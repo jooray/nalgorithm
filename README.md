@@ -8,9 +8,9 @@ A Nostr relevance feed. Fetches posts from your follows and ranks them by what y
 
 You write a short profile describing your interests ("I like cypherpunk culture, Bitcoin, cats, thoughtful longform writing. I don't care about price speculation or GM posts"). The app sends batches of posts to your chosen LLM along with this profile, and each post gets a 0-10 relevance score.
 
-There's also a secondary "learned prompt" that gets built automatically from your Nostr likes (kind 7 reactions). You just keep using your regular Nostr client, like the posts you enjoy, and nalgorithm picks up on those preferences. The learned prompt updates in the background after each feed load, but it only affects the *next* ranking -- already-scored posts keep their scores.
+There's also a "learned prompt" that gets built automatically from your Nostr likes (kind 7 reactions). You keep using your regular Nostr client, like the posts you enjoy, and nalgorithm picks up on those patterns. The learned prompt evolves incrementally -- each run only looks at likes since the last run and refines the existing prompt, rather than regenerating from scratch. It only affects future rankings; already-scored posts keep their scores.
 
-Scores are cached locally, so refreshing the feed only scores posts the LLM hasn't seen before. No wasted tokens.
+Scores are cached locally (localStorage in the web app, a JSON file for the CLI), so re-running only scores posts the LLM hasn't seen before. No wasted tokens.
 
 ## What it handles
 
@@ -23,20 +23,20 @@ Scores are cached locally, so refreshing the feed only scores posts the LLM hasn
 
 ## No server
 
-Everything runs in the browser. Settings, scores, and the learned prompt live in localStorage. The app connects directly to Nostr relays for posts and to your chosen LLM provider for scoring. There's nothing in between.
+Everything runs in the browser (web app) or locally (CLI). Settings, scores, and the learned prompt live in localStorage or local files. The app connects directly to Nostr relays for posts and to your chosen LLM provider for scoring. There's nothing in between.
 
 ## LLM providers
 
-The app works with any OpenAI-compatible chat completions API. You configure the endpoint, key, and model in settings.
+The app works with any OpenAI-compatible chat completions API. You configure the endpoint, key, and model.
 
 Some options I've tested:
 
 - **Venice AI** -- works from the browser (permissive CORS). Also works with their E2E encrypted proxy, though since Nostr posts are public anyway, encrypting the prompts doesn't add much.
 - **OpenRouter** -- works from the browser (permissive CORS).
 - **Ollama local** -- works if you set `OLLAMA_ORIGINS=*` before starting it.
-- **Ollama Cloud** (`https://ollama.com/v1`) -- no CORS headers, so you need a proxy. I use a simple Caddy reverse proxy on localhost.
+- **Ollama Cloud** (`https://ollama.com/v1`) -- no CORS headers, so you need a proxy for the web app. I use a simple Caddy reverse proxy on localhost.
 
-I run **gemma3:27b** through Ollama Cloud. It's cheap, fast at structured JSON output, and works on the free tier. Other models that work well: `minimax-m2.5`, `qwen3-next:80b` if you want more depth.
+I run **gemma3:27b** through Ollama Cloud for scoring. It's cheap, fast at structured JSON output, and works on the free tier. Other models that work well: `minimax-m2.5`, `qwen3-next:80b` if you want more depth.
 
 ## Project structure
 
@@ -49,7 +49,7 @@ nalgorithm/
 │       ├── learner.ts   # Like analysis, learned prompt generation
 │       ├── llm.ts       # Generic OpenAI-compatible API client
 │       └── types.ts     # All shared types
-├── web/               # Test web frontend (Vite)
+├── web/               # Web frontend (Vite)
 │   └── src/
 │       ├── app.ts       # Two-phase flow: fetch/score/render, then background learn
 │       ├── settings.ts  # localStorage settings + date-keyed score cache
@@ -68,8 +68,8 @@ The library (`lib/`) is a standalone package. The web frontend (`web/`) and dige
 
 ```bash
 npm install
-npm run build     # builds lib (tsc) then web (vite) then digest (tsc)
-npm run dev        # starts vite dev server on localhost:3000
+npm run build     # builds lib, web, and digest
+npm run dev       # starts vite dev server for the web app
 ```
 
 Open the app, go to Settings, fill in:
@@ -81,23 +81,24 @@ Click Refresh.
 
 ## Digest tool
 
-A CLI tool that generates a spoken-word radio-show-style digest of what happened on your Nostr feed. It fetches posts from your follows, ranks them, picks the top ones, and sends them to an LLM to write a cohesive narrative.
+A CLI tool that generates a radio-show-style digest of what happened on your Nostr feed. It fetches posts from your follows, ranks them, picks the top ones, and sends them to an LLM to write a cohesive narrative. Output goes to stdout.
 
-Output goes to stdout, so you can pipe it into a TTS engine, save it to a file, or just read it.
+### Quick start
 
 ```bash
 # Copy and edit the config
 cp digest.config.example.json digest.config.json
-# Edit digest.config.json with your npub and API keys
+# Fill in your npub and API keys, then:
 
-# Run it
 npm run digest
 
-# Or with a custom config path
+# Or with a custom config path:
 node digest/dist/main.js /path/to/my-config.json
 ```
 
-The config supports `$ENV_VAR` and `${ENV_VAR}` syntax for API keys, so you don't have to hardcode secrets:
+### Configuration
+
+The config supports `$ENV_VAR` and `${ENV_VAR}` syntax for API keys so you don't hardcode secrets:
 
 ```json
 {
@@ -107,13 +108,55 @@ The config supports `$ENV_VAR` and `${ENV_VAR}` syntax for API keys, so you don'
 }
 ```
 
-You can use different LLM models for each step. The ranking model scores posts (fast, cheap model works fine), the learner model summarizes your likes into preferences, and the digest model writes the final narrative (benefits from a stronger model). All three can point to different providers.
+You can use different LLM models for each step:
 
-There's also a TTS-aware config example (`digest.config.tts.example.json`) with prompts tuned for text-to-speech output: no markdown, spelled-out version numbers, shorter format.
+| Step | Config key | What it does | Recommended |
+|------|-----------|--------------|-------------|
+| Scoring | `rankingApi` | Scores posts 0-10 by relevance | Fast, cheap model (`google-gemma-3-27b-it`) |
+| Learning | `learnerApi` | Summarizes your likes into preferences | Optional, falls back to `rankingApi` |
+| Digest | `digestApi` | Writes the final narrative | Stronger model (`claude-sonnet-4-6`) |
+
+All three can point to different providers and models.
+
+### Score caching
+
+Scores are saved to a local JSON file (`digest.scores.json` by default). On each run, only new posts get scored -- cached scores are reused. The cache auto-prunes entries older than 2x your `hoursBack` setting (minimum 48 hours). Posts that failed scoring and got a default fallback score are not cached.
+
+### Learned prompt
+
+If `learnFromLikes` is true (the default), the tool fetches your recent Nostr likes and uses them to build a preference summary. This learned prompt is saved to a file (`digest.learned.json`) and evolves with each run:
+
+- **First run**: generates a prompt from scratch based on your likes
+- **Later runs**: only fetches likes newer than what was last processed, asks the LLM to refine the existing prompt with the new signal
+- **No new likes**: skips the LLM call entirely, uses whatever was cached
+
+The learned prompt is passed alongside your `userPrompt` to both the scoring and digest generation steps.
+
+### TTS variant
+
+There's a TTS-aware config example (`digest.config.tts.example.json`) with prompts tuned for text-to-speech output: no markdown formatting, spelled-out version numbers and abbreviations, shorter format (~800-1200 words). Use this if you're piping the output into a TTS engine.
+
+### All config options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `npub` | required | Your Nostr npub |
+| `relays` | required | Array of relay WebSocket URLs |
+| `rankingApi` | required | `{apiBaseUrl, apiKey, model, batchSize?}` for post scoring |
+| `digestApi` | required | `{apiBaseUrl, apiKey, model, temperature?}` for digest generation |
+| `learnerApi` | falls back to `rankingApi` | `{apiBaseUrl, apiKey, model}` for preference learning |
+| `userPrompt` | required | Describe your interests and what to filter out |
+| `learnFromLikes` | `true` | Whether to learn preferences from your likes |
+| `learnedPromptCache` | `./digest.learned.json` | Path to the learned prompt file |
+| `scoreCachePath` | `./digest.scores.json` | Path to the score cache file |
+| `hoursBack` | `24` | How far back to fetch posts |
+| `topN` | `15` | Number of top posts to include in the digest |
+| `digestSystemPrompt` | built-in | System prompt for digest generation |
+| `digestPrompt` | built-in | User prompt template for digest generation |
 
 ## Caddy CORS proxy for Ollama Cloud
 
-If you want to use Ollama Cloud from the browser, you need a local CORS proxy since their API doesn't send CORS headers. Here's a minimal Caddyfile:
+If you want to use Ollama Cloud from the browser, you need a local CORS proxy since their API doesn't send CORS headers. Minimal Caddyfile:
 
 ```
 :9292 {

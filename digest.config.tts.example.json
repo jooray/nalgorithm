@@ -21,7 +21,7 @@
   "learnerApi": {
     "apiBaseUrl": "https://api.venice.ai/api/v1",
     "apiKey": "$VENICE_API_KEY",
-    "model": "grok-41-fast"
+    "model": "gemini-3-flash-preview"
   },
   "userPrompt": "I'm interested in Bitcoin, Lightning Network, Nostr protocol development, privacy tech, open-source software, and cypherpunk philosophy.",
   "learnFromLikes": true,
