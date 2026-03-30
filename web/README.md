@@ -79,8 +79,8 @@ The app works with any OpenAI-compatible chat completions API:
 
 ## What's stored locally
 
-- **localStorage**: settings (npub, relays, API config, prompts, scored event IDs)
-- Scored event IDs are saved to avoid redundant display, not full event data
+- **localStorage**: settings (npub, relays, API config, prompts) and date-keyed score cache
+- Scores are cached per day and pruned after 30 days. No full events are stored.
 - No data is sent anywhere except the configured LLM API endpoint
 
 ## Tech stack
