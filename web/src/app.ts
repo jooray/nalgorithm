@@ -260,8 +260,11 @@ async function runFeed(): Promise<void> {
         return
       }
 
-      // Save newly scored posts to cache
-      cacheScores(newlyScored.map((p) => ({ id: p.id, score: p.score, justification: p.justification })))
+      // Save newly scored posts to cache (skip default/fallback scores)
+      const realScores = newlyScored.filter((p) => !p.defaultScore)
+      if (realScores.length > 0) {
+        cacheScores(realScores.map((p) => ({ id: p.id, score: p.score, justification: p.justification })))
+      }
     }
 
     // Merge cached + newly scored, sort by score descending

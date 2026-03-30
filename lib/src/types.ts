@@ -97,6 +97,8 @@ export interface ScoredPost extends FetchedPost {
   score: number
   /** Short justification from the LLM explaining the score */
   justification?: string
+  /** True if the LLM failed and this post got the fallback score (5) */
+  defaultScore?: boolean
 }
 
 export interface ScoreOptions {

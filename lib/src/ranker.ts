@@ -271,11 +271,11 @@ export function createRanker(config: RankerConfig): Ranker {
     batchIndex: number,
     debug?: DebugEntry[],
     profiles?: Map<string, ProfileData>
-  ): Promise<Map<string, { score: number; justification: string }>> {
+  ): Promise<Map<string, { score: number; justification: string; defaultScore?: boolean }>> {
     const systemPrompt = buildSystemPrompt()
     const userMsg = buildUserPrompt(posts, userPrompt, learnedPrompt, profiles)
 
-    const scoreMap = new Map<string, { score: number; justification: string }>()
+    const scoreMap = new Map<string, { score: number; justification: string; defaultScore?: boolean }>()
     let rawResponse: string | undefined
     let debugError: string | undefined
 
@@ -328,7 +328,7 @@ export function createRanker(config: RankerConfig): Ranker {
     // Assign default score to any posts that didn't get scored
     for (const post of posts) {
       if (!scoreMap.has(post.id)) {
-        scoreMap.set(post.id, { score: DEFAULT_SCORE, justification: '' })
+        scoreMap.set(post.id, { score: DEFAULT_SCORE, justification: '', defaultScore: true })
       }
     }
 
@@ -342,7 +342,7 @@ export function createRanker(config: RankerConfig): Ranker {
     if (posts.length === 0) return []
 
     const batches = chunk(posts, batchSize)
-    const allScores = new Map<string, { score: number; justification: string }>()
+    const allScores = new Map<string, { score: number; justification: string; defaultScore?: boolean }>()
 
     // Process batches sequentially to avoid rate limiting
     let scoredSoFar = 0
@@ -371,6 +371,7 @@ export function createRanker(config: RankerConfig): Ranker {
         ...post,
         score: data?.score ?? DEFAULT_SCORE,
         justification: data?.justification || undefined,
+        defaultScore: data?.defaultScore || undefined,
       }
     })
 
