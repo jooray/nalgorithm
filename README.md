@@ -2,6 +2,8 @@
 
 A Nostr relevance feed. Fetches posts from your follows and ranks them by what you actually care about, using an LLM instead of reverse chronological order.
 
+**Live demo:** https://cypherpunk.today/nalgorithm/
+
 ## How it works
 
 You write a short profile describing your interests ("I like cypherpunk culture, Bitcoin, cats, thoughtful longform writing. I don't care about price speculation or GM posts"). The app sends batches of posts to your chosen LLM along with this profile, and each post gets a 0-10 relevance score.

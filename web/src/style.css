@@ -85,6 +85,18 @@ a:hover {
   color: var(--text-muted);
 }
 
+.github-link {
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.github-link:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
 .header-right {
   display: flex;
   align-items: center;
