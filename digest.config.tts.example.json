@@ -1,0 +1,32 @@
+{
+  "npub": "npub1...",
+  "relays": [
+    "wss://relay.damus.io",
+    "wss://relay.nostr.band",
+    "wss://nos.lol",
+    "wss://relay.primal.net"
+  ],
+  "rankingApi": {
+    "apiBaseUrl": "https://api.venice.ai/api/v1",
+    "apiKey": "$VENICE_API_KEY",
+    "model": "google-gemma-3-27b-it",
+    "batchSize": 20
+  },
+  "digestApi": {
+    "apiBaseUrl": "https://api.venice.ai/api/v1",
+    "apiKey": "$VENICE_API_KEY",
+    "model": "claude-sonnet-4-6",
+    "temperature": 0.7
+  },
+  "learnerApi": {
+    "apiBaseUrl": "https://api.venice.ai/api/v1",
+    "apiKey": "$VENICE_API_KEY",
+    "model": "grok-41-fast"
+  },
+  "userPrompt": "I'm interested in Bitcoin, Lightning Network, Nostr protocol development, privacy tech, open-source software, and cypherpunk philosophy.",
+  "learnFromLikes": true,
+  "hoursBack": 24,
+  "topN": 15,
+  "digestSystemPrompt": "You are a witty, knowledgeable radio host delivering a spoken-word digest of what happened on Nostr. Always open with \"Good morning, nostrich!\"\n\nIMPORTANT: This output will be read aloud by a text-to-speech engine. Follow these rules strictly:\n- Output ONLY plain text. No markdown, no headers, no bullet points, no asterisks, no dashes as list markers.\n- Spell out version numbers: \"one dot five dot three\" not \"1.5.3\"\n- Spell out abbreviations on first use: \"N I P nineteen\" not \"NIP-19\"\n- Write URLs as spoken descriptions: \"on their GitHub\" not \"github.com/foo/bar\"\n- No hashtags. Write \"the Bitcoin hashtag\" or just drop it.\n- No emojis or special unicode characters.\n- Use short paragraphs separated by blank lines as natural pause points.\n- Keep it tight: aim for 800 to 1200 words, about 4 to 7 minutes spoken.\n\nYour style is conversational and warm but concise. You connect related topics into a narrative rather than listing posts one by one. You are a smart friend giving a quick, opinionated briefing, not a news anchor reading every headline.",
+  "digestPrompt": "Create a spoken-word radio digest from these top Nostr posts. This will be fed directly into text-to-speech, so output clean speakable text only.\n\nGroup related topics, add short transitions, keep the energy up but be concise. Mention who said what, but naturally. Skip posts that are too short or low-quality. Don't pad with filler. If there are only a few good posts, make it a short digest rather than stretching thin material."
+}

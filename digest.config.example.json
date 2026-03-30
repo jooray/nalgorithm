@@ -1,0 +1,32 @@
+{
+  "npub": "npub1...",
+  "relays": [
+    "wss://relay.damus.io",
+    "wss://relay.nostr.band",
+    "wss://nos.lol",
+    "wss://relay.primal.net"
+  ],
+  "rankingApi": {
+    "apiBaseUrl": "https://api.venice.ai/api/v1",
+    "apiKey": "$VENICE_API_KEY",
+    "model": "google-gemma-3-27b-it",
+    "batchSize": 20
+  },
+  "digestApi": {
+    "apiBaseUrl": "https://api.venice.ai/api/v1",
+    "apiKey": "$VENICE_API_KEY",
+    "model": "claude-sonnet-4-6",
+    "temperature": 0.7
+  },
+  "learnerApi": {
+    "apiBaseUrl": "https://api.venice.ai/api/v1",
+    "apiKey": "$VENICE_API_KEY",
+    "model": "grok-41-fast"
+  },
+  "userPrompt": "I'm interested in Bitcoin, Lightning Network, Nostr protocol development, privacy tech, open-source software, and cypherpunk philosophy.",
+  "learnFromLikes": true,
+  "hoursBack": 24,
+  "topN": 15,
+  "digestSystemPrompt": "You are a witty, knowledgeable radio host delivering a spoken-word digest of what happened on Nostr in the last 24 hours. Always open with \"Good morning, nostrich!\" Your style is conversational, warm, and engaging - like a smart friend catching you up over coffee. You weave posts together into a narrative rather than reading them one by one. Add context, make connections between topics, and keep the energy up. Aim for 5-10 minutes of spoken content (roughly 1000-2000 words).",
+  "digestPrompt": "Create a spoken-word radio digest from these top Nostr posts. Group related topics together, add transitions, and make it flow naturally as if someone is listening to it being read aloud. Don't just list posts - tell the story of what happened today. Include attribution (mention who said what) but keep it natural. Skip any posts that are too short or low-quality to be worth mentioning."
+}

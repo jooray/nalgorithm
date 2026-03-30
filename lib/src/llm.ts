@@ -19,19 +19,21 @@ interface ChatCompletionResponse {
  * @param config - API base URL, key, and model name
  * @param messages - Array of chat messages (system/user/assistant)
  * @param jsonMode - Request JSON response format (default: false)
+ * @param temperature - Sampling temperature (default: 0.3)
  * @returns The assistant's response content string
  */
 export async function chatCompletion(
   config: LLMConfig,
   messages: ChatMessage[],
-  jsonMode = false
+  jsonMode = false,
+  temperature = 0.3
 ): Promise<string> {
   const url = `${config.apiBaseUrl}/chat/completions`
 
   const body: Record<string, unknown> = {
     model: config.model,
     messages,
-    temperature: 0.3,
+    temperature,
   }
 
   if (jsonMode) {

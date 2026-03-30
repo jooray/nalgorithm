@@ -55,16 +55,20 @@ nalgorithm/
 │       ├── settings.ts  # localStorage settings + date-keyed score cache
 │       ├── render.ts    # Post card rendering, content formatting
 │       └── ui.ts        # DOM bindings, settings panel
+├── digest/            # CLI digest tool
+│   └── src/
+│       ├── main.ts      # Fetch, rank, generate spoken-word digest
+│       └── config.ts    # JSON config loader with env var interpolation
 └── package.json       # npm workspaces root
 ```
 
-The library (`lib/`) is a standalone package. The web frontend (`web/`) imports it via a Vite alias during development. They're connected through npm workspaces.
+The library (`lib/`) is a standalone package. The web frontend (`web/`) and digest CLI (`digest/`) both import it. They're connected through npm workspaces.
 
 ## Setup
 
 ```bash
 npm install
-npm run build     # builds lib (tsc) then web (vite)
+npm run build     # builds lib (tsc) then web (vite) then digest (tsc)
 npm run dev        # starts vite dev server on localhost:3000
 ```
 
@@ -74,6 +78,38 @@ Open the app, go to Settings, fill in:
 - A user prompt describing what you like to see in your feed
 
 Click Refresh.
+
+## Digest tool
+
+A CLI tool that generates a spoken-word radio-show-style digest of what happened on your Nostr feed. It fetches posts from your follows, ranks them, picks the top ones, and sends them to an LLM to write a cohesive narrative.
+
+Output goes to stdout, so you can pipe it into a TTS engine, save it to a file, or just read it.
+
+```bash
+# Copy and edit the config
+cp digest.config.example.json digest.config.json
+# Edit digest.config.json with your npub and API keys
+
+# Run it
+npm run digest
+
+# Or with a custom config path
+node digest/dist/main.js /path/to/my-config.json
+```
+
+The config supports `$ENV_VAR` and `${ENV_VAR}` syntax for API keys, so you don't have to hardcode secrets:
+
+```json
+{
+  "rankingApi": {
+    "apiKey": "$VENICE_API_KEY"
+  }
+}
+```
+
+You can use different LLM models for each step. The ranking model scores posts (fast, cheap model works fine), the learner model summarizes your likes into preferences, and the digest model writes the final narrative (benefits from a stronger model). All three can point to different providers.
+
+There's also a TTS-aware config example (`digest.config.tts.example.json`) with prompts tuned for text-to-speech output: no markdown, spelled-out version numbers, shorter format.
 
 ## Caddy CORS proxy for Ollama Cloud
 

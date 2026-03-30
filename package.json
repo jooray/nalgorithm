@@ -3,12 +3,15 @@
   "private": true,
   "workspaces": [
     "lib",
-    "web"
+    "web",
+    "digest"
   ],
   "scripts": {
     "build:lib": "npm run build -w lib",
     "build:web": "npm run build -w web",
-    "build": "npm run build:lib && npm run build:web",
-    "dev": "npm run dev -w web"
+    "build:digest": "npm run build -w digest",
+    "build": "npm run build:lib && npm run build:web && npm run build:digest",
+    "dev": "npm run dev -w web",
+    "digest": "npm run build:lib && npm run digest -w digest"
   }
 }
