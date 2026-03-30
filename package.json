@@ -1,0 +1,14 @@
+{
+  "name": "nalgorithm-root",
+  "private": true,
+  "workspaces": [
+    "lib",
+    "web"
+  ],
+  "scripts": {
+    "build:lib": "npm run build -w lib",
+    "build:web": "npm run build -w web",
+    "build": "npm run build:lib && npm run build:web",
+    "dev": "npm run dev -w web"
+  }
+}

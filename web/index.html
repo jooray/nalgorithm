@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nalgorithm — Nostr Relevance Feed</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header id="header">
+      <div class="header-left">
+        <h1>Nalgorithm</h1>
+        <span class="subtitle">Relevance-ranked Nostr feed</span>
+      </div>
+      <div class="header-right">
+        <span id="status" class="status"></span>
+        <button id="btn-refresh" class="btn btn-primary" disabled>Refresh</button>
+        <button id="btn-settings" class="btn btn-secondary">Settings</button>
+      </div>
+    </header>
+
+    <!-- Settings Panel (slide-out) -->
+    <div id="settings-overlay" class="overlay hidden"></div>
+    <aside id="settings-panel" class="settings-panel hidden">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button id="btn-close-settings" class="btn-icon">&times;</button>
+      </div>
+      <div class="settings-body">
+        <!-- Identity -->
+        <section class="settings-section">
+          <h3>Identity</h3>
+          <label for="input-npub">npub or hex pubkey</label>
+          <input type="text" id="input-npub" placeholder="npub1... or hex pubkey" spellcheck="false">
+        </section>
+
+        <!-- Relays -->
+        <section class="settings-section">
+          <h3>Relays</h3>
+          <label for="input-relays">WebSocket relay URLs (one per line)</label>
+          <textarea id="input-relays" rows="4" spellcheck="false" placeholder="wss://relay.damus.io&#10;wss://relay.primal.net&#10;wss://nos.lol"></textarea>
+        </section>
+
+        <!-- API Configuration -->
+        <section class="settings-section">
+          <h3>LLM API</h3>
+          <label for="select-provider">Provider</label>
+          <select id="select-provider">
+            <option value="venice">Venice AI</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="ollama">Ollama (local)</option>
+            <option value="custom">Custom</option>
+          </select>
+
+          <label for="input-api-base">API Base URL</label>
+          <input type="text" id="input-api-base" placeholder="https://api.venice.ai/api/v1" spellcheck="false">
+
+          <label for="input-api-key">API Key</label>
+          <input type="password" id="input-api-key" placeholder="sk-..." spellcheck="false">
+
+          <label for="input-model">Model</label>
+          <input type="text" id="input-model" placeholder="grok-3-mini" spellcheck="false">
+        </section>
+
+        <!-- Prompts -->
+        <section class="settings-section">
+          <h3>Prompts</h3>
+          <label for="input-user-prompt">User prompt (describe your interests)</label>
+          <textarea id="input-user-prompt" rows="5" placeholder="I like cypherpunk culture, decentralized technology, Bitcoin, and thoughtful longform posts. I don't care about price speculation or GM posts."></textarea>
+
+          <label for="input-learned-prompt">Learned prompt (auto-generated from likes)</label>
+          <textarea id="input-learned-prompt" rows="4" readonly class="readonly-field" placeholder="Will be generated after first run..."></textarea>
+          <button id="btn-regenerate-learned" class="btn btn-small">Regenerate from likes</button>
+        </section>
+
+        <!-- Feed options -->
+        <section class="settings-section">
+          <h3>Feed</h3>
+          <label for="input-hours-back">Time window (hours)</label>
+          <input type="number" id="input-hours-back" min="1" max="168" value="24">
+
+          <label for="input-batch-size">Batch size (posts per LLM call)</label>
+          <input type="number" id="input-batch-size" min="5" max="50" value="20">
+
+          <label for="input-njump-base">Post link base URL</label>
+          <input type="text" id="input-njump-base" placeholder="https://njump.me/" spellcheck="false">
+        </section>
+
+        <!-- Actions -->
+        <section class="settings-section">
+          <button id="btn-save-settings" class="btn btn-primary btn-full">Save Settings</button>
+          <button id="btn-clear-scores" class="btn btn-small btn-full">Clear Cached Scores</button>
+        </section>
+      </div>
+    </aside>
+
+    <!-- Main Feed -->
+    <main id="feed">
+      <div id="feed-empty" class="feed-empty">
+        <p>Configure your npub and API key in Settings, then click Refresh to load your feed.</p>
+      </div>
+      <div id="feed-list" class="feed-list"></div>
+    </main>
+  </div>
+
+  <script type="module" src="/src/app.ts"></script>
+</body>
+</html>
