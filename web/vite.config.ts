@@ -3,6 +3,7 @@ import { resolve } from 'path'
 
 export default defineConfig({
   root: '.',
+  base: process.env.VITE_BASE ?? '/',
   resolve: {
     alias: {
       nalgorithm: resolve(__dirname, '../lib/src')

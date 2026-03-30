@@ -100,6 +100,12 @@ export function initUI(
     btnRefresh.disabled = false
   }
 
+  // Auto-open settings if npub is not configured yet
+  if (!settings.npub.trim()) {
+    panel.classList.remove('hidden')
+    overlay.classList.remove('hidden')
+  }
+
   return settings
 }
 
