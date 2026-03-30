@@ -25,6 +25,8 @@
   },
   "userPrompt": "I'm interested in Bitcoin, Lightning Network, Nostr protocol development, privacy tech, open-source software, and cypherpunk philosophy.",
   "learnFromLikes": true,
+  "learnedPromptCache": "./digest.learned.json",
+  "scoreCachePath": "./digest.scores.json",
   "hoursBack": 24,
   "topN": 15,
   "digestSystemPrompt": "You are a witty, knowledgeable radio host delivering a spoken-word digest of what happened on Nostr in the last 24 hours. Always open with \"Good morning, nostrich!\" Your style is conversational, warm, and engaging - like a smart friend catching you up over coffee. You weave posts together into a narrative rather than reading them one by one. Add context, make connections between topics, and keep the energy up. Aim for 5-10 minutes of spoken content (roughly 1000-2000 words).",

@@ -26,6 +26,10 @@ export interface DigestConfig {
   learnerApi?: ApiConfig
   userPrompt: string
   learnFromLikes?: boolean
+  /** Path to the learned prompt file (default: ./digest.learned.json) */
+  learnedPromptCache?: string
+  /** Path to score cache file (default: ./digest.scores.json) */
+  scoreCachePath?: string
   hoursBack?: number
   topN?: number
   digestSystemPrompt?: string
@@ -145,6 +149,8 @@ export function loadConfig(path?: string): DigestConfig {
     learnerApi: parsedLearnerApi,
     userPrompt: config.userPrompt as string,
     learnFromLikes: (config.learnFromLikes as boolean) ?? true,
+    learnedPromptCache: (config.learnedPromptCache as string) ?? './digest.learned.json',
+    scoreCachePath: (config.scoreCachePath as string) ?? './digest.scores.json',
     hoursBack: (config.hoursBack as number) ?? 24,
     topN: (config.topN as number) ?? 15,
     digestSystemPrompt: (config.digestSystemPrompt as string) ?? DEFAULT_DIGEST_SYSTEM_PROMPT,

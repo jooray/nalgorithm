@@ -9,3 +9,5 @@ digest/dist/
 AGENTS.md
 digest.config.json
 digest.config.tts.json
+digest.learned.json
+digest.scores.json
