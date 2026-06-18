@@ -20,6 +20,7 @@ import type {
 
 const DEFAULT_BATCH_SIZE = 20
 const DEFAULT_SCORE = 5
+const DEFAULT_CONCURRENCY = 1
 
 /**
  * Sort scored posts by relevance (descending), then by time (descending) as tiebreaker.
@@ -258,6 +259,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
  */
 export function createRanker(config: RankerConfig): Ranker {
   const batchSize = config.batchSize ?? DEFAULT_BATCH_SIZE
+  const concurrency = Math.max(1, config.concurrency ?? DEFAULT_CONCURRENCY)
   const llmConfig: LLMConfig = {
     apiBaseUrl: config.apiBaseUrl,
     apiKey: config.apiKey,
@@ -344,23 +346,43 @@ export function createRanker(config: RankerConfig): Ranker {
     const batches = chunk(posts, batchSize)
     const allScores = new Map<string, { score: number; justification: string; defaultScore?: boolean }>()
 
-    // Process batches sequentially to avoid rate limiting
+    // Track progress atomically
     let scoredSoFar = 0
-    for (let i = 0; i < batches.length; i++) {
-      const batchScores = await scoreBatch(
-        batches[i],
-        options.userPrompt,
-        options.learnedPrompt,
-        i,
-        options.debug,
-        options.profiles
+    const totalPosts = posts.length
+
+    /**
+     * Run batches with controlled concurrency (like a pool).
+     * We process `concurrency` batches at a time, waiting for all in the
+     * current window before starting the next window. This prevents flooding
+     * the LLM API while still providing meaningful parallelism.
+     */
+    for (let start = 0; start < batches.length; start += concurrency) {
+      const window = batches.slice(start, start + concurrency)
+
+      // Fire off all batches in this window concurrently
+      const results = await Promise.all(
+        window.map((batch, offset) =>
+          scoreBatch(
+            batch,
+            options.userPrompt,
+            options.learnedPrompt,
+            start + offset,
+            options.debug,
+            options.profiles
+          )
+        )
       )
-      for (const [id, data] of batchScores) {
-        allScores.set(id, data)
-      }
-      scoredSoFar += batches[i].length
-      if (options.onProgress) {
-        options.onProgress(scoredSoFar, posts.length)
+
+      // Merge results and update progress
+      for (let w = 0; w < results.length; w++) {
+        const batchScores = results[w]
+        for (const [id, data] of batchScores) {
+          allScores.set(id, data)
+        }
+        scoredSoFar += window[w].length
+        if (options.onProgress) {
+          options.onProgress(scoredSoFar, totalPosts)
+        }
       }
     }
 

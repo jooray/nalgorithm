@@ -125,55 +125,69 @@ function saveLearnedPrompt(cachePath: string, data: LearnedPromptFile): void {
 
 /**
  * Evolve the learned prompt by incorporating new likes.
- * If there's an existing prompt, asks the LLM to refine it with new signal.
- * If there's no existing prompt, generates one from scratch.
+ * Processes likes in batches to avoid hitting context limits on smaller models.
+ * If there's an existing prompt, iteratively refines it with each batch.
+ * If there's no existing prompt, generates one from scratch on the first batch
+ * then evolves it with subsequent batches.
  */
 async function evolveLearnedPrompt(
   existingPrompt: string | undefined,
   newLikes: Array<{ content: string }>,
-  llmConfig: LLMConfig
+  llmConfig: LLMConfig,
+  batchSize = 50
 ): Promise<string> {
-  const likesList = newLikes
-    .map((l, i) => `${i + 1}. "${l.content.replace(/\n+/g, ' ').trim().slice(0, 300)}"`)
-    .join('\n')
+  if (newLikes.length === 0) return existingPrompt ?? ''
 
-  if (existingPrompt) {
-    // Evolve: refine existing prompt with new signal
-    const response = await chatCompletionWithRetry(llmConfig, [
-      {
-        role: 'system',
-        content: 'You refine user preference summaries based on new engagement data. Be concise and specific. Output only the updated summary text, no JSON, no markdown.',
-      },
-      {
-        role: 'user',
-        content: `Here is the current summary of a user's preferences based on their past Nostr likes:
+  // Split likes into chunks to avoid context overflow on models with smaller windows
+  const batches: Array<Array<{ content: string }>> = []
+  for (let i = 0; i < newLikes.length; i += batchSize) {
+    batches.push(newLikes.slice(i, i + batchSize))
+  }
 
-${existingPrompt}
+  log(`Evolving learned prompt in ${batches.length} batch(es) of up to ${batchSize} likes`)
 
-The user has recently liked these additional posts:
+  let currentPrompt = existingPrompt
+
+  for (let b = 0; b < batches.length; b++) {
+    const batch = batches[b]
+    const likesList = batch
+      .map((l, i) => `${i + 1}. "${l.content.replace(/\n+/g, ' ').trim().slice(0, 300)}"`)
+      .join('\n')
+
+    if (currentPrompt) {
+      // Evolve: refine existing prompt with new signal from this batch
+      const response = await chatCompletionWithRetry(llmConfig, [
+        {
+          role: 'system',
+          content: 'You refine user preference summaries based on new engagement data. Be concise and specific. Output only the updated summary text, no JSON, no markdown.',
+        },
+        {
+          role: 'user',
+          content: `Here is the current summary of a user's preferences based on their past Nostr likes:
+
+${currentPrompt}
+
+The user has recently liked these additional posts (batch ${b + 1}/${batches.length}):
 
 ${likesList}
 
 Update the preference summary to incorporate any new patterns or interests from these recent likes. Keep what's still relevant, adjust emphasis if needed, add new themes if they appear. Stay concise (2-5 sentences). If the new likes are consistent with the existing summary, only make minor refinements.
 
 Updated summary:`,
-      },
-    ])
-    return response.trim()
-  } else {
-    // Fresh: no existing prompt, generate from scratch
-    // We call chatCompletionWithRetry directly instead of createLearner.summarizeLikes
-    // because the learner swallows errors and returns '' — we want errors to propagate
-    // so the caller can log them properly.
-    const response = await chatCompletionWithRetry(llmConfig, [
-      {
-        role: 'system',
-        content:
-          'You are an analyst that summarizes user preferences based on their social media engagement. Be concise and specific. Output only the summary text, no JSON, no markdown formatting.',
-      },
-      {
-        role: 'user',
-        content: `Analyze these Nostr posts that a user has liked/reacted positively to. Based on these posts, summarize the user's interests, preferences, and the types of content they engage with.
+        },
+      ])
+      currentPrompt = response.trim()
+    } else {
+      // Fresh: no existing prompt — generate from scratch using this first batch
+      const response = await chatCompletionWithRetry(llmConfig, [
+        {
+          role: 'system',
+          content:
+            'You are an analyst that summarizes user preferences based on their social media engagement. Be concise and specific. Output only the summary text, no JSON, no markdown formatting.',
+        },
+        {
+          role: 'user',
+          content: `Analyze these Nostr posts that a user has liked/reacted positively to. Based on these posts, summarize the user's interests, preferences, and the types of content they engage with.
 
 Be specific about:
 - Topics they care about
@@ -187,10 +201,20 @@ Liked posts:
 ${likesList}
 
 Summary:`,
-      },
-    ])
-    return response.trim()
+        },
+      ])
+      currentPrompt = response.trim()
+    }
+
+    log(`  Batch ${b + 1}/${batches.length} done: "${currentPrompt.slice(0, 80)}..."`)
+
+    // Small pause between batches to avoid rate-limit bursts
+    if (b < batches.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
   }
+
+  return currentPrompt ?? ''
 }
 
 // ─── Score cache ─────────────────────────────────────────────────────────────
@@ -233,6 +257,7 @@ function saveScoreCache(cachePath: string, cache: ScoreCacheFile): void {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const scoreOnly = process.argv.includes('--score-only')
   const config = loadConfig()
 
   const pubkeyHex = pubkeyToHex(config.npub)
@@ -245,6 +270,7 @@ async function main(): Promise<void> {
     apiKey: config.rankingApi.apiKey,
     model: config.rankingApi.model,
     batchSize: config.rankingApi.batchSize,
+    concurrency: config.rankingApi.concurrency,
   })
 
   try {
@@ -261,7 +287,7 @@ async function main(): Promise<void> {
     log(`Fetching posts from the last ${config.hoursBack} hours...`)
     const posts = await fetcher.getPosts(follows, {
       hoursBack: config.hoursBack,
-      maxPosts: 500,
+      maxPosts: config.maxPosts ?? 500,
     })
     log(`Fetched ${posts.length} posts`)
 
@@ -308,7 +334,7 @@ async function main(): Promise<void> {
         }
 
         try {
-          const evolved = await evolveLearnedPrompt(learnedPrompt, likes, llmConfig)
+          const evolved = await evolveLearnedPrompt(learnedPrompt, likes, llmConfig, config.likesBatchSize ?? 50)
           if (evolved) {
             learnedPrompt = evolved
             log(`Learned prompt: ${learnedPrompt.slice(0, 100)}...`)
@@ -338,7 +364,8 @@ async function main(): Promise<void> {
     // 5. Score posts (with caching)
     const scoreCachePath = resolve(config.scoreCachePath ?? './digest.scores.json')
     // Keep cached scores for up to 48 hours (posts older than hoursBack get pruned)
-    const maxCacheAge = Math.max((config.hoursBack ?? 24) * 2, 48) * 3600
+    // scoreCacheTTLDays defaults to 90 days — scores are deterministic, no need to re-score old posts
+    const maxCacheAge = (config.scoreCacheTTLDays ?? 90) * 86400
     const scoreCache = loadScoreCache(scoreCachePath, maxCacheAge)
 
     // Split posts into cached and uncached
@@ -412,6 +439,11 @@ async function main(): Promise<void> {
     }
     saveScoreCache(scoreCachePath, updatedCache)
 
+    if (scoreOnly) {
+      log(`Score-only mode: cached ${Object.keys(updatedCache.scores).length} scores. Done.`)
+      return
+    }
+
     // 6. Take top N
     const topN = config.topN ?? 15
     const sorted = sortByRelevance(allScoredPosts)
@@ -435,19 +467,39 @@ ${postsBlock}`
 
     // 8. Generate digest
     log(`Generating digest with ${config.digestApi.model}...`)
-    const digest = await chatCompletion(
-      {
-        apiBaseUrl: config.digestApi.apiBaseUrl,
-        apiKey: config.digestApi.apiKey,
-        model: config.digestApi.model,
-      },
-      [
-        { role: 'system', content: config.digestSystemPrompt! },
-        { role: 'user', content: digestUserPrompt },
-      ],
-      false,
-      config.digestApi.temperature ?? 0.7
-    )
+    let digest: string
+    try {
+      digest = await chatCompletionWithRetry(
+        {
+          apiBaseUrl: config.digestApi.apiBaseUrl,
+          apiKey: config.digestApi.apiKey,
+          model: config.digestApi.model,
+        },
+        [
+          { role: 'system', content: config.digestSystemPrompt! },
+          { role: 'user', content: digestUserPrompt },
+        ],
+        false,
+      )
+    } catch (primaryErr) {
+      if (config.digestFallbackApi) {
+        log(`Primary digest model failed (${(primaryErr as Error).message}), falling back to ${config.digestFallbackApi.model}...`)
+        digest = await chatCompletionWithRetry(
+          {
+            apiBaseUrl: config.digestFallbackApi.apiBaseUrl,
+            apiKey: config.digestFallbackApi.apiKey,
+            model: config.digestFallbackApi.model,
+          },
+          [
+            { role: 'system', content: config.digestSystemPrompt! },
+            { role: 'user', content: digestUserPrompt },
+          ],
+          false,
+        )
+      } else {
+        throw primaryErr
+      }
+    }
 
     // 9. Output to stdout
     process.stdout.write(digest)

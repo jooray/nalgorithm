@@ -64,17 +64,35 @@ export async function chatCompletion(
 }
 
 /**
- * Call chatCompletion with a single retry on failure.
+ * Sleep for a given number of milliseconds.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Call chatCompletion with exponential-backoff retries.
+ * Retries on any error (network, 429, 500, etc.) up to maxAttempts times.
  */
 export async function chatCompletionWithRetry(
   config: LLMConfig,
   messages: ChatMessage[],
-  jsonMode = false
+  jsonMode = false,
+  maxAttempts = 3,
+  baseDelayMs = 2000
 ): Promise<string> {
-  try {
-    return await chatCompletion(config, messages, jsonMode)
-  } catch (err) {
-    console.warn('LLM call failed, retrying once:', (err as Error).message)
-    return await chatCompletion(config, messages, jsonMode)
+  let lastErr: Error | undefined
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await chatCompletion(config, messages, jsonMode)
+    } catch (err) {
+      lastErr = err as Error
+      if (attempt < maxAttempts) {
+        const delay = baseDelayMs * Math.pow(2, attempt - 1) // 2s, 4s
+        console.warn(`LLM call failed (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms:`, lastErr.message)
+        await sleep(delay)
+      }
+    }
   }
+  throw lastErr
 }

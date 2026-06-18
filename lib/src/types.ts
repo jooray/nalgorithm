@@ -33,6 +33,12 @@ export interface RankerConfig {
   model: string
   /** Posts per batch (default: 20) */
   batchSize?: number
+  /**
+   * Number of batches to score in parallel (default: 1 = sequential).
+   * Increase to 3-5 for faster scoring at the cost of higher API burst usage.
+   * Be mindful of rate limits on your LLM provider.
+   */
+  concurrency?: number
 }
 
 export interface LearnerConfig {

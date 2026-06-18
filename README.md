@@ -142,16 +142,18 @@ There's a TTS-aware config example (`digest.config.tts.example.json`) with promp
 |--------|---------|-------------|
 | `npub` | required | Your Nostr npub |
 | `relays` | required | Array of relay WebSocket URLs |
-| `rankingApi` | required | `{apiBaseUrl, apiKey, model, batchSize?}` for post scoring |
+| `rankingApi` | required | `{apiBaseUrl, apiKey, model, batchSize?, concurrency?}` for post scoring |
 | `digestApi` | required | `{apiBaseUrl, apiKey, model, temperature?}` for digest generation |
 | `learnerApi` | falls back to `rankingApi` | `{apiBaseUrl, apiKey, model}` for preference learning |
 | `userPrompt` | required | Describe your interests and what to filter out |
 | `learnFromLikes` | `true` | Whether to learn preferences from your likes |
+| `likesBatchSize` | `50` | Likes per preference-learning batch. Reduce if your model has a small context window |
 | `learnedPromptCache` | `./digest.learned.json` | Path to the learned prompt file |
 | `scoreCachePath` | `./digest.scores.json` | Path to the score cache file |
 | `hoursBack` | `24` | How far back to fetch posts |
+| `maxPosts` | `500` | Cap on posts fetched per run. Lower this (e.g. `200`) for faster daily runs |
 | `topN` | `15` | Number of top posts to include in the digest |
-| `digestSystemPrompt` | built-in | System prompt for digest generation |
+| `digestSystemPrompt` | built-in | System prompt for digest generation. Humanizer rules are always appended automatically |
 | `digestPrompt` | built-in | User prompt template for digest generation |
 
 ## Caddy CORS proxy for Ollama Cloud

@@ -18,19 +18,42 @@ export interface DigestConfig {
   relays: string[]
   rankingApi: ApiConfig & {
     batchSize?: number
+    /**
+     * Number of scoring batches to run in parallel (default: 1 = sequential).
+     * Set to 3-5 for significantly faster scoring. Be mindful of API rate limits.
+     */
+    concurrency?: number
   }
   digestApi: ApiConfig & {
+    temperature?: number
+  }
+  /**
+   * Optional fallback LLM for digest generation.
+   * Used when digestApi fails (e.g. 429 overload) after all retries are exhausted.
+   * Can use a different provider and/or model.
+   * If not set, digest generation will fail without a fallback.
+   */
+  digestFallbackApi?: ApiConfig & {
     temperature?: number
   }
   /** Optional separate LLM for preference learning. Falls back to rankingApi if not set. */
   learnerApi?: ApiConfig
   userPrompt: string
   learnFromLikes?: boolean
+  /**
+   * How many likes to include per summarization batch (default: 50).
+   * Larger values may hit context limits on some models.
+   */
+  likesBatchSize?: number
   /** Path to the learned prompt file (default: ./digest.learned.json) */
   learnedPromptCache?: string
   /** Path to score cache file (default: ./digest.scores.json) */
   scoreCachePath?: string
+  /** How many days to keep cached scores. Defaults to 90. Scores are deterministic so long TTLs are fine. */
+  scoreCacheTTLDays?: number
   hoursBack?: number
+  /** Maximum number of posts to fetch (default: 500) */
+  maxPosts?: number
   topN?: number
   digestSystemPrompt?: string
   digestPrompt?: string
@@ -39,6 +62,26 @@ export interface DigestConfig {
 const DEFAULT_DIGEST_SYSTEM_PROMPT = `You are a witty, knowledgeable radio host delivering a spoken-word digest of what happened on Nostr in the last 24 hours. Always open with "Good morning, nostrich!" Your style is conversational, warm, and engaging — like a smart friend catching you up over coffee. You weave posts together into a narrative rather than reading them one by one. Add context, make connections between topics, and keep the energy up. Aim for 5-10 minutes of spoken content (roughly 1000-2000 words).`
 
 const DEFAULT_DIGEST_PROMPT = `Create a spoken-word radio digest from these top Nostr posts. Group related topics together, add transitions, and make it flow naturally as if someone is listening to it being read aloud. Don't just list posts — tell the story of what happened today. Include attribution (mention who said what) but keep it natural. Skip any posts that are too short or low-quality to be worth mentioning.`
+
+/**
+ * Humanizer rules — always appended to the system prompt.
+ * Prevents the most common AI writing tells in voice output.
+ * Based on https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing
+ */
+const HUMANIZER_APPENDIX = `
+WRITING STYLE (mandatory — apply before finalizing):
+- No significance inflation: avoid "pivotal", "testament", "evolving landscape", "underscores", "enduring"
+- No promotional language: avoid "groundbreaking", "vibrant", "stunning", "nestled", "breathtaking"
+- No vague attributions: avoid "experts believe", "observers note", "industry reports suggest"
+- No superficial -ing phrases tacked on for fake depth: avoid "highlighting...", "showcasing...", "reflecting...", "contributing to..."
+- No em dash overuse — prefer commas or short sentences
+- No staccato "Not X. Not Y." contrast pattern
+- No copula avoidance: use "is"/"are" instead of "serves as", "stands as", "functions as"
+- No filler: cut "In order to", "At this point in time", "It is important to note that"
+- No generic upbeat conclusions: avoid "the future looks bright", "exciting times ahead", "continuing this journey"
+- No rule of three where it feels forced
+- Vary sentence length. Short punchy ones. Then longer ones that take their time. Mix them.
+- Have opinions. React to things. Be specific rather than vague.`
 
 /**
  * Interpolate $ENV_VAR and ${ENV_VAR} references in string values.
@@ -121,6 +164,17 @@ export function loadConfig(path?: string): DigestConfig {
     throw new Error('Config: "userPrompt" is required — describe your interests')
   }
 
+  // Parse optional digestFallbackApi
+  const digestFallbackApi = config.digestFallbackApi as Record<string, unknown> | undefined
+  const parsedDigestFallbackApi = (digestFallbackApi?.apiBaseUrl && digestFallbackApi?.apiKey && digestFallbackApi?.model)
+    ? {
+        apiBaseUrl: digestFallbackApi.apiBaseUrl as string,
+        apiKey: digestFallbackApi.apiKey as string,
+        model: digestFallbackApi.model as string,
+        temperature: (digestFallbackApi.temperature as number | undefined),
+      }
+    : undefined
+
   // Parse optional learnerApi (falls back to rankingApi in main.ts)
   const learnerApi = config.learnerApi as Record<string, unknown> | undefined
   const parsedLearnerApi = (learnerApi?.apiBaseUrl && learnerApi?.apiKey && learnerApi?.model)
@@ -139,6 +193,7 @@ export function loadConfig(path?: string): DigestConfig {
       apiKey: rankingApi.apiKey as string,
       model: rankingApi.model as string,
       batchSize: (rankingApi.batchSize as number) ?? 20,
+      concurrency: (rankingApi.concurrency as number) ?? 1,
     },
     digestApi: {
       apiBaseUrl: digestApi.apiBaseUrl as string,
@@ -146,14 +201,17 @@ export function loadConfig(path?: string): DigestConfig {
       model: digestApi.model as string,
       temperature: (digestApi.temperature as number) ?? 0.7,
     },
+    digestFallbackApi: parsedDigestFallbackApi,
     learnerApi: parsedLearnerApi,
     userPrompt: config.userPrompt as string,
     learnFromLikes: (config.learnFromLikes as boolean) ?? true,
+    likesBatchSize: (config.likesBatchSize as number) ?? 50,
     learnedPromptCache: (config.learnedPromptCache as string) ?? './digest.learned.json',
     scoreCachePath: (config.scoreCachePath as string) ?? './digest.scores.json',
     hoursBack: (config.hoursBack as number) ?? 24,
     topN: (config.topN as number) ?? 15,
-    digestSystemPrompt: (config.digestSystemPrompt as string) ?? DEFAULT_DIGEST_SYSTEM_PROMPT,
+    maxPosts: (config.maxPosts as number) ?? 500,
+    digestSystemPrompt: ((config.digestSystemPrompt as string) ?? DEFAULT_DIGEST_SYSTEM_PROMPT) + HUMANIZER_APPENDIX,
     digestPrompt: (config.digestPrompt as string) ?? DEFAULT_DIGEST_PROMPT,
   }
 }
