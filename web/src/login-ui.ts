@@ -25,7 +25,7 @@ let activeSession: RemoteSignerSession | null = null
  *
  * @returns the user's hex pubkey, or null if they closed the dialog.
  */
-export function openLoginDialog(): Promise<string | null> {
+export function openLoginDialog(signerRelays?: string[]): Promise<string | null> {
   return new Promise((resolve) => {
     const el = ensureDialog()
     const body = el.querySelector<HTMLElement>('.login-body')!
@@ -81,7 +81,7 @@ export function openLoginDialog(): Promise<string | null> {
     startBtn.textContent = 'Use a remote signer (Amber)'
     startBtn.addEventListener('click', () => {
       startBtn.remove()
-      beginRemoteSigner(signerWrap, status, finish)
+      beginRemoteSigner(signerWrap, status, finish, signerRelays)
     })
     signerWrap.appendChild(startBtn)
 
@@ -115,11 +115,12 @@ export function openLoginDialog(): Promise<string | null> {
 function beginRemoteSigner(
   wrap: HTMLElement,
   status: HTMLElement,
-  finish: (pubkey: string | null) => void
+  finish: (pubkey: string | null) => void,
+  relays?: string[]
 ): void {
   let session: RemoteSignerSession
   try {
-    session = startRemoteSignerLogin()
+    session = startRemoteSignerLogin(relays?.length ? relays : undefined)
   } catch (err) {
     setStatus(status, (err as Error).message, true)
     return

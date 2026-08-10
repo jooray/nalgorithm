@@ -11,6 +11,14 @@ import {
 } from './settings.js'
 import { openLoginDialog } from './login-ui.js'
 import { toNpub } from './nostr-login.js'
+import {
+  fetchModels,
+  loadCachedModels,
+  suggestModels,
+  describeModel,
+  isVenice,
+  type ModelInfo,
+} from './models.js'
 
 type RefreshCallback = () => Promise<void>
 type RegenerateCallback = () => Promise<void>
@@ -79,15 +87,67 @@ export function initUI(
   const btnConnect = $<HTMLButtonElement>('#btn-connect')
   const inputNpub = $<HTMLInputElement>('#input-npub')
   btnConnect.addEventListener('click', () => {
-    openLoginDialog()
+    openLoginDialog(readSignerRelays())
       .then((pubkey) => {
         if (!pubkey) return
         // Store the npub form — it round-trips through pubkeyToHex either way,
         // and it is the form a user recognizes when they look at the field.
         inputNpub.value = pubkey.startsWith('npub') ? pubkey : toNpub(pubkey)
+        updateIdentityState()
         setStatus('Nostr identity connected')
       })
       .catch((err) => setStatus(`Login failed: ${(err as Error).message}`))
+  })
+  // Typing or clearing the npub by hand must move the indicator too.
+  inputNpub.addEventListener('input', updateIdentityState)
+  updateIdentityState()
+
+  // Model catalog
+  const btnLoadModels = $<HTMLButtonElement>('#btn-load-models')
+  const btnRecommend = $<HTMLButtonElement>('#btn-recommend-models')
+  const catalogStatus = $('#model-catalog-status')
+
+  const applyCatalog = (models: ModelInfo[], note: string): void => {
+    fillModelList(models)
+    catalogStatus.textContent = `${models.length} models ${note}`
+    const base = $<HTMLInputElement>('#input-api-base').value.trim()
+    btnRecommend.classList.toggle('hidden', !isVenice(base))
+  }
+
+  // Show a cached catalog immediately so the pickers are useful on open.
+  const cachedBase = $<HTMLInputElement>('#input-api-base').value.trim()
+  if (cachedBase) {
+    const cached = loadCachedModels(cachedBase)
+    if (cached) applyCatalog(cached, '(cached)')
+  }
+
+  btnLoadModels.addEventListener('click', () => {
+    const base = $<HTMLInputElement>('#input-api-base').value.trim()
+    const key = $<HTMLInputElement>('#input-api-key').value.trim()
+    catalogStatus.textContent = 'Loading…'
+    btnLoadModels.disabled = true
+    fetchModels(base, key, true)
+      .then((models) => applyCatalog(models, 'available'))
+      .catch((err) => {
+        catalogStatus.textContent = (err as Error).message
+      })
+      .finally(() => {
+        btnLoadModels.disabled = false
+      })
+  })
+
+  btnRecommend.addEventListener('click', () => {
+    const base = $<HTMLInputElement>('#input-api-base').value.trim()
+    const models = loadCachedModels(base)
+    if (!models) {
+      catalogStatus.textContent = 'Load the model list first'
+      return
+    }
+    const picks = suggestModels(base, models)
+    if (picks.scoring) $<HTMLInputElement>('#input-model').value = picks.scoring
+    if (picks.digest) $<HTMLInputElement>('#input-digest-model').value = picks.digest
+    if (picks.learner) $<HTMLInputElement>('#input-learner-model').value = picks.learner
+    catalogStatus.textContent = 'Recommended models filled in'
   })
 
   // Clear scores
@@ -205,12 +265,62 @@ export function readFieldsToSettings(): AppSettings {
     learnerModel: $<HTMLInputElement>('#input-learner-model').value.trim(),
     digestTopN: parseInt($<HTMLInputElement>('#input-digest-topn').value, 10) || 15,
     digestForSpeech: $<HTMLInputElement>('#input-digest-speech').checked,
+    signerRelays: readSignerRelays(),
     userPrompt: $<HTMLTextAreaElement>('#input-user-prompt').value.trim(),
     learnedPrompt: $<HTMLTextAreaElement>('#input-learned-prompt').value,
     hoursBack: parseInt($<HTMLInputElement>('#input-hours-back').value, 10) || 24,
     batchSize: parseInt($<HTMLInputElement>('#input-batch-size').value, 10) || 20,
     njumpBaseUrl: $<HTMLInputElement>('#input-njump-base').value.trim() || 'https://njump.me/',
   }
+}
+
+/**
+ * Reflect whether an identity is set.
+ *
+ * The connect button stays primary-styled only while there is nothing to
+ * connect to — once a pubkey is present it steps down to a secondary
+ * "Change identity", and the npub is shown, so the panel does not look like it
+ * is still asking you to do something you already did.
+ */
+export function updateIdentityState(): void {
+  const npub = $<HTMLInputElement>('#input-npub').value.trim()
+  const banner = $('#identity-connected')
+  const btn = $<HTMLButtonElement>('#btn-connect')
+  const label = $('#identity-npub')
+
+  if (npub) {
+    banner.classList.remove('hidden')
+    label.textContent = npub.length > 24 ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : npub
+    btn.textContent = 'Change identity'
+    btn.classList.remove('btn-primary')
+    btn.classList.add('btn-secondary')
+  } else {
+    banner.classList.add('hidden')
+    label.textContent = ''
+    btn.textContent = 'Connect Nostr identity'
+    btn.classList.add('btn-primary')
+    btn.classList.remove('btn-secondary')
+  }
+}
+
+/** Populate the shared <datalist> backing all three model inputs. */
+function fillModelList(models: ModelInfo[]): void {
+  const list = $<HTMLDataListElement>('#model-list')
+  list.textContent = ''
+  for (const model of models) {
+    const option = document.createElement('option')
+    option.value = model.id
+    const label = describeModel(model)
+    if (label) option.label = label
+    list.appendChild(option)
+  }
+}
+
+function readSignerRelays(): string[] {
+  return $<HTMLTextAreaElement>('#input-signer-relays').value
+    .split('\n')
+    .map((r) => r.trim())
+    .filter((r) => r.length > 0)
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
@@ -226,6 +336,7 @@ function populateFields(settings: AppSettings): void {
   $<HTMLInputElement>('#input-learner-model').value = settings.learnerModel
   $<HTMLInputElement>('#input-digest-topn').value = String(settings.digestTopN)
   $<HTMLInputElement>('#input-digest-speech').checked = settings.digestForSpeech
+  $<HTMLTextAreaElement>('#input-signer-relays').value = settings.signerRelays.join('\n')
   $<HTMLTextAreaElement>('#input-user-prompt').value = settings.userPrompt
   $<HTMLTextAreaElement>('#input-learned-prompt').value = settings.learnedPrompt
   $<HTMLInputElement>('#input-hours-back').value = String(settings.hoursBack)

@@ -2,6 +2,8 @@
  * Nalgorithm Web — Settings management (localStorage)
  */
 
+import { DEFAULT_SIGNER_RELAYS } from './nostr-login.js'
+
 const STORAGE_PREFIX = 'nalgorithm_'
 
 const PROVIDER_URLS: Record<string, string> = {
@@ -26,6 +28,8 @@ export interface AppSettings {
   digestTopN: number
   /** Add text-to-speech phrasing rules to the digest prompt. */
   digestForSpeech: boolean
+  /** Relays used for the NIP-46 remote-signer handshake. */
+  signerRelays: string[]
   userPrompt: string
   learnedPrompt: string
   hoursBack: number
@@ -81,6 +85,7 @@ const DEFAULTS: AppSettings = {
   learnerModel: '',
   digestTopN: 15,
   digestForSpeech: true,
+  signerRelays: [...DEFAULT_SIGNER_RELAYS],
   userPrompt: '',
   learnedPrompt: '',
   hoursBack: 24,
@@ -111,6 +116,7 @@ export function loadSettings(): AppSettings {
     learnerModel: getItem('learnerModel') ?? DEFAULTS.learnerModel,
     digestTopN: parseInt(getItem('digestTopN') ?? '', 10) || DEFAULTS.digestTopN,
     digestForSpeech: (getItem('digestForSpeech') ?? String(DEFAULTS.digestForSpeech)) === 'true',
+    signerRelays: parseJsonArray(getItem('signerRelays')) ?? DEFAULTS.signerRelays,
     userPrompt: getItem('userPrompt') ?? DEFAULTS.userPrompt,
     learnedPrompt: getItem('learnedPrompt') ?? DEFAULTS.learnedPrompt,
     hoursBack: parseInt(getItem('hoursBack') ?? '', 10) || DEFAULTS.hoursBack,
@@ -133,6 +139,7 @@ export function saveSettings(settings: AppSettings): void {
   setItem('learnerModel', settings.learnerModel)
   setItem('digestTopN', String(settings.digestTopN))
   setItem('digestForSpeech', String(settings.digestForSpeech))
+  setItem('signerRelays', JSON.stringify(settings.signerRelays))
   setItem('userPrompt', settings.userPrompt)
   setItem('learnedPrompt', settings.learnedPrompt)
   setItem('hoursBack', String(settings.hoursBack))

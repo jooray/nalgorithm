@@ -59,6 +59,13 @@ learner can each be pointed somewhere else:
 
 Leave the last two blank to reuse the scoring model.
 
+**Load model list** fetches the provider's catalog from `/models` and attaches
+it to all three fields. They stay free-text inputs — the list is a suggestion,
+not an allowlist, so a provider that can't be enumerated never stops you typing
+a model name. On Venice the catalog also carries context size and pricing,
+shown next to each entry, and **Use recommended** fills in a known-good model
+per role. The list is cached for a day.
+
 ## Signing in
 
 The web app needs to know your public key and nothing else — it reads your
@@ -73,11 +80,19 @@ signs. Three ways to tell it who you are:
 - **Paste an npub** — no signer involved. Works for reading any public feed,
   including someone else's.
 
-A detail worth knowing if you implement this yourself: on NIP-46 the pubkey on
-the signer's response frames is a per-connection *routing* key, not the user's
-identity. Newer Amber builds generate a fresh one per connection, so treating it
-as the npub silently logs you in as an ephemeral key that follows nobody.
-`get_public_key` is the only correct source.
+The signer relays are configurable, and worth a thought: the handshake rides on
+kind 24133, which is *ephemeral*, so a relay that accepts the event without
+relaying it live looks exactly like a signer that never answered. Every default
+in the list was verified by publishing on one connection and receiving on
+another. When that list was set, `relay.nsec.app` — the dedicated bunker relay,
+and the obvious first choice — was returning HTTP 502, and `relay.damus.io`
+would not complete a WebSocket handshake. Probe before you add one.
+
+Another detail worth knowing if you implement this yourself: on NIP-46 the
+pubkey on the signer's response frames is a per-connection *routing* key, not
+the user's identity. Newer Amber builds generate a fresh one per connection, so
+treating it as the npub silently logs you in as an ephemeral key that follows
+nobody. `get_public_key` is the only correct source.
 
 ## LLM providers
 

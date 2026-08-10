@@ -23,11 +23,21 @@ import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { BunkerSigner, createNostrConnectURI } from 'nostr-tools/nip46'
 import { npubEncode } from 'nostr-tools/nip19'
 
-/** Relays used for the NIP-46 handshake. Multiple, because relays go down. */
+/**
+ * Relays used for the NIP-46 handshake. Multiple, because relays go down.
+ *
+ * Every entry here was verified to actually *round-trip* an ephemeral kind-24133
+ * event, publishing on one connection and receiving on another. That check
+ * matters: a relay can accept the event and never relay it, which looks exactly
+ * like a signer that never answered. `wss://relay.nsec.app` — the dedicated
+ * bunker relay, and the obvious first choice — was returning HTTP 502 when this
+ * list was set, and `wss://relay.damus.io` would not complete a WebSocket
+ * handshake. Re-probe before adding one.
+ */
 export const DEFAULT_SIGNER_RELAYS = [
-  'wss://relay.nsec.app',
-  'wss://relay.damus.io',
+  'wss://nostr.cypherpunk.today',
   'wss://nos.lol',
+  'wss://relay.primal.net',
 ]
 
 /** How long to wait for the user to approve in their signer app. */

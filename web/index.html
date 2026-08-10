@@ -43,10 +43,19 @@
         <!-- Identity -->
         <section class="settings-section">
           <h3>Identity</h3>
+          <div id="identity-connected" class="identity-connected hidden">
+            <span class="identity-dot"></span>
+            <span class="identity-label">Connected</span>
+            <code id="identity-npub" class="identity-npub"></code>
+          </div>
           <button id="btn-connect" class="btn btn-primary btn-full">Connect Nostr identity</button>
           <p class="field-hint">Reads your public key only — Nalgorithm never signs or posts.</p>
           <label for="input-npub">npub or hex pubkey</label>
           <input type="text" id="input-npub" placeholder="npub1... or hex pubkey" spellcheck="false">
+
+          <label for="input-signer-relays">Remote signer relays (one per line)</label>
+          <textarea id="input-signer-relays" rows="3" spellcheck="false" class="compact-field"></textarea>
+          <p class="field-hint">Used only for the Amber / bunker handshake. Must relay ephemeral kind 24133.</p>
         </section>
 
         <!-- Relays -->
@@ -73,16 +82,23 @@
           <label for="input-api-key">API Key</label>
           <input type="password" id="input-api-key" placeholder="sk-..." spellcheck="false">
 
+          <div class="model-catalog">
+            <button id="btn-load-models" class="btn btn-small" type="button">Load model list</button>
+            <button id="btn-recommend-models" class="btn btn-small hidden" type="button">Use recommended</button>
+            <span id="model-catalog-status" class="catalog-status"></span>
+          </div>
+          <datalist id="model-list"></datalist>
+
           <label for="input-model">Model (scoring)</label>
-          <input type="text" id="input-model" placeholder="deepseek-v4-flash-0731" spellcheck="false">
+          <input type="text" id="input-model" list="model-list" placeholder="deepseek-v4-flash-0731" spellcheck="false">
           <p class="field-hint">Does the bulk of the work. Keep it cheap and fast.</p>
 
           <label for="input-digest-model">Model (digest)</label>
-          <input type="text" id="input-digest-model" placeholder="same as scoring model" spellcheck="false">
+          <input type="text" id="input-digest-model" list="model-list" placeholder="same as scoring model" spellcheck="false">
           <p class="field-hint">Runs once over your top posts, so a stronger model costs little. Blank reuses the scoring model.</p>
 
           <label for="input-learner-model">Model (learning from likes)</label>
-          <input type="text" id="input-learner-model" placeholder="same as scoring model" spellcheck="false">
+          <input type="text" id="input-learner-model" list="model-list" placeholder="same as scoring model" spellcheck="false">
           <p class="field-hint">Needs a large context window. Blank reuses the scoring model.</p>
         </section>
 

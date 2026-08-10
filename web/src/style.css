@@ -944,3 +944,58 @@ select {
   width: auto;
   margin: 0;
 }
+
+/* ─── Identity connected state ─────────────────────────────────────────────── */
+
+.identity-connected {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  font-size: 0.8rem;
+}
+
+.identity-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--score-high);
+}
+
+.identity-label {
+  color: var(--text-muted);
+}
+
+.identity-npub {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Model catalog controls ───────────────────────────────────────────────── */
+
+.model-catalog {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+
+.catalog-status {
+  color: var(--text-dim);
+  font-size: 0.74rem;
+}
+
+.compact-field {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
