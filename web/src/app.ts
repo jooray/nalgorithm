@@ -11,6 +11,7 @@ import {
   createRanker,
   createLearner,
   pubkeyToHex,
+  scoreCacheKey,
   type FetchedPost,
   type ScoredPost,
   type ProfileData,
@@ -117,7 +118,13 @@ async function scorePosts(
     onBatchScored: (batch) => {
       const real = batch.filter((p) => !p.defaultScore)
       if (real.length > 0) {
-        cacheScores(real.map((p) => ({ id: p.id, score: p.score, justification: p.justification })))
+        cacheScores(
+          real.map((p) => ({
+            id: scoreCacheKey(p),
+            score: p.score,
+            justification: p.justification,
+          }))
+        )
       }
       onBatch?.(batch)
     },
@@ -261,7 +268,9 @@ async function runFeed(): Promise<void> {
     const uncachedPosts: FetchedPost[] = []
 
     for (const p of posts) {
-      const cached = scoreCache.get(p.id)
+      // Keyed by the boosted event where there is one, so a boost of something
+      // already scored is a cache hit rather than a fresh LLM call.
+      const cached = scoreCache.get(scoreCacheKey(p))
       if (cached) {
         cachedPosts.push({ ...p, score: cached.score, justification: cached.justification })
       } else {

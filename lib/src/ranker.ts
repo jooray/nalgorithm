@@ -23,6 +23,26 @@ const DEFAULT_SCORE = 5
 const DEFAULT_CONCURRENCY = 1
 
 /**
+ * The identity a post should be scored and cached under.
+ *
+ * For a plain repost this is the **boosted event's** id, not the repost's own.
+ * A kind-6 carries no commentary, so its relevance is entirely the relevance of
+ * the thing it points at — and keying on that has three effects worth having:
+ *
+ * - Ten people boosting one note costs one scoring call, not ten.
+ * - A boost of something already scored is free, including across runs and days.
+ * - If you also follow the original author, their post and everyone's boosts of
+ *   it collapse onto a single score instead of being judged separately.
+ *
+ * Quote posts keep their own id: the commentary is new content, and the whole
+ * point of a quote is that it says something the original did not.
+ */
+export function scoreCacheKey(post: Pick<FetchedPost, 'id' | 'type' | 'originalPost'>): string {
+  if (post.type === 'boost' && post.originalPost?.id) return post.originalPost.id
+  return post.id
+}
+
+/**
  * Sort scored posts by relevance (descending), then by time (descending) as tiebreaker.
  */
 export function sortByRelevance(posts: ScoredPost[]): ScoredPost[] {
@@ -525,11 +545,29 @@ export function createRanker(config: RankerConfig): Ranker {
   ): Promise<ScoredPost[]> {
     if (posts.length === 0) return []
 
-    const batches = chunk(posts, batchSize)
+    // Group by scoring identity, so a note boosted ten times is scored once.
+    const groups = new Map<string, FetchedPost[]>()
+    for (const post of posts) {
+      const key = scoreCacheKey(post)
+      const group = groups.get(key)
+      if (group) group.push(post)
+      else groups.set(key, [post])
+    }
+
+    // One representative per group is what actually goes to the LLM. Prefer a
+    // non-boost if the group has one: an original post carries the real author
+    // and full event, where a repost is a wrapper around it.
+    const representatives = [...groups.values()].map(
+      (group) => group.find((p) => p.type !== 'boost') ?? group[0]
+    )
+
+    const batches = chunk(representatives, batchSize)
     const allScores = new Map<string, { score: number; justification: string; defaultScore?: boolean }>()
 
+    // Progress counts the work actually being done, not the post count — with
+    // boosts collapsed those differ, and the smaller number is the honest one.
     let scoredSoFar = 0
-    const totalPosts = posts.length
+    const totalPosts = representatives.length
 
     /**
      * Score batches through a worker pool.
@@ -562,25 +600,30 @@ export function createRanker(config: RankerConfig): Ranker {
           options.profiles
         )
 
-        for (const [id, data] of batchScores) {
-          allScores.set(id, data)
+        // Store under the scoring key so every post in the group picks it up.
+        for (const representative of batches[index]) {
+          const data = batchScores.get(representative.id)
+          if (data) allScores.set(scoreCacheKey(representative), data)
         }
 
         // Hand this batch to the caller straight away so it can be cached.
         // Holding everything until the whole run resolves loses the lot on a
-        // reload or a crash.
+        // reload or a crash. Emits every post in the scored groups, not just
+        // the representatives, so a progressive UI shows them all.
         if (options.onBatchScored) {
-          options.onBatchScored(
-            batches[index].map((post) => {
-              const data = batchScores.get(post.id)
-              return {
+          const emitted: ScoredPost[] = []
+          for (const representative of batches[index]) {
+            const data = batchScores.get(representative.id)
+            for (const post of groups.get(scoreCacheKey(representative)) ?? [representative]) {
+              emitted.push({
                 ...post,
                 score: data?.score ?? DEFAULT_SCORE,
                 justification: data?.justification || undefined,
                 defaultScore: data?.defaultScore || undefined,
-              }
-            })
-          )
+              })
+            }
+          }
+          options.onBatchScored(emitted)
         }
 
         // Progress reflects completion order, not batch order — with a pool
@@ -592,9 +635,9 @@ export function createRanker(config: RankerConfig): Ranker {
 
     await Promise.all(Array.from({ length: workerCount }, worker))
 
-    // Build scored posts
+    // Build scored posts — every post resolves through its group's score.
     const scoredPosts: ScoredPost[] = posts.map((post) => {
-      const data = allScores.get(post.id)
+      const data = allScores.get(scoreCacheKey(post))
       return {
         ...post,
         score: data?.score ?? DEFAULT_SCORE,

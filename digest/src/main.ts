@@ -17,6 +17,7 @@ import {
   chatCompletionWithRetry,
   synthesizeSpeech,
   pubkeyToHex,
+  scoreCacheKey,
   sortByRelevance,
 } from 'nalgorithm'
 import type {
@@ -420,7 +421,8 @@ async function main(): Promise<void> {
     const uncachedPosts: FetchedPost[] = []
 
     for (const post of posts) {
-      const cached = scoreCache?.scores[post.id]
+      // Keyed by the boosted event where there is one — see scoreCacheKey.
+      const cached = scoreCache?.scores[scoreCacheKey(post)]
       if (cached) {
         cachedScores.set(post.id, { score: cached.score, justification: cached.justification })
       } else {
@@ -456,7 +458,7 @@ async function main(): Promise<void> {
         onBatchScored: (batch) => {
           for (const sp of batch) {
             if (!sp.defaultScore) {
-              runningCache.scores[sp.id] = {
+              runningCache.scores[scoreCacheKey(sp)] = {
                 score: sp.score,
                 justification: sp.justification,
                 createdAt: sp.createdAt,
@@ -505,7 +507,7 @@ async function main(): Promise<void> {
     }
     for (const sp of allScoredPosts) {
       if (!sp.defaultScore) {
-        updatedCache.scores[sp.id] = {
+        updatedCache.scores[scoreCacheKey(sp)] = {
           score: sp.score,
           justification: sp.justification,
           createdAt: sp.createdAt,
