@@ -39,7 +39,10 @@ import {
   showEmptyState,
   getFeedContainer,
   readFieldsToSettings,
+  setDigestEnabled,
 } from './ui.js'
+
+import { showDigest, stopDigestSpeech } from './digest-ui.js'
 
 import { initVersionCheck, setUpdateBlocked } from './version-check.js'
 
@@ -129,6 +132,8 @@ async function runFeed(): Promise<void> {
 
   isRunning = true
   setRefreshEnabled(false)
+  // The digest on screen describes the previous feed; stop reading it out.
+  stopDigestSpeech()
   // Hold off any pending auto-update until this run finishes — reloading
   // mid-scoring would discard work already paid for.
   setUpdateBlocked(true)
@@ -287,6 +292,8 @@ async function runFeed(): Promise<void> {
     setStatus(`Showing ${allScored.length} posts, ranked by relevance${cachedLabel}`)
     setRefreshEnabled(true)
 
+    setDigestEnabled(currentPosts.length > 0)
+
     // ── Phase 2: background likes → re-rate ────────────────────────────
 
     // Fire and forget — runs in background, doesn't block UI
@@ -335,7 +342,7 @@ async function backgroundLearnAndRerate(
     const learner = createLearner({
       apiBaseUrl: settings.apiBaseUrl,
       apiKey: settings.apiKey,
-      model: settings.model,
+      model: settings.learnerModel.trim() || settings.model,
     })
 
     const newLearnedPrompt = await learner.summarizeLikes(likes)
@@ -406,7 +413,7 @@ async function regenerateLearnedPrompt(): Promise<void> {
     const learner = createLearner({
       apiBaseUrl: settings.apiBaseUrl,
       apiKey: settings.apiKey,
-      model: settings.model,
+      model: settings.learnerModel.trim() || settings.model,
     })
 
     const learnedPrompt = await learner.summarizeLikes(likes)
@@ -432,7 +439,17 @@ async function regenerateLearnedPrompt(): Promise<void> {
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
+/**
+ * Summarize the posts currently on screen. Uses whatever has already been
+ * fetched and scored, so it costs exactly one LLM call.
+ */
+async function runDigest(): Promise<void> {
+  const settings = readFieldsToSettings()
+  saveSettings(settings)
+  await showDigest(currentPosts, currentProfiles, settings)
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  initUI(runFeed, regenerateLearnedPrompt)
+  initUI(runFeed, regenerateLearnedPrompt, runDigest)
   initVersionCheck()
 })

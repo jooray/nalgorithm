@@ -18,6 +18,14 @@ export interface AppSettings {
   apiBaseUrl: string
   apiKey: string
   model: string
+  /** Model for digest writing. Falls back to `model` when blank. */
+  digestModel: string
+  /** Model for learning from likes. Falls back to `model` when blank. */
+  learnerModel: string
+  /** Number of top posts fed to the digest. */
+  digestTopN: number
+  /** Add text-to-speech phrasing rules to the digest prompt. */
+  digestForSpeech: boolean
   userPrompt: string
   learnedPrompt: string
   hoursBack: number
@@ -67,6 +75,12 @@ const DEFAULTS: AppSettings = {
   // Keep this pointing at a model that is actually live in the provider's
   // catalog — a delisted default makes the first run fail for every new user.
   model: 'deepseek-v4-flash-0731',
+  // Blank means "reuse the scoring model". A digest runs once over ~15 posts,
+  // so a stronger model here costs little; scoring is the expensive part.
+  digestModel: '',
+  learnerModel: '',
+  digestTopN: 15,
+  digestForSpeech: true,
   userPrompt: '',
   learnedPrompt: '',
   hoursBack: 24,
@@ -93,6 +107,10 @@ export function loadSettings(): AppSettings {
     apiBaseUrl: getItem('apiBaseUrl') ?? DEFAULTS.apiBaseUrl,
     apiKey: getItem('apiKey') ?? DEFAULTS.apiKey,
     model: getItem('model') ?? DEFAULTS.model,
+    digestModel: getItem('digestModel') ?? DEFAULTS.digestModel,
+    learnerModel: getItem('learnerModel') ?? DEFAULTS.learnerModel,
+    digestTopN: parseInt(getItem('digestTopN') ?? '', 10) || DEFAULTS.digestTopN,
+    digestForSpeech: (getItem('digestForSpeech') ?? String(DEFAULTS.digestForSpeech)) === 'true',
     userPrompt: getItem('userPrompt') ?? DEFAULTS.userPrompt,
     learnedPrompt: getItem('learnedPrompt') ?? DEFAULTS.learnedPrompt,
     hoursBack: parseInt(getItem('hoursBack') ?? '', 10) || DEFAULTS.hoursBack,
@@ -111,6 +129,10 @@ export function saveSettings(settings: AppSettings): void {
   setItem('apiBaseUrl', settings.apiBaseUrl)
   setItem('apiKey', settings.apiKey)
   setItem('model', settings.model)
+  setItem('digestModel', settings.digestModel)
+  setItem('learnerModel', settings.learnerModel)
+  setItem('digestTopN', String(settings.digestTopN))
+  setItem('digestForSpeech', String(settings.digestForSpeech))
   setItem('userPrompt', settings.userPrompt)
   setItem('learnedPrompt', settings.learnedPrompt)
   setItem('hoursBack', String(settings.hoursBack))

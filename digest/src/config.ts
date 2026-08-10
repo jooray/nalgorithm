@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { TTSConfig, ReasoningEffort } from 'nalgorithm'
+import { buildDigestSystemPrompt, DEFAULT_DIGEST_PROMPT } from 'nalgorithm'
 
 export interface ApiConfig {
   apiBaseUrl: string
@@ -83,30 +84,6 @@ export interface DigestConfig {
    */
   ttsOutputPath?: string
 }
-
-const DEFAULT_DIGEST_SYSTEM_PROMPT = `You are a witty, knowledgeable radio host delivering a spoken-word digest of what happened on Nostr in the last 24 hours. Always open with "Good morning, nostrich!" Your style is conversational, warm, and engaging — like a smart friend catching you up over coffee. You weave posts together into a narrative rather than reading them one by one. Add context, make connections between topics, and keep the energy up. Aim for 5-10 minutes of spoken content (roughly 1000-2000 words).`
-
-const DEFAULT_DIGEST_PROMPT = `Create a spoken-word radio digest from these top Nostr posts. Group related topics together, add transitions, and make it flow naturally as if someone is listening to it being read aloud. Don't just list posts — tell the story of what happened today. Include attribution (mention who said what) but keep it natural. Skip any posts that are too short or low-quality to be worth mentioning.`
-
-/**
- * Humanizer rules — always appended to the system prompt.
- * Prevents the most common AI writing tells in voice output.
- * Based on https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing
- */
-const HUMANIZER_APPENDIX = `
-WRITING STYLE (mandatory — apply before finalizing):
-- No significance inflation: avoid "pivotal", "testament", "evolving landscape", "underscores", "enduring"
-- No promotional language: avoid "groundbreaking", "vibrant", "stunning", "nestled", "breathtaking"
-- No vague attributions: avoid "experts believe", "observers note", "industry reports suggest"
-- No superficial -ing phrases tacked on for fake depth: avoid "highlighting...", "showcasing...", "reflecting...", "contributing to..."
-- No em dash overuse — prefer commas or short sentences
-- No staccato "Not X. Not Y." contrast pattern
-- No copula avoidance: use "is"/"are" instead of "serves as", "stands as", "functions as"
-- No filler: cut "In order to", "At this point in time", "It is important to note that"
-- No generic upbeat conclusions: avoid "the future looks bright", "exciting times ahead", "continuing this journey"
-- No rule of three where it feels forced
-- Vary sentence length. Short punchy ones. Then longer ones that take their time. Mix them.
-- Have opinions. React to things. Be specific rather than vague.`
 
 /**
  * Interpolate $ENV_VAR and ${ENV_VAR} references in string values.
@@ -307,7 +284,7 @@ export function loadConfig(path?: string): DigestConfig {
     hoursBack: (config.hoursBack as number) ?? 24,
     topN: (config.topN as number) ?? 15,
     maxPosts: (config.maxPosts as number) ?? 500,
-    digestSystemPrompt: ((config.digestSystemPrompt as string) ?? DEFAULT_DIGEST_SYSTEM_PROMPT) + HUMANIZER_APPENDIX,
+    digestSystemPrompt: buildDigestSystemPrompt(config.digestSystemPrompt as string | undefined),
     digestPrompt: (config.digestPrompt as string) ?? DEFAULT_DIGEST_PROMPT,
     ttsApi: parsedTtsApi,
     ttsOutputPath: config.ttsOutputPath as string | undefined,

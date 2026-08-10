@@ -858,3 +858,89 @@ select {
     transform: none;
   }
 }
+
+/* ─── Digest panel ─────────────────────────────────────────────────────────── */
+
+.digest-panel {
+  margin: 0 auto 1.5rem;
+  padding: 1.25rem;
+  max-width: 720px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+}
+
+.digest-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.digest-header h2 {
+  font-size: 1.05rem;
+  color: var(--accent-light);
+}
+
+.digest-status {
+  min-height: 1.1rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.digest-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.75rem 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.digest-voice {
+  max-width: 220px;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.digest-rate {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.digest-rate-input {
+  width: 90px;
+}
+
+.digest-body {
+  color: var(--text);
+  font-size: 0.97rem;
+  line-height: 1.65;
+}
+
+.digest-body p {
+  margin-bottom: 0.9rem;
+}
+
+.checkbox-label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0 0.25rem;
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.checkbox-label input {
+  width: auto;
+  margin: 0;
+}

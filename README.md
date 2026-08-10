@@ -25,6 +25,40 @@ Scores are cached locally (localStorage in the web app, a JSON file for the CLI)
 
 Everything runs in the browser (web app) or locally (CLI). Settings, scores, and the learned prompt live in localStorage or local files. The app connects directly to Nostr relays for posts and to your chosen LLM provider for scoring. There's nothing in between.
 
+## Digest in the browser
+
+The web app can do the same thing the CLI does: click **Digest** and it writes
+a narrative summary of your top-ranked posts. It reuses posts already fetched
+and scored, so it costs exactly one extra LLM call.
+
+**Read aloud** uses the browser's own speech engine (Web Speech API). No TTS
+provider, no API key, nothing leaves the device — the tradeoff is that voice
+quality is whatever your OS ships. Pick a voice, set the speed, pause and
+resume. For better voices, use the CLI's `ttsApi` with a real TTS model.
+
+Two Chrome quirks are handled, because both make long text fail in ways that
+look like your fault: utterances over a couple hundred characters get truncated
+or never fire their end event, and speech stops after roughly 15 seconds unless
+it is nudged. The text is chunked on sentence boundaries and queued, with a
+keep-alive timer running during playback.
+
+The **Phrase it for speech** setting adds instructions to drop markdown and
+spell out version numbers and abbreviations ("N I P nineteen", not "NIP-19").
+Leave it on if you plan to listen, turn it off if you'd rather read.
+
+### Per-role models
+
+The web app uses one model for everything by default, but the digest and the
+learner can each be pointed somewhere else:
+
+| Setting | What it does | Notes |
+|---|---|---|
+| Model (scoring) | Scores every post | The volume consumer. Keep it cheap. |
+| Model (digest) | Writes the narrative | One call over ~15 posts, so a stronger model is affordable |
+| Model (learning from likes) | Summarizes your likes | Needs a large context window |
+
+Leave the last two blank to reuse the scoring model.
+
 ## Signing in
 
 The web app needs to know your public key and nothing else — it reads your

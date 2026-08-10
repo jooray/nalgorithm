@@ -20,7 +20,8 @@ type RegenerateCallback = () => Promise<void>
  */
 export function initUI(
   onRefresh: RefreshCallback,
-  onRegenerate: RegenerateCallback
+  onRegenerate: RegenerateCallback,
+  onDigest: RefreshCallback
 ): AppSettings {
   const settings = loadSettings()
 
@@ -104,6 +105,12 @@ export function initUI(
     })
   })
 
+  // Digest
+  const btnDigest = $<HTMLButtonElement>('#btn-digest')
+  btnDigest.addEventListener('click', () => {
+    onDigest().catch((err) => setStatus(`Digest error: ${(err as Error).message}`))
+  })
+
   // Regenerate learned prompt
   const btnRegenerate = $<HTMLButtonElement>('#btn-regenerate-learned')
   btnRegenerate.addEventListener('click', () => {
@@ -158,6 +165,11 @@ export function setRefreshEnabled(enabled: boolean): void {
   btn.disabled = !enabled
 }
 
+/** The digest button only makes sense once there are scored posts to summarize. */
+export function setDigestEnabled(enabled: boolean): void {
+  $<HTMLButtonElement>('#btn-digest').disabled = !enabled
+}
+
 /**
  * Show/hide the empty state.
  */
@@ -189,6 +201,10 @@ export function readFieldsToSettings(): AppSettings {
     apiBaseUrl: $<HTMLInputElement>('#input-api-base').value.trim(),
     apiKey: $<HTMLInputElement>('#input-api-key').value.trim(),
     model: $<HTMLInputElement>('#input-model').value.trim(),
+    digestModel: $<HTMLInputElement>('#input-digest-model').value.trim(),
+    learnerModel: $<HTMLInputElement>('#input-learner-model').value.trim(),
+    digestTopN: parseInt($<HTMLInputElement>('#input-digest-topn').value, 10) || 15,
+    digestForSpeech: $<HTMLInputElement>('#input-digest-speech').checked,
     userPrompt: $<HTMLTextAreaElement>('#input-user-prompt').value.trim(),
     learnedPrompt: $<HTMLTextAreaElement>('#input-learned-prompt').value,
     hoursBack: parseInt($<HTMLInputElement>('#input-hours-back').value, 10) || 24,
@@ -206,6 +222,10 @@ function populateFields(settings: AppSettings): void {
   $<HTMLInputElement>('#input-api-base').value = settings.apiBaseUrl
   $<HTMLInputElement>('#input-api-key').value = settings.apiKey
   $<HTMLInputElement>('#input-model').value = settings.model
+  $<HTMLInputElement>('#input-digest-model').value = settings.digestModel
+  $<HTMLInputElement>('#input-learner-model').value = settings.learnerModel
+  $<HTMLInputElement>('#input-digest-topn').value = String(settings.digestTopN)
+  $<HTMLInputElement>('#input-digest-speech').checked = settings.digestForSpeech
   $<HTMLTextAreaElement>('#input-user-prompt').value = settings.userPrompt
   $<HTMLTextAreaElement>('#input-learned-prompt').value = settings.learnedPrompt
   $<HTMLInputElement>('#input-hours-back').value = String(settings.hoursBack)
