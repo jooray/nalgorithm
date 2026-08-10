@@ -29,10 +29,15 @@ import { npubEncode } from 'nostr-tools/nip19'
  * Every entry here was verified to actually *round-trip* an ephemeral kind-24133
  * event, publishing on one connection and receiving on another. That check
  * matters: a relay can accept the event and never relay it, which looks exactly
- * like a signer that never answered. `wss://relay.nsec.app` — the dedicated
- * bunker relay, and the obvious first choice — was returning HTTP 502 when this
- * list was set, and `wss://relay.damus.io` would not complete a WebSocket
- * handshake. Re-probe before adding one.
+ * like a signer that never answered.
+ *
+ * Two obvious candidates failed that probe from two independent networks when
+ * this list was set. `wss://relay.nsec.app` — the dedicated bunker relay, and
+ * the natural first choice — was returning HTTP 502. `wss://relay.damus.io`
+ * would not complete the WebSocket handshake; note it is still perfectly good
+ * as a *feed* relay, and remains in the default feed list. Being usable for
+ * content says nothing about being usable for the signer handshake, so re-probe
+ * rather than assuming.
  */
 export const DEFAULT_SIGNER_RELAYS = [
   'wss://nostr.cypherpunk.today',
