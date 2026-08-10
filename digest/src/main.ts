@@ -15,6 +15,7 @@ import {
   createRanker,
   chatCompletion,
   chatCompletionWithRetry,
+  synthesizeSpeech,
   pubkeyToHex,
   sortByRelevance,
 } from 'nalgorithm'
@@ -26,9 +27,9 @@ import type {
   LLMConfig,
 } from 'nalgorithm'
 
-import { readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { loadConfig } from './config.js'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
+import { loadConfig, parseArgs } from './config.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -254,11 +255,54 @@ function saveScoreCache(cachePath: string, cache: ScoreCacheFile): void {
   }
 }
 
+// ─── TTS output ──────────────────────────────────────────────────────────────
+
+/**
+ * Expand strftime-style tokens in an output path so repeated runs do not
+ * overwrite each other.
+ */
+function expandPathTokens(path: string, now = new Date()): string {
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const tokens: Record<string, string> = {
+    '%Y': String(now.getFullYear()),
+    '%m': pad(now.getMonth() + 1),
+    '%d': pad(now.getDate()),
+    '%H': pad(now.getHours()),
+    '%M': pad(now.getMinutes()),
+    '%S': pad(now.getSeconds()),
+  }
+  return path.replace(/%[YmdHMS]/g, (t) => tokens[t] ?? t)
+}
+
+/**
+ * Resolve where the audio should be written, or null if TTS was not requested.
+ * An explicit `--tts <path>` wins over the configured `ttsOutputPath`.
+ */
+function resolveTtsTarget(flag: string | boolean, configured?: string): string | null {
+  if (flag === false) return null
+  const target = typeof flag === 'string' ? flag : configured
+  if (!target) {
+    throw new Error(
+      '--tts was passed without a path and no "ttsOutputPath" is set in the config. ' +
+        'Either give the flag a path (--tts digest.mp3) or add "ttsOutputPath".'
+    )
+  }
+  return resolve(expandPathTokens(target))
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const scoreOnly = process.argv.includes('--score-only')
+  const args = parseArgs()
+  const scoreOnly = args.scoreOnly
   const config = loadConfig()
+
+  // Resolve the audio target up front: a misconfigured path should fail now,
+  // not after a full fetch/score/generate cycle has been paid for.
+  const ttsTarget = scoreOnly ? null : resolveTtsTarget(args.tts, config.ttsOutputPath)
+  if (ttsTarget && !config.ttsApi) {
+    throw new Error('TTS output was requested but no "ttsApi" block is configured.')
+  }
 
   const pubkeyHex = pubkeyToHex(config.npub)
   log(`Pubkey: ${pubkeyHex.slice(0, 12)}...`)
@@ -480,6 +524,9 @@ ${postsBlock}`
           { role: 'user', content: digestUserPrompt },
         ],
         false,
+        3,
+        2000,
+        config.digestApi.temperature,
       )
     } catch (primaryErr) {
       if (config.digestFallbackApi) {
@@ -495,6 +542,9 @@ ${postsBlock}`
             { role: 'user', content: digestUserPrompt },
           ],
           false,
+          3,
+          2000,
+          config.digestFallbackApi.temperature,
         )
       } else {
         throw primaryErr
@@ -504,6 +554,21 @@ ${postsBlock}`
     // 9. Output to stdout
     process.stdout.write(digest)
     process.stdout.write('\n')
+
+    // 10. Optionally synthesize the digest to audio.
+    // Deliberately after stdout: the text is the primary product, so a TTS
+    // failure must not cost you the digest you already paid to generate.
+    if (ttsTarget && config.ttsApi) {
+      log(`Synthesizing speech with ${config.ttsApi.model} → ${ttsTarget}`)
+      const audio = await synthesizeSpeech(config.ttsApi, digest, {
+        onProgress: (chunk, total) => {
+          if (total > 1) log(`  TTS chunk ${chunk}/${total}`)
+        },
+      })
+      mkdirSync(dirname(ttsTarget), { recursive: true })
+      writeFileSync(ttsTarget, audio)
+      log(`Wrote ${(audio.length / 1024).toFixed(0)} KB of audio to ${ttsTarget}`)
+    }
 
     log('Done!')
   } finally {

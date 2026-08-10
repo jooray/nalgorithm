@@ -9,20 +9,36 @@
   "rankingApi": {
     "apiBaseUrl": "https://api.venice.ai/api/v1",
     "apiKey": "$VENICE_API_KEY",
-    "model": "google-gemma-3-27b-it",
-    "batchSize": 20
+    "model": "deepseek-v4-flash-0731",
+    "batchSize": 20,
+    "concurrency": 3
   },
   "digestApi": {
     "apiBaseUrl": "https://api.venice.ai/api/v1",
     "apiKey": "$VENICE_API_KEY",
-    "model": "claude-sonnet-4-6",
+    "model": "kimi-k3",
+    "temperature": 0.7
+  },
+  "digestFallbackApi": {
+    "apiBaseUrl": "https://api.venice.ai/api/v1",
+    "apiKey": "$VENICE_API_KEY",
+    "model": "qwen-3-6-plus",
     "temperature": 0.7
   },
   "learnerApi": {
     "apiBaseUrl": "https://api.venice.ai/api/v1",
     "apiKey": "$VENICE_API_KEY",
-    "model": "gemini-3-flash-preview"
+    "model": "kimi-k3"
   },
+  "ttsApi": {
+    "apiBaseUrl": "https://api.venice.ai/api/v1",
+    "apiKey": "$VENICE_API_KEY",
+    "model": "tts-kokoro",
+    "voice": "af_sky",
+    "speed": 1.0,
+    "format": "mp3"
+  },
+  "ttsOutputPath": "./digests/nalgorithm-%Y-%m-%d.mp3",
   "userPrompt": "I'm interested in Bitcoin, Lightning Network, Nostr protocol development, privacy tech, open-source software, and cypherpunk philosophy.",
   "learnFromLikes": true,
   "learnedPromptCache": "./digest.learned.json",

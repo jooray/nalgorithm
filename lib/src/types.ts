@@ -170,6 +170,31 @@ export interface LLMConfig {
   model: string
 }
 
+// ─── TTS types ───────────────────────────────────────────────────────────────
+
+/** Audio container requested from the `/audio/speech` endpoint. */
+export type TTSFormat = 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm'
+
+export interface TTSConfig {
+  /** OpenAI-compatible API base URL (e.g. "https://api.venice.ai/api/v1") */
+  apiBaseUrl: string
+  /** API key for the TTS endpoint */
+  apiKey: string
+  /** Model name (e.g. "tts-kokoro") */
+  model: string
+  /** Voice id, provider-specific (e.g. "af_sky" on Venice's Kokoro) */
+  voice?: string
+  /** Playback rate multiplier (default: provider's own, usually 1.0) */
+  speed?: number
+  /** Output format (default: "mp3" — the only one safe to join across chunks) */
+  format?: TTSFormat
+  /**
+   * Maximum characters per request (default: 4096, Venice's limit).
+   * Longer text is split on natural boundaries and the audio is joined.
+   */
+  maxChars?: number
+}
+
 // ─── Fetcher interface ───────────────────────────────────────────────────────
 
 export interface Fetcher {

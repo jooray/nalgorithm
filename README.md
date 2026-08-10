@@ -36,7 +36,9 @@ Some options I've tested:
 - **Ollama local** -- works if you set `OLLAMA_ORIGINS=*` before starting it.
 - **Ollama Cloud** (`https://ollama.com/v1`) -- no CORS headers, so you need a proxy for the web app. I use a simple Caddy reverse proxy on localhost.
 
-I run **gemma3:27b** through Ollama Cloud for scoring. It's cheap, fast at structured JSON output, and works on the free tier. Other models that work well: `minimax-m2.5`, `qwen3-next:80b` if you want more depth.
+For the web app I've run **gemma3:27b** through Ollama Cloud for scoring -- cheap, fast at structured JSON output, and it works on the free tier. `minimax-m2.5` and `qwen3-next:80b` also work if you want more depth.
+
+My daily digest runs on Venice: `deepseek-v4-flash-0731` for scoring, `kimi-k3` for writing the digest and for learning from likes, `qwen-3-6-plus` as the digest fallback, and `tts-kokoro` for the audio.
 
 ## Project structure
 
@@ -112,15 +114,52 @@ You can use different LLM models for each step:
 
 | Step | Config key | What it does | Recommended |
 |------|-----------|--------------|-------------|
-| Scoring | `rankingApi` | Scores posts 0-10 by relevance | Fast, cheap model (`google-gemma-3-27b-it`) |
-| Learning | `learnerApi` | Summarizes your likes into preferences | Optional, falls back to `rankingApi` |
-| Digest | `digestApi` | Writes the final narrative | Stronger model (`claude-sonnet-4-6`) |
+| Scoring | `rankingApi` | Scores posts 0-10 by relevance | Fast, cheap model (`deepseek-v4-flash-0731`) |
+| Learning | `learnerApi` | Summarizes your likes into preferences | Large context (`kimi-k3`); falls back to `rankingApi` |
+| Digest | `digestApi` | Writes the final narrative | Stronger model (`kimi-k3`) |
+| Digest fallback | `digestFallbackApi` | Retries the digest if the primary fails | Different model (`qwen-3-6-plus`) |
+| Speech | `ttsApi` | Reads the digest aloud | `tts-kokoro` (see below) |
 
-All three can point to different providers and models.
+They can all point to different providers and models.
+
+The scoring model does the bulk of the work (hundreds of posts per day), so it
+should be cheap. The digest model runs once per day on ~15 posts, so it can
+afford to be good. The learner needs a large context window because it
+summarizes up to 50 likes in one prompt — small-context models return HTTP 400
+here.
+
+### Digest fallback
+
+Strong models are the ones most likely to be rate-limited. If `digestApi` fails
+after its retries are exhausted (429, overload, network), and `digestFallbackApi`
+is set, the whole digest prompt is retried against that second model. Without
+it, a 429 at the digest step loses the run — including the scoring you already
+paid for.
 
 ### Score caching
 
-Scores are saved to a local JSON file (`digest.scores.json` by default). On each run, only new posts get scored -- cached scores are reused. The cache auto-prunes entries older than 2x your `hoursBack` setting (minimum 48 hours). Posts that failed scoring and got a default fallback score are not cached.
+Scores are saved to a local JSON file (`digest.scores.json` by default). On each run, only new posts get scored -- cached scores are reused. Entries older than `scoreCacheTTLDays` (90 by default) are pruned on load. Posts that failed scoring and got a default fallback score are not cached, so they get another chance next run.
+
+Scores are deterministic, so a long TTL is fine and re-scoring old posts buys you nothing. The side effect is that the cache accumulates a few months of scored posts, which you can query directly if you want "best of the last quarter" rather than "best of today".
+
+### Pre-warming the cache (`--score-only`)
+
+A cold run has to score everything before it can write anything. With
+`maxPosts: 500` and `batchSize: 20` that's 25 sequential LLM calls -- around ten
+minutes.
+
+`--score-only` fetches and scores posts, updates the cache, and exits without
+generating a digest or writing to stdout:
+
+```bash
+node digest/dist/main.js digest.config.json --score-only
+```
+
+Run it on a timer through the day, and the daily digest only has to score the
+handful of posts that arrived since the last pass. This is the reason to keep
+`maxPosts` high rather than lowering it to make cold runs bearable -- and
+`"concurrency": 3` in `rankingApi` scores three batches in parallel on top of
+that.
 
 ### Learned prompt
 
@@ -132,9 +171,67 @@ If `learnFromLikes` is true (the default), the tool fetches your recent Nostr li
 
 The learned prompt is passed alongside your `userPrompt` to both the scoring and digest generation steps.
 
-### TTS variant
+### Text to speech
 
-There's a TTS-aware config example (`digest.config.tts.example.json`) with prompts tuned for text-to-speech output: no markdown formatting, spelled-out version numbers and abbreviations, shorter format (~800-1200 words). Use this if you're piping the output into a TTS engine.
+The digest can read itself aloud. Add a `ttsApi` block and the finished text is
+synthesized to an audio file alongside the stdout output:
+
+```json
+"ttsApi": {
+  "apiBaseUrl": "https://api.venice.ai/api/v1",
+  "apiKey": "$VENICE_API_KEY",
+  "model": "tts-kokoro",
+  "voice": "af_sky",
+  "speed": 1.0,
+  "format": "mp3"
+},
+"ttsOutputPath": "./digests/nalgorithm-%Y-%m-%d.mp3"
+```
+
+Then run with `--tts`:
+
+```bash
+node digest/dist/main.js digest.config.json --tts
+node digest/dist/main.js digest.config.json --tts /tmp/today.mp3   # override the path
+```
+
+`ttsOutputPath` understands `%Y %m %d %H %M %S`, so each run gets its own file
+instead of overwriting yesterday's.
+
+This uses the OpenAI-compatible `/audio/speech` endpoint, so it works with
+Venice, OpenAI, or a local server that speaks the same shape. Venice's TTS
+models, cheapest first:
+
+| Model | $/M chars | Voices | Notes |
+|-------|----------:|-------:|-------|
+| `tts-kokoro` | 3.50 | 54 | Best value; the only one offering formats beyond mp3/wav |
+| `tts-inworld-1-5-max` | 12.50 | 14 | wav only |
+| `tts-xai-v1` | 18.75 | 26 | |
+| `tts-gradium-v1` | 47.50 | 12 | |
+| `tts-chatterbox-hd` | 50.00 | 9 | |
+| `tts-orpheus` | 62.50 | 8 | |
+| `tts-elevenlabs-turbo-v2-5` | 62.50 | 21 | |
+| `tts-qwen3-0-6b` | 87.50 | 9 | |
+| `tts-qwen3-1-7b` | 112.50 | 9 | |
+| `tts-minimax-speech-02-hd` | 125.00 | 15 | |
+| `tts-gemini-3-1-flash` | 187.50 | 30 | |
+
+A 1000-word digest is roughly 6000 characters, so `tts-kokoro` costs about two
+cents per run and `tts-gemini-3-1-flash` a bit over a dollar.
+
+**On chunking:** Venice rejects any single request over **4096 characters**, and
+a spoken digest is comfortably longer than that. The text is split on paragraph
+breaks (falling back to sentences, then words) and the audio is joined back
+together, with ID3 tags stripped from continuation chunks so the result is one
+clean stream. This is why `format` should stay `mp3` for long digests -- `wav`,
+`flac`, `opus` and `aac` carry per-file headers that cannot be concatenated
+without a real muxer, so the tool refuses rather than emitting a broken file.
+`pcm` is also safe to join.
+
+Keep the TTS-tuned prompts in mind too: `digest.config.tts.example.json` has
+prompts that suppress markdown, spell out version numbers and abbreviations, and
+target ~800-1200 words. Feeding a markdown-formatted digest to a TTS engine
+means listening to it read asterisks aloud.
 
 ### All config options
 
@@ -144,17 +241,106 @@ There's a TTS-aware config example (`digest.config.tts.example.json`) with promp
 | `relays` | required | Array of relay WebSocket URLs |
 | `rankingApi` | required | `{apiBaseUrl, apiKey, model, batchSize?, concurrency?}` for post scoring |
 | `digestApi` | required | `{apiBaseUrl, apiKey, model, temperature?}` for digest generation |
+| `digestFallbackApi` | none | Same shape as `digestApi`. Used if the primary digest model fails after retries |
 | `learnerApi` | falls back to `rankingApi` | `{apiBaseUrl, apiKey, model}` for preference learning |
+| `ttsApi` | none | `{apiBaseUrl, apiKey, model, voice?, speed?, format?, maxChars?}` for speech synthesis |
+| `ttsOutputPath` | none | Where to write audio. Supports `%Y %m %d %H %M %S` |
 | `userPrompt` | required | Describe your interests and what to filter out |
 | `learnFromLikes` | `true` | Whether to learn preferences from your likes |
 | `likesBatchSize` | `50` | Likes per preference-learning batch. Reduce if your model has a small context window |
 | `learnedPromptCache` | `./digest.learned.json` | Path to the learned prompt file |
 | `scoreCachePath` | `./digest.scores.json` | Path to the score cache file |
+| `scoreCacheTTLDays` | `90` | How long to keep cached scores before pruning |
 | `hoursBack` | `24` | How far back to fetch posts |
-| `maxPosts` | `500` | Cap on posts fetched per run. Lower this (e.g. `200`) for faster daily runs |
+| `maxPosts` | `500` | Cap on posts fetched per run. Prefer `--score-only` pre-warming over lowering this |
 | `topN` | `15` | Number of top posts to include in the digest |
 | `digestSystemPrompt` | built-in | System prompt for digest generation. Humanizer rules are always appended automatically |
 | `digestPrompt` | built-in | User prompt template for digest generation |
+
+### Command-line flags
+
+| Flag | What it does |
+|------|--------------|
+| *(first positional arg)* | Path to the config file. Defaults to `./digest.config.json` |
+| `--score-only` | Score posts into the cache and exit. No digest, no stdout output |
+| `--tts [path]` | Also synthesize the digest to audio. Without a path, uses `ttsOutputPath` |
+
+## Running it on a schedule
+
+This is how the digest runs daily on my server: two systemd user timers, one
+pre-warming the score cache through the day, one generating the digest in the
+morning. Adapt the paths and drop them in `~/.config/systemd/user/`.
+
+`nalgorithm-score.service` -- keeps the cache warm so the morning run is fast:
+
+```ini
+[Unit]
+Description=Nalgorithm score cache refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/nalgorithm/digest
+EnvironmentFile=%h/.config/nalgorithm/env
+ExecStart=/usr/bin/node dist/main.js digest.config.json --score-only
+```
+
+`nalgorithm-score.timer`:
+
+```ini
+[Unit]
+Description=Nalgorithm score cache refresh every 3 hours
+
+[Timer]
+OnCalendar=*-*-* 04,07,10,13,16,19,22:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+`nalgorithm-digest.service` -- the daily digest, with audio:
+
+```ini
+[Unit]
+Description=Generate the Nalgorithm morning digest
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/nalgorithm/digest
+EnvironmentFile=%h/.config/nalgorithm/env
+ExecStart=/usr/bin/node dist/main.js digest.config.json --tts
+```
+
+`nalgorithm-digest.timer` (same shape, `OnCalendar=*-*-* 07:00:00`).
+
+Put your key in `~/.config/nalgorithm/env` as `VENICE_API_KEY=...` and reference
+it as `$VENICE_API_KEY` in the config -- `EnvironmentFile` keeps it out of the
+unit file, which is world-readable. `chmod 600` it.
+
+Enable with:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now nalgorithm-score.timer nalgorithm-digest.timer
+systemctl --user list-timers | grep nalgorithm
+```
+
+Two things worth knowing:
+
+- **`Persistent=true`** re-runs a timer that was missed while the machine was
+  off. Without it, a laptop that sleeps through 07:00 silently gets no digest.
+- **Order matters.** Anything consuming the digest (a voice bot, a note in your
+  vault) should be scheduled after the generator, not alongside it.
+
+To keep the text as well as the audio, redirect stdout:
+
+```bash
+node dist/main.js digest.config.json --tts > "$HOME/digests/$(date +%F).md"
+```
 
 ## Caddy CORS proxy for Ollama Cloud
 

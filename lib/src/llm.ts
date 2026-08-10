@@ -79,12 +79,13 @@ export async function chatCompletionWithRetry(
   messages: ChatMessage[],
   jsonMode = false,
   maxAttempts = 3,
-  baseDelayMs = 2000
+  baseDelayMs = 2000,
+  temperature = 0.3
 ): Promise<string> {
   let lastErr: Error | undefined
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await chatCompletion(config, messages, jsonMode)
+      return await chatCompletion(config, messages, jsonMode, temperature)
     } catch (err) {
       lastErr = err as Error
       if (attempt < maxAttempts) {

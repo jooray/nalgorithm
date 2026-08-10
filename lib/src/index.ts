@@ -10,6 +10,8 @@ export { createFetcher, pubkeyToHex } from './fetcher.js'
 export { createRanker, sortByRelevance } from './ranker.js'
 export { createLearner } from './learner.js'
 export { chatCompletion, chatCompletionWithRetry } from './llm.js'
+export { synthesizeSpeech, splitTextForTTS, DEFAULT_TTS_MAX_CHARS } from './tts.js'
+export type { SynthesizeOptions } from './tts.js'
 
 export type {
   // Config
@@ -42,6 +44,10 @@ export type {
 
   // LLM
   ChatMessage,
+
+  // TTS
+  TTSConfig,
+  TTSFormat,
 
   // Nostr
   NostrEvent,
