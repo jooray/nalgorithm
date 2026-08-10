@@ -207,6 +207,16 @@ export interface LLMConfig {
   model: string
   /** Omitted from the request entirely when unset, so non-supporting models are unaffected. */
   reasoningEffort?: ReasoningEffort
+  /**
+   * Abort a request that produces no response within this many milliseconds
+   * (default: 120000).
+   *
+   * `fetch` has no timeout of its own: a connection the provider accepts and
+   * then stalls on will hang forever. In a scheduled run that is worse than an
+   * error, because a `Type=oneshot` unit stays "activating" and systemd skips
+   * every subsequent trigger.
+   */
+  timeoutMs?: number
 }
 
 // ─── TTS types ───────────────────────────────────────────────────────────────
@@ -232,6 +242,8 @@ export interface TTSConfig {
    * Longer text is split on natural boundaries and the audio is joined.
    */
   maxChars?: number
+  /** Abort a chunk that produces no response within this many ms (default: 180000). */
+  timeoutMs?: number
 }
 
 // ─── Fetcher interface ───────────────────────────────────────────────────────

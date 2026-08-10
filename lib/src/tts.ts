@@ -186,14 +186,24 @@ async function synthesizeChunk(config: TTSConfig, text: string, format: TTSForma
   if (config.voice) body.voice = config.voice
   if (config.speed !== undefined) body.speed = config.speed
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify(body),
-  })
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      // Synthesis is slower than a chat call, but must still not hang forever.
+      signal: AbortSignal.timeout(config.timeoutMs ?? 180_000),
+    })
+  } catch (err) {
+    if ((err as Error).name === 'TimeoutError' || (err as Error).name === 'AbortError') {
+      throw new Error('TTS API timed out')
+    }
+    throw err
+  }
 
   if (!res.ok) {
     const errorBody = await res.text()

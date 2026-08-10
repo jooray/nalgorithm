@@ -4,6 +4,9 @@
 
 import type { ChatMessage, LLMConfig } from './types.js'
 
+/** Fail a stalled request rather than hanging a scheduled run forever. */
+const DEFAULT_TIMEOUT_MS = 120_000
+
 interface ChatCompletionResponse {
   choices: Array<{
     message: {
@@ -46,14 +49,27 @@ export async function chatCompletion(
     body.response_format = { type: 'json_object' }
   }
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify(body),
-  })
+  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
+
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+  } catch (err) {
+    // Surface a timeout as a normal error so the retry path can handle it,
+    // rather than letting the call hang indefinitely.
+    if ((err as Error).name === 'TimeoutError' || (err as Error).name === 'AbortError') {
+      throw new Error(`LLM API timed out after ${timeoutMs}ms`)
+    }
+    throw err
+  }
 
   if (!res.ok) {
     const errorBody = await res.text()
