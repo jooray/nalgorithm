@@ -12,17 +12,72 @@
 
 import type { ScoredPost, EmbeddedPost, ProfileData } from 'nalgorithm'
 import * as nip19 from 'nostr-tools/nip19'
+import { buildEventUrl, clientLabel, type ClientPreset } from './client-url.js'
 
 export interface RenderOptions {
   profiles?: Map<string, ProfileData>
-  njumpBaseUrl?: string
+  /** URL template for "open in client" — may contain {e} or be a prefix. */
+  eventUrlTemplate?: string
+  /** Which preset is selected, for the menu label. */
+  clientPreset?: ClientPreset
+}
+
+/**
+ * A post as displayed. Plain boosts of the same original are collapsed into one
+ * card, so `boostedBy` lists everyone who boosted it.
+ */
+export interface DisplayPost extends ScoredPost {
+  boostedBy?: string[]
+}
+
+/**
+ * Collapse plain boosts of the same post into a single entry.
+ *
+ * Kind-6 reposts carry no commentary, so five people boosting one note is five
+ * identical cards. Quote posts are left alone — those have something to say.
+ * The highest score wins, since the ranker sees each copy separately and we
+ * want the best judgement of the underlying content.
+ */
+export function aggregateBoosts(posts: ScoredPost[]): DisplayPost[] {
+  const out: DisplayPost[] = []
+  const byOriginal = new Map<string, DisplayPost>()
+
+  for (const post of posts) {
+    const originalId = post.type === 'boost' ? post.originalPost?.id : undefined
+    if (!originalId) {
+      out.push(post)
+      continue
+    }
+
+    const existing = byOriginal.get(originalId)
+    if (!existing) {
+      const entry: DisplayPost = { ...post, boostedBy: [post.author] }
+      byOriginal.set(originalId, entry)
+      out.push(entry)
+      continue
+    }
+
+    if (!existing.boostedBy!.includes(post.author)) {
+      existing.boostedBy!.push(post.author)
+    }
+    // Keep the most favourable score and its reasoning.
+    if (post.score > existing.score) {
+      existing.score = post.score
+      existing.justification = post.justification
+      existing.defaultScore = post.defaultScore
+    }
+    // Show the most recent boost time.
+    if (post.createdAt > existing.createdAt) existing.createdAt = post.createdAt
+  }
+
+  return out
 }
 
 /**
  * Render a list of scored posts into the feed container.
  */
 export function renderFeed(
-  posts: ScoredPost[],
+  posts: DisplayPost[],
   container: HTMLElement,
   options: RenderOptions = {}
 ): void {
@@ -41,7 +96,7 @@ export function renderFeed(
 /**
  * Render a single post card.
  */
-function renderPostCard(post: ScoredPost, options: RenderOptions): HTMLElement {
+function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement {
   const card = el('article', 'post-card')
 
   // ── Header: profile pic + name + type label + timestamp ──
@@ -91,6 +146,13 @@ function renderPostCard(post: ScoredPost, options: RenderOptions): HTMLElement {
 
   // ── Content ──
   if (post.type === 'boost' && post.originalPost) {
+    // When several people boosted the same note, name them all on one line
+    // rather than repeating the note once per booster.
+    if (post.boostedBy && post.boostedBy.length > 1) {
+      const line = el('div', 'boosted-by')
+      line.textContent = `${formatBoosterList(post.boostedBy, options.profiles)} boosted it`
+      card.appendChild(line)
+    }
     const embedded = renderEmbeddedPost(post.originalPost, options)
     card.appendChild(embedded)
   } else {
@@ -172,8 +234,7 @@ function renderPostCard(post: ScoredPost, options: RenderOptions): HTMLElement {
     closeDropdown()
   })
 
-  const baseUrl = (options.njumpBaseUrl ?? 'https://njump.me/').replace(/\/?$/, '/')
-  const postUrl = baseUrl + neventStr
+  const postUrl = buildEventUrl(options.eventUrlTemplate ?? '', neventStr)
 
   const copyUrlItem = el('button', 'post-menu-item')
   copyUrlItem.textContent = 'Copy URL'
@@ -184,7 +245,7 @@ function renderPostCard(post: ScoredPost, options: RenderOptions): HTMLElement {
   })
 
   const openUrlItem = el('button', 'post-menu-item')
-  openUrlItem.textContent = 'Open in njump'
+  openUrlItem.textContent = `Open in ${clientLabel(options.clientPreset ?? 'njump')}`
   openUrlItem.addEventListener('click', (e) => {
     e.stopPropagation()
     window.open(postUrl, '_blank', 'noopener')
@@ -223,7 +284,7 @@ function renderPostCard(post: ScoredPost, options: RenderOptions): HTMLElement {
  */
 function renderEmbeddedPost(post: EmbeddedPost, options: RenderOptions): HTMLElement {
   const container = el('div', 'embedded-post')
-  const njumpBase = (options.njumpBaseUrl ?? 'https://njump.me/').replace(/\/?$/, '/')
+  const profileBase = options.eventUrlTemplate ?? ''
 
   // ── Header: avatar + name (like top-level posts) ──
   const header = el('div', 'embedded-header')
@@ -251,7 +312,7 @@ function renderEmbeddedPost(post: EmbeddedPost, options: RenderOptions): HTMLEle
   const displayName = profile?.name ?? formatAuthor(post.author)
   const npub = nip19.npubEncode(post.author)
   const authorLink = document.createElement('a')
-  authorLink.href = njumpBase + npub
+  authorLink.href = buildEventUrl(profileBase, npub)
   authorLink.target = '_blank'
   authorLink.rel = 'noopener'
   authorLink.textContent = displayName
@@ -308,7 +369,7 @@ function decodeNostrPubkey(bech32: string): string | null {
  * and build HTML for the special tokens from unescaped source data.
  */
 function formatContent(content: string, options: RenderOptions = {}): string {
-  const njumpBase = (options.njumpBaseUrl ?? 'https://njump.me/').replace(/\/?$/, '/')
+  const profileBase = options.eventUrlTemplate ?? ''
   const profiles = options.profiles
 
   // Tokenize: match nostr: references and URLs as special tokens
@@ -335,11 +396,11 @@ function formatContent(content: string, options: RenderOptions = {}): string {
         const pubkey = decodeNostrPubkey(nostrBech32)
         const profile = pubkey ? profiles?.get(pubkey) : undefined
         const displayName = profile?.name ?? nostrBech32.slice(0, 16) + '...'
-        const href = njumpBase + nostrBech32
+        const href = buildEventUrl(profileBase, nostrBech32)
         result += `<a href="${escapeAttr(href)}" target="_blank" rel="noopener" class="nostr-profile-link" title="${escapeAttr(pubkey ?? nostrBech32)}">@${escapeHtml(displayName)}</a>`
       } else {
         // Event/note/addr reference — generic link
-        const href = njumpBase + nostrBech32
+        const href = buildEventUrl(profileBase, nostrBech32)
         result += `<a href="${escapeAttr(href)}" target="_blank" rel="noopener" class="nostr-ref-link">[referenced post]</a>`
       }
     } else {
@@ -422,12 +483,49 @@ function extractMediaFromContent(content: string): MediaItem[] {
  */
 function renderMedia(item: MediaItem): HTMLElement {
   if (item.type === 'video') {
-    const video = document.createElement('video')
-    video.src = item.url
-    video.controls = true
-    video.preload = 'metadata'
-    video.muted = true
-    return video
+    // Click-to-load rather than a <video src> with preload="metadata".
+    //
+    // "metadata" is not the small fetch it sounds like. For an MP4 whose moov
+    // atom sits at the end of the file — anything not written with faststart —
+    // the browser has to hunt for it, and in practice pulls hundreds of
+    // kilobytes to several megabytes per clip. A 500-post feed carried 34
+    // videos, the sampled ones totalling ~400 MB of source material, none of
+    // which anyone had asked to watch. (The hosts themselves are fine: all 12
+    // sampled honour Range correctly. The waste is on our side.)
+    //
+    // Requesting nothing until the placeholder is clicked sidesteps the whole
+    // question.
+    const holder = el('div', 'video-placeholder')
+    holder.setAttribute('role', 'button')
+    holder.setAttribute('tabindex', '0')
+    holder.title = item.url
+
+    const play = el('div', 'video-play-icon')
+    play.textContent = '▶'
+    const label = el('div', 'video-placeholder-label')
+    label.textContent = 'Load video'
+    holder.appendChild(play)
+    holder.appendChild(label)
+
+    const load = (): void => {
+      const video = document.createElement('video')
+      video.src = item.url
+      video.controls = true
+      video.autoplay = true
+      video.muted = true
+      video.playsInline = true
+      video.className = 'post-video'
+      holder.replaceWith(video)
+    }
+
+    holder.addEventListener('click', load)
+    holder.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+        e.preventDefault()
+        load()
+      }
+    })
+    return holder
   }
 
   const img = document.createElement('img')
@@ -438,6 +536,24 @@ function renderMedia(item: MediaItem): HTMLElement {
     img.style.display = 'none'
   }
   return img
+}
+
+/**
+ * "alice, bob and carol" — with a cap, because a viral note can be boosted by
+ * dozens of people and the list would swamp the post itself.
+ */
+function formatBoosterList(pubkeys: string[], profiles?: Map<string, ProfileData>): string {
+  const MAX_NAMED = 3
+  const names = pubkeys.map((pk) => profiles?.get(pk)?.name ?? formatAuthor(pk))
+
+  if (names.length <= MAX_NAMED) {
+    if (names.length === 1) return names[0]
+    return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+  }
+
+  const shown = names.slice(0, MAX_NAMED).join(', ')
+  const rest = names.length - MAX_NAMED
+  return `${shown} and ${rest} ${rest === 1 ? 'other' : 'others'}`
 }
 
 // ─── Utility helpers ─────────────────────────────────────────────────────────

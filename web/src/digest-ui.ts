@@ -5,7 +5,7 @@
  * aloud with the browser's own speech engine.
  */
 
-import { generateDigest, type ProfileData, type ScoredPost } from 'nalgorithm'
+import { generateDigest, synthesizeSpeech, type ProfileData, type ScoredPost } from 'nalgorithm'
 import {
   isSpeechSupported,
   listVoices,
@@ -17,6 +17,8 @@ import type { AppSettings } from './settings.js'
 let panel: HTMLElement | null = null
 let session: SpeechSession | null = null
 let currentText = ''
+/** Kept so the download button can reach the TTS credentials. */
+let lastSettings: AppSettings | null = null
 
 /** Remember the chosen voice across digests within a session. */
 let preferredVoice = ''
@@ -38,15 +40,20 @@ export function stopDigestSpeech(): void {
 export async function showDigest(
   posts: ScoredPost[],
   profiles: Map<string, ProfileData>,
-  settings: AppSettings
+  settings: AppSettings,
+  onStatus?: (text: string) => void
 ): Promise<void> {
   const el = ensurePanel()
   el.classList.remove('hidden')
+  // The panel sits above the feed, so someone who clicked Digest while scrolled
+  // down would otherwise see nothing happen at all.
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   const body = el.querySelector<HTMLElement>('.digest-body')!
   const status = el.querySelector<HTMLElement>('.digest-status')!
   const controls = el.querySelector<HTMLElement>('.digest-controls')!
 
+  lastSettings = settings
   stopDigestSpeech()
   controls.classList.add('hidden')
   body.textContent = ''
@@ -59,7 +66,23 @@ export async function showDigest(
   // Blank means "reuse the scoring model", so the user only fills this in when
   // they actually want a different one.
   const model = settings.digestModel.trim() || settings.model
-  status.textContent = `Writing digest with ${model}…`
+  onStatus?.(`Writing digest with ${model}…`)
+
+  // Reasoning models buffer before emitting anything — kimi-k3 measured 5.7s of
+  // silence out of a 6.4s generation. So the spinner runs on its own clock and
+  // shows elapsed seconds: during the quiet stretch that is the only signal
+  // distinguishing "thinking" from "hung", and the word count takes over once
+  // tokens actually start arriving.
+  const frames = ['|', '/', '-', '\\']
+  let frame = 0
+  let streamed = ''
+  const startedAt = Date.now()
+  const tick = window.setInterval(() => {
+    frame = (frame + 1) % frames.length
+    const seconds = Math.round((Date.now() - startedAt) / 1000)
+    const progress = streamed ? `${seconds}s, ${wordCount(streamed)} words` : `${seconds}s, thinking`
+    status.textContent = `${frames[frame]} Writing digest with ${model} (${progress})…`
+  }, 120)
 
   try {
     const text = await generateDigest(
@@ -75,18 +98,28 @@ export async function showDigest(
         learnedPrompt: settings.learnedPrompt || undefined,
         topN: settings.digestTopN,
         forSpeech: settings.digestForSpeech,
+        onDelta: (piece) => {
+          streamed += piece
+          renderDigestText(body, streamed)
+        },
       }
     )
 
+    clearInterval(tick)
     currentText = text.trim()
     renderDigestText(body, currentText)
 
     const used = Math.min(settings.digestTopN, posts.length)
-    status.textContent = `${used} posts, ${wordCount(currentText)} words, ${model}`
+    const summary = `${used} posts, ${wordCount(currentText)} words, ${model}`
+    status.textContent = summary
+    onStatus?.(`Digest ready — ${summary}`)
     controls.classList.remove('hidden')
     await populateVoices(el)
   } catch (err) {
-    status.textContent = `Digest failed: ${(err as Error).message}`
+    clearInterval(tick)
+    const message = `Digest failed: ${(err as Error).message}`
+    status.textContent = message
+    onStatus?.(message)
   }
 }
 
@@ -172,6 +205,7 @@ function ensurePanel(): HTMLElement {
         <span class="digest-rate-value">1.0x</span>
       </label>
       <button class="btn btn-small digest-copy">Copy</button>
+      <button class="btn btn-small digest-download">Download MP3</button>
     </div>
     <div class="digest-body"></div>
   `
@@ -214,6 +248,50 @@ function ensurePanel(): HTMLElement {
   stopBtn.addEventListener('click', () => {
     stopDigestSpeech()
     status.textContent = 'Stopped.'
+  })
+
+  // Download: the browser's speech engine gives no access to its audio, so
+  // this goes through the configured TTS provider instead. Requires a ttsApi
+  // model to be set; browser playback stays free and instant.
+  panel.querySelector<HTMLButtonElement>('.digest-download')!.addEventListener('click', async () => {
+    const btn = panel!.querySelector<HTMLButtonElement>('.digest-download')!
+    if (!lastSettings?.ttsModel.trim()) {
+      status.textContent =
+        'Set a TTS model in Settings to download audio (browser speech cannot be recorded).'
+      return
+    }
+    btn.disabled = true
+    const original = btn.textContent
+    try {
+      const audio = await synthesizeSpeech(
+        {
+          apiBaseUrl: lastSettings.apiBaseUrl,
+          apiKey: lastSettings.apiKey,
+          model: lastSettings.ttsModel.trim(),
+          voice: lastSettings.ttsVoice.trim() || undefined,
+          format: 'mp3',
+        },
+        currentText,
+        {
+          onProgress: (chunk, total) => {
+            btn.textContent = total > 1 ? `Synthesizing ${chunk}/${total}…` : 'Synthesizing…'
+          },
+        }
+      )
+      const blob = new Blob([audio as BlobPart], { type: 'audio/mpeg' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `nalgorithm-digest-${new Date().toISOString().slice(0, 10)}.mp3`
+      link.click()
+      URL.revokeObjectURL(url)
+      status.textContent = `Downloaded ${(blob.size / 1024 / 1024).toFixed(1)} MB of audio.`
+    } catch (err) {
+      status.textContent = `Audio failed: ${(err as Error).message}`
+    } finally {
+      btn.disabled = false
+      btn.textContent = original
+    }
   })
 
   panel.querySelector<HTMLButtonElement>('.digest-copy')!.addEventListener('click', async () => {

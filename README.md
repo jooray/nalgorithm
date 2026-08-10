@@ -18,6 +18,8 @@ Scores are cached locally (localStorage in the web app, a JSON file for the CLI)
 - **Quote posts** (kind 1 with `nostr:` references) -- scores the quote + embedded post together
 - **Boosts** (kind 6) -- resolves and scores the original content
 - Replies are filtered out
+- Plain boosts of the same note are merged into one card ("alice, bob and carol boosted it")
+- Videos are click-to-load, so a feed full of clips costs no bandwidth until you ask for one
 - Profile pictures and display names are fetched and shown
 - `nostr:npub` and `nostr:nprofile` references in post content are resolved to clickable @names
 
@@ -34,7 +36,20 @@ and scored, so it costs exactly one extra LLM call.
 **Read aloud** uses the browser's own speech engine (Web Speech API). No TTS
 provider, no API key, nothing leaves the device — the tradeoff is that voice
 quality is whatever your OS ships. Pick a voice, set the speed, pause and
-resume. For better voices, use the CLI's `ttsApi` with a real TTS model.
+resume.
+
+**Download MP3** is a separate path, and has to be. The Web Speech API gives no
+access to the audio it produces: there is no stream to tap, no buffer to read,
+and nothing to record. Saving a file therefore means synthesizing it again
+through a real TTS provider. Set a TTS model (`tts-kokoro` on Venice, about 2.7
+cents for a typical digest) and the button appears. Browser playback stays free
+and instant; the download is what costs.
+
+The digest streams as it is written, so you can watch it appear. Worth knowing
+that reasoning models buffer before emitting anything — `kimi-k3` measured 5.7
+seconds of silence out of a 6.4 second generation — so the status line also
+shows a spinner and elapsed time. During that quiet stretch it is the only
+thing distinguishing "thinking" from "hung".
 
 Two Chrome quirks are handled, because both make long text fail in ways that
 look like your fault: utterances over a couple hundred characters get truncated

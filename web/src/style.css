@@ -999,3 +999,50 @@ select {
   font-family: var(--font-mono);
   font-size: 0.78rem;
 }
+
+/* ─── Click-to-load video ──────────────────────────────────────────────────── */
+
+.video-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: center;
+  justify-content: center;
+  min-height: 140px;
+  margin-top: 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.video-placeholder:hover,
+.video-placeholder:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
+.video-play-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.video-placeholder-label {
+  font-size: 0.78rem;
+}
+
+.post-video {
+  width: 100%;
+  margin-top: 0.5rem;
+  border-radius: var(--radius-sm);
+}
+
+/* Boost aggregation */
+.boosted-by {
+  margin-bottom: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}

@@ -150,6 +150,10 @@ export function initUI(
     catalogStatus.textContent = 'Recommended models filled in'
   })
 
+  // Client picker: the custom field only matters for the custom option
+  const selectClient = $<HTMLSelectElement>('#select-client')
+  selectClient.addEventListener('change', () => toggleCustomClientField(selectClient.value))
+
   // Clear scores
   const btnClearScores = $<HTMLButtonElement>('#btn-clear-scores')
   btnClearScores.addEventListener('click', () => {
@@ -271,7 +275,11 @@ export function readFieldsToSettings(): AppSettings {
     hoursBack: parseInt($<HTMLInputElement>('#input-hours-back').value, 10) || 24,
     batchSize: parseInt($<HTMLInputElement>('#input-batch-size').value, 10) || 20,
     concurrency: Math.max(1, parseInt($<HTMLInputElement>('#input-concurrency').value, 10) || 1),
-    njumpBaseUrl: $<HTMLInputElement>('#input-njump-base').value.trim() || 'https://njump.me/',
+    clientPreset: $<HTMLSelectElement>('#select-client').value as AppSettings['clientPreset'],
+    clientCustomUrl: $<HTMLInputElement>('#input-client-custom').value.trim(),
+    autoRefresh: $<HTMLInputElement>('#input-auto-refresh').checked,
+    ttsModel: $<HTMLInputElement>('#input-tts-model').value.trim(),
+    ttsVoice: $<HTMLInputElement>('#input-tts-voice').value.trim(),
   }
 }
 
@@ -302,6 +310,11 @@ export function updateIdentityState(): void {
     btn.classList.add('btn-primary')
     btn.classList.remove('btn-secondary')
   }
+}
+
+function toggleCustomClientField(preset: string): void {
+  $('#input-client-custom').classList.toggle('hidden', preset !== 'custom')
+  $('#client-hint').classList.toggle('hidden', preset !== 'custom')
 }
 
 /** Populate the shared <datalist> backing all three model inputs. */
@@ -343,7 +356,12 @@ function populateFields(settings: AppSettings): void {
   $<HTMLInputElement>('#input-hours-back').value = String(settings.hoursBack)
   $<HTMLInputElement>('#input-batch-size').value = String(settings.batchSize)
   $<HTMLInputElement>('#input-concurrency').value = String(settings.concurrency)
-  $<HTMLInputElement>('#input-njump-base').value = settings.njumpBaseUrl
+  $<HTMLSelectElement>('#select-client').value = settings.clientPreset
+  $<HTMLInputElement>('#input-client-custom').value = settings.clientCustomUrl
+  $<HTMLInputElement>('#input-auto-refresh').checked = settings.autoRefresh
+  $<HTMLInputElement>('#input-tts-model').value = settings.ttsModel
+  $<HTMLInputElement>('#input-tts-voice').value = settings.ttsVoice
+  toggleCustomClientField(settings.clientPreset)
 
   // Set provider select and base URL readonly state
   const provider = settings.provider

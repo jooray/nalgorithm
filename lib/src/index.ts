@@ -9,7 +9,7 @@
 export { createFetcher, pubkeyToHex } from './fetcher.js'
 export { createRanker, sortByRelevance } from './ranker.js'
 export { createLearner } from './learner.js'
-export { chatCompletion, chatCompletionWithRetry } from './llm.js'
+export { chatCompletion, chatCompletionWithRetry, chatCompletionStream } from './llm.js'
 export { synthesizeSpeech, splitTextForTTS, DEFAULT_TTS_MAX_CHARS } from './tts.js'
 export {
   generateDigest,

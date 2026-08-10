@@ -113,6 +113,13 @@
             Phrase it for speech
           </label>
           <p class="field-hint">Drops markdown and spells out version numbers and abbreviations, so it reads well aloud.</p>
+
+          <label for="input-tts-model">TTS model (for downloadable audio)</label>
+          <input type="text" id="input-tts-model" placeholder="tts-kokoro" spellcheck="false">
+
+          <label for="input-tts-voice">TTS voice</label>
+          <input type="text" id="input-tts-voice" placeholder="af_sky" spellcheck="false">
+          <p class="field-hint">Only needed for <strong>Download MP3</strong>. Reading aloud in the browser is free and needs nothing here — but browsers give no access to that audio, so a file has to be synthesized by the provider.</p>
         </section>
 
         <!-- Prompts -->
@@ -139,8 +146,20 @@
           <input type="number" id="input-concurrency" min="1" value="1">
           <p class="field-hint">How many scoring calls run at once. 1 is sequential; 5 is roughly five times faster on a cold cache. Keep it within what your provider's rate limits allow.</p>
 
-          <label for="input-njump-base">Post link base URL</label>
-          <input type="text" id="input-njump-base" placeholder="https://njump.me/" spellcheck="false">
+          <label for="select-client">Open posts in</label>
+          <select id="select-client">
+            <option value="njump">njump</option>
+            <option value="primal">Primal</option>
+            <option value="yakihonne">Yakihonne</option>
+            <option value="custom">Custom</option>
+          </select>
+          <input type="text" id="input-client-custom" class="hidden" placeholder="https://example.com/e/{e}" spellcheck="false">
+          <p class="field-hint" id="client-hint">Use <code>{e}</code> where the event id goes, or just give the prefix — both work.</p>
+
+          <label class="checkbox-label">
+            <input type="checkbox" id="input-auto-refresh" checked>
+            Load the feed automatically on open
+          </label>
         </section>
 
         <!-- Actions -->

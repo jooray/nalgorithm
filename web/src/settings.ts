@@ -3,6 +3,7 @@
  */
 
 import { DEFAULT_SIGNER_RELAYS } from './nostr-login.js'
+import { presetFromUrl, type ClientPreset } from './client-url.js'
 
 const STORAGE_PREFIX = 'nalgorithm_'
 
@@ -36,7 +37,16 @@ export interface AppSettings {
   batchSize: number
   /** Scoring batches to run in parallel. 1 = sequential. */
   concurrency: number
-  njumpBaseUrl: string
+  /** Which Nostr client to open posts in. */
+  clientPreset: ClientPreset
+  /** Custom URL template, used when clientPreset is 'custom'. */
+  clientCustomUrl: string
+  /** Automatically load the feed on page open when settings are complete. */
+  autoRefresh: boolean
+  /** TTS model for downloadable audio (e.g. tts-kokoro). Blank disables download. */
+  ttsModel: string
+  /** Voice id for the TTS model. */
+  ttsVoice: string
 }
 
 // ─── Score cache ─────────────────────────────────────────────────────────────
@@ -93,7 +103,11 @@ const DEFAULTS: AppSettings = {
   hoursBack: 24,
   batchSize: 20,
   concurrency: 1,
-  njumpBaseUrl: 'https://njump.me/',
+  clientPreset: 'njump',
+  clientCustomUrl: '',
+  autoRefresh: true,
+  ttsModel: '',
+  ttsVoice: '',
 }
 
 function getItem(key: string): string | null {
@@ -125,8 +139,30 @@ export function loadSettings(): AppSettings {
     hoursBack: parseInt(getItem('hoursBack') ?? '', 10) || DEFAULTS.hoursBack,
     batchSize: parseInt(getItem('batchSize') ?? '', 10) || DEFAULTS.batchSize,
     concurrency: parseInt(getItem('concurrency') ?? '', 10) || DEFAULTS.concurrency,
-    njumpBaseUrl: getItem('njumpBaseUrl') ?? DEFAULTS.njumpBaseUrl,
+    clientPreset: readClientPreset(),
+    clientCustomUrl: getItem('clientCustomUrl') ?? readLegacyCustomUrl(),
+    autoRefresh: (getItem('autoRefresh') ?? String(DEFAULTS.autoRefresh)) === 'true',
+    ttsModel: getItem('ttsModel') ?? DEFAULTS.ttsModel,
+    ttsVoice: getItem('ttsVoice') ?? DEFAULTS.ttsVoice,
   }
+}
+
+/**
+ * Resolve the client choice, migrating the older `njumpBaseUrl` setting.
+ *
+ * That key held a bare prefix, so an existing user who had pointed it at
+ * Primal keeps Primal instead of being silently reset to njump.
+ */
+function readClientPreset(): ClientPreset {
+  const stored = getItem('clientPreset')
+  if (stored) return stored as ClientPreset
+  const legacy = getItem('njumpBaseUrl')
+  return legacy ? presetFromUrl(legacy) : DEFAULTS.clientPreset
+}
+
+function readLegacyCustomUrl(): string {
+  const legacy = getItem('njumpBaseUrl')
+  return legacy && presetFromUrl(legacy) === 'custom' ? legacy : DEFAULTS.clientCustomUrl
 }
 
 /**
@@ -149,7 +185,11 @@ export function saveSettings(settings: AppSettings): void {
   setItem('hoursBack', String(settings.hoursBack))
   setItem('batchSize', String(settings.batchSize))
   setItem('concurrency', String(settings.concurrency))
-  setItem('njumpBaseUrl', settings.njumpBaseUrl)
+  setItem('clientPreset', settings.clientPreset)
+  setItem('clientCustomUrl', settings.clientCustomUrl)
+  setItem('autoRefresh', String(settings.autoRefresh))
+  setItem('ttsModel', settings.ttsModel)
+  setItem('ttsVoice', settings.ttsVoice)
 }
 
 /**

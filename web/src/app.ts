@@ -28,7 +28,8 @@ import {
   pruneScoreCache,
 } from './settings.js'
 
-import { renderFeed } from './render.js'
+import { renderFeed, aggregateBoosts } from './render.js'
+import { resolveTemplate } from './client-url.js'
 
 import {
   initUI,
@@ -118,11 +119,27 @@ async function scorePosts(
       if (real.length > 0) {
         cacheScores(real.map((p) => ({ id: p.id, score: p.score, justification: p.justification })))
       }
+      onBatch?.(batch)
     },
   })
 
   logDebug(debug)
   return scored
+}
+
+/**
+ * Render the feed as it currently stands.
+ *
+ * Called repeatedly while scoring runs, so the user sees ranked posts building
+ * up instead of staring at a spinner until the last batch lands.
+ */
+function renderCurrent(settings: ReturnType<typeof loadSettings>): void {
+  showEmptyState(false)
+  renderFeed(aggregateBoosts(currentPosts), getFeedContainer(), {
+    profiles: currentProfiles,
+    eventUrlTemplate: resolveTemplate(settings.clientPreset, settings.clientCustomUrl),
+    clientPreset: settings.clientPreset,
+  })
 }
 
 // ─── Main flow ───────────────────────────────────────────────────────────────
@@ -258,6 +275,13 @@ async function runFeed(): Promise<void> {
 
     let newlyScored: ScoredPost[] = []
 
+    // Show whatever is already cached before any network call — with a warm
+    // cache the feed appears instantly, and new scores slot in as they arrive.
+    if (cachedPosts.length > 0) {
+      currentPosts = [...cachedPosts].sort((a, b) => b.score - a.score)
+      renderCurrent(settings)
+    }
+
     if (uncachedPosts.length > 0) {
       setStatusLoading(`Scoring ${uncachedPosts.length} new posts (${cachedPosts.length} cached)...`)
       try {
@@ -270,7 +294,15 @@ async function runFeed(): Promise<void> {
             setStatusLoading(
               `Scoring posts ${scored}/${total} (${cachedPosts.length} cached)...`
             ),
-          currentProfiles
+          currentProfiles,
+          // Re-render as each batch lands so results appear progressively
+          // rather than all at once when the slowest batch finishes.
+          (batch) => {
+            newlyScored.push(...batch)
+            currentPosts = [...cachedPosts, ...newlyScored].sort((a, b) => b.score - a.score)
+            renderCurrent(settings)
+            setDigestEnabled(currentPosts.length > 0)
+          }
         )
       } catch (err) {
         setStatus(`Scoring failed: ${(err as Error).message}`)
@@ -287,16 +319,13 @@ async function runFeed(): Promise<void> {
     // Merge cached + newly scored, sort by score descending
     const allScored = [...cachedPosts, ...newlyScored].sort((a, b) => b.score - a.score)
     currentPosts = allScored
+    renderCurrent(settings)
 
-    // 5. Render immediately — user sees ranked results now
-    showEmptyState(false)
-    renderFeed(allScored, getFeedContainer(), {
-      profiles: currentProfiles,
-      njumpBaseUrl: settings.njumpBaseUrl,
-    })
-
+    const shown = aggregateBoosts(allScored).length
+    const collapsed = allScored.length - shown
     const cachedLabel = cachedPosts.length > 0 ? ` (${cachedPosts.length} from cache)` : ''
-    setStatus(`Showing ${allScored.length} posts, ranked by relevance${cachedLabel}`)
+    const boostLabel = collapsed > 0 ? `, ${collapsed} duplicate boosts merged` : ''
+    setStatus(`Showing ${shown} posts, ranked by relevance${cachedLabel}${boostLabel}`)
     setRefreshEnabled(true)
 
     setDigestEnabled(currentPosts.length > 0)
@@ -453,10 +482,17 @@ async function regenerateLearnedPrompt(): Promise<void> {
 async function runDigest(): Promise<void> {
   const settings = readFieldsToSettings()
   saveSettings(settings)
-  await showDigest(currentPosts, currentProfiles, settings)
+  setStatusLoading('Writing digest…')
+  await showDigest(currentPosts, currentProfiles, settings, setStatus)
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  initUI(runFeed, regenerateLearnedPrompt, runDigest)
+  const settings = initUI(runFeed, regenerateLearnedPrompt, runDigest)
   initVersionCheck()
+
+  // Start loading straight away when everything needed is configured. Clicking
+  // Refresh to see the feed you already set up is a step with no decision in it.
+  if (settings.autoRefresh && !validateSettings(settings)) {
+    void runFeed().catch((err) => setStatus(`Error: ${(err as Error).message}`))
+  }
 })
