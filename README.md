@@ -261,9 +261,26 @@ node digest/dist/main.js digest.config.json --score-only
 
 Run it on a timer through the day, and the daily digest only has to score the
 handful of posts that arrived since the last pass. This is the reason to keep
-`maxPosts` high rather than lowering it to make cold runs bearable -- and
-`"concurrency": 3` in `rankingApi` scores three batches in parallel on top of
-that.
+`maxPosts` high rather than lowering it to make cold runs bearable.
+
+### Parallel scoring
+
+`concurrency` (in `rankingApi`, or **Parallel scoring batches** in the web app)
+sets how many scoring calls run at once. It defaults to `1`, and raising it is
+the single biggest speedup available on a cold cache: 500 posts at a batch size
+of 20 is 25 sequential calls, and at `5` that becomes roughly five rounds.
+
+It runs as a worker pool, so each slot picks up the next batch the moment it
+frees up rather than waiting for its neighbours. LLM latency varies enough
+between calls that this matters — with a fixed window, every fast batch idles
+until the slowest one in its group returns.
+
+**There is no upper limit, deliberately.** What's sensible depends entirely on
+your provider and plan, so pick a number your rate limits will tolerate. Too
+high and you'll get HTTP 429s; those are retried with exponential backoff, but
+a run that spends its time backing off is slower than one that never triggered
+the limit. If you start seeing 429s in the console, come back down. Somewhere
+around 3-5 is a reasonable starting point on a paid Venice key.
 
 ### Learned prompt
 
@@ -343,7 +360,7 @@ means listening to it read asterisks aloud.
 |--------|---------|-------------|
 | `npub` | required | Your Nostr npub |
 | `relays` | required | Array of relay WebSocket URLs |
-| `rankingApi` | required | `{apiBaseUrl, apiKey, model, reasoningEffort?, batchSize?, concurrency?}` for post scoring |
+| `rankingApi` | required | `{apiBaseUrl, apiKey, model, reasoningEffort?, batchSize?, concurrency?, jsonMode?}` for post scoring |
 | `digestApi` | required | `{apiBaseUrl, apiKey, model, temperature?, reasoningEffort?}` for digest generation |
 | `digestFallbackApi` | none | Same shape as `digestApi`. Used if the primary digest model fails after retries |
 | `learnerApi` | falls back to `rankingApi` | `{apiBaseUrl, apiKey, model}` for preference learning |

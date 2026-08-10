@@ -96,6 +96,7 @@ async function scorePosts(
   profiles?: Map<string, ProfileData>
 ): Promise<ScoredPost[]> {
   const ranker = createRanker({
+    concurrency: settings.concurrency,
     apiBaseUrl: settings.apiBaseUrl,
     apiKey: settings.apiKey,
     model: settings.model,

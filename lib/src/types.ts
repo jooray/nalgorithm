@@ -63,8 +63,10 @@ export interface RankerConfig {
   jsonMode?: boolean
   /**
    * Number of batches to score in parallel (default: 1 = sequential).
-   * Increase to 3-5 for faster scoring at the cost of higher API burst usage.
-   * Be mindful of rate limits on your LLM provider.
+   *
+   * Runs as a worker pool, so this many requests stay in flight for the whole
+   * run rather than moving in lockstep. There is no imposed ceiling — pick a
+   * value your provider's rate limits will tolerate.
    */
   concurrency?: number
 }

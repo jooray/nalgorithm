@@ -270,6 +270,7 @@ export function readFieldsToSettings(): AppSettings {
     learnedPrompt: $<HTMLTextAreaElement>('#input-learned-prompt').value,
     hoursBack: parseInt($<HTMLInputElement>('#input-hours-back').value, 10) || 24,
     batchSize: parseInt($<HTMLInputElement>('#input-batch-size').value, 10) || 20,
+    concurrency: Math.max(1, parseInt($<HTMLInputElement>('#input-concurrency').value, 10) || 1),
     njumpBaseUrl: $<HTMLInputElement>('#input-njump-base').value.trim() || 'https://njump.me/',
   }
 }
@@ -341,6 +342,7 @@ function populateFields(settings: AppSettings): void {
   $<HTMLTextAreaElement>('#input-learned-prompt').value = settings.learnedPrompt
   $<HTMLInputElement>('#input-hours-back').value = String(settings.hoursBack)
   $<HTMLInputElement>('#input-batch-size').value = String(settings.batchSize)
+  $<HTMLInputElement>('#input-concurrency').value = String(settings.concurrency)
   $<HTMLInputElement>('#input-njump-base').value = settings.njumpBaseUrl
 
   // Set provider select and base URL readonly state

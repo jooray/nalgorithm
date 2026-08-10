@@ -528,45 +528,52 @@ export function createRanker(config: RankerConfig): Ranker {
     const batches = chunk(posts, batchSize)
     const allScores = new Map<string, { score: number; justification: string; defaultScore?: boolean }>()
 
-    // Track progress atomically
     let scoredSoFar = 0
     const totalPosts = posts.length
 
     /**
-     * Run batches with controlled concurrency (like a pool).
-     * We process `concurrency` batches at a time, waiting for all in the
-     * current window before starting the next window. This prevents flooding
-     * the LLM API while still providing meaningful parallelism.
+     * Score batches through a worker pool.
+     *
+     * Each worker takes the next unclaimed batch the moment it finishes one, so
+     * `concurrency` requests stay in flight for the whole run. The obvious
+     * alternative — awaiting a fixed window of N batches before starting the
+     * next N — idles every fast batch until the slowest in its window returns,
+     * and LLM latency varies enough for that to cost most of the speedup.
+     *
+     * `nextBatch++` needs no lock: JS runs this synchronously, and there is no
+     * await between reading the index and incrementing it.
      */
-    for (let start = 0; start < batches.length; start += concurrency) {
-      const window = batches.slice(start, start + concurrency)
+    let nextBatch = 0
+    const workerCount = Math.min(concurrency, batches.length)
 
-      // Fire off all batches in this window concurrently
-      const results = await Promise.all(
-        window.map((batch, offset) =>
-          scoreBatch(
-            batch,
-            options.userPrompt,
-            options.learnedPrompt,
-            start + offset,
-            options.debug,
-            options.profiles
-          )
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const index = nextBatch++
+        if (index >= batches.length) return
+
+        // scoreBatch handles its own errors and falls back to default scores,
+        // so one bad batch cannot kill a worker and strand the rest.
+        const batchScores = await scoreBatch(
+          batches[index],
+          options.userPrompt,
+          options.learnedPrompt,
+          index,
+          options.debug,
+          options.profiles
         )
-      )
 
-      // Merge results and update progress
-      for (let w = 0; w < results.length; w++) {
-        const batchScores = results[w]
         for (const [id, data] of batchScores) {
           allScores.set(id, data)
         }
-        scoredSoFar += window[w].length
-        if (options.onProgress) {
-          options.onProgress(scoredSoFar, totalPosts)
-        }
+
+        // Progress reflects completion order, not batch order — with a pool
+        // those differ, and the count is what the caller displays.
+        scoredSoFar += batches[index].length
+        options.onProgress?.(scoredSoFar, totalPosts)
       }
     }
+
+    await Promise.all(Array.from({ length: workerCount }, worker))
 
     // Build scored posts
     const scoredPosts: ScoredPost[] = posts.map((post) => {

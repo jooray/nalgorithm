@@ -135,6 +135,10 @@
           <label for="input-batch-size">Batch size (posts per LLM call)</label>
           <input type="number" id="input-batch-size" min="5" max="50" value="20">
 
+          <label for="input-concurrency">Parallel scoring batches</label>
+          <input type="number" id="input-concurrency" min="1" value="1">
+          <p class="field-hint">How many scoring calls run at once. 1 is sequential; 5 is roughly five times faster on a cold cache. Keep it within what your provider's rate limits allow.</p>
+
           <label for="input-njump-base">Post link base URL</label>
           <input type="text" id="input-njump-base" placeholder="https://njump.me/" spellcheck="false">
         </section>

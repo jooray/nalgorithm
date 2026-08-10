@@ -34,6 +34,8 @@ export interface AppSettings {
   learnedPrompt: string
   hoursBack: number
   batchSize: number
+  /** Scoring batches to run in parallel. 1 = sequential. */
+  concurrency: number
   njumpBaseUrl: string
 }
 
@@ -90,6 +92,7 @@ const DEFAULTS: AppSettings = {
   learnedPrompt: '',
   hoursBack: 24,
   batchSize: 20,
+  concurrency: 1,
   njumpBaseUrl: 'https://njump.me/',
 }
 
@@ -121,6 +124,7 @@ export function loadSettings(): AppSettings {
     learnedPrompt: getItem('learnedPrompt') ?? DEFAULTS.learnedPrompt,
     hoursBack: parseInt(getItem('hoursBack') ?? '', 10) || DEFAULTS.hoursBack,
     batchSize: parseInt(getItem('batchSize') ?? '', 10) || DEFAULTS.batchSize,
+    concurrency: parseInt(getItem('concurrency') ?? '', 10) || DEFAULTS.concurrency,
     njumpBaseUrl: getItem('njumpBaseUrl') ?? DEFAULTS.njumpBaseUrl,
   }
 }
@@ -144,6 +148,7 @@ export function saveSettings(settings: AppSettings): void {
   setItem('learnedPrompt', settings.learnedPrompt)
   setItem('hoursBack', String(settings.hoursBack))
   setItem('batchSize', String(settings.batchSize))
+  setItem('concurrency', String(settings.concurrency))
   setItem('njumpBaseUrl', settings.njumpBaseUrl)
 }
 
