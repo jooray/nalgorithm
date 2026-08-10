@@ -116,19 +116,28 @@ nalgorithm/
 ├── lib/               # Library (TypeScript, npm package)
 │   └── src/
 │       ├── fetcher.ts   # Relay connections, post/profile/like fetching
-│       ├── ranker.ts    # LLM scoring with batched calls and JSON validation
+│       ├── ranker.ts    # LLM scoring: batching, worker pool, response parsing
 │       ├── learner.ts   # Like analysis, learned prompt generation
+│       ├── digest.ts    # Digest prompts and generation (shared by web + CLI)
+│       ├── tts.ts       # OpenAI-compatible speech synthesis with chunking
 │       ├── llm.ts       # Generic OpenAI-compatible API client
 │       └── types.ts     # All shared types
-├── web/               # Web frontend (Vite)
+├── web/               # Web frontend (Vite, PWA)
+│   ├── public/          # Manifest, icons, service worker
 │   └── src/
-│       ├── app.ts       # Two-phase flow: fetch/score/render, then background learn
-│       ├── settings.ts  # localStorage settings + date-keyed score cache
-│       ├── render.ts    # Post card rendering, content formatting
-│       └── ui.ts        # DOM bindings, settings panel
+│       ├── app.ts          # Two-phase flow: fetch/score/render, then background learn
+│       ├── settings.ts     # localStorage settings + date-keyed score cache
+│       ├── render.ts       # Post card rendering, content formatting
+│       ├── ui.ts           # DOM bindings, settings panel
+│       ├── nostr-login.ts  # NIP-07 and NIP-46 pubkey retrieval (read-only)
+│       ├── login-ui.ts     # Login dialog with QR code
+│       ├── digest-ui.ts    # Digest panel and playback controls
+│       ├── speech.ts       # Browser speech synthesis (Web Speech API)
+│       ├── models.ts       # Provider model catalog and per-role suggestions
+│       └── version-check.ts # Version polling and automatic reload
 ├── digest/            # CLI digest tool
 │   └── src/
-│       ├── main.ts      # Fetch, rank, generate spoken-word digest
+│       ├── main.ts      # Fetch, rank, generate spoken-word digest, optional TTS
 │       └── config.ts    # JSON config loader with env var interpolation
 └── package.json       # npm workspaces root
 ```
