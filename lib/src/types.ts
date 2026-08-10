@@ -148,6 +148,14 @@ export interface ScoreOptions {
   debug?: DebugEntry[]
   /** Called after each batch completes with (scoredSoFar, totalPosts) */
   onProgress?: (scored: number, total: number) => void
+  /**
+   * Called with each batch's results as soon as that batch lands.
+   *
+   * Use this to persist scores incrementally. Waiting for `score()` to resolve
+   * means a reload, a crash, or a hung request throws away everything already
+   * paid for — which is the opposite of what a score cache is for.
+   */
+  onBatchScored?: (scored: ScoredPost[]) => void
 }
 
 export interface DebugEntry {

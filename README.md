@@ -251,7 +251,14 @@ paid for.
 
 ### Score caching
 
-Scores are saved to a local JSON file (`digest.scores.json` by default). On each run, only new posts get scored -- cached scores are reused. Entries older than `scoreCacheTTLDays` (90 by default) are pruned on load. Posts that failed scoring and got a default fallback score are not cached, so they get another chance next run.
+Scores are saved to a local JSON file (`digest.scores.json` by default; localStorage in the web app). On each run, only new posts get scored -- cached scores are reused. Entries older than `scoreCacheTTLDays` (90 by default) are pruned on load. Posts that failed scoring and got a default fallback score are not cached, so they get another chance next run.
+
+**Scores are written as each batch lands, not at the end of the run.** This
+matters more than it sounds: a cold cache can take minutes, and if the cache
+were only written once scoring fully completed, then reloading the page,
+closing the tab, or a request hanging would throw away everything already paid
+for -- precisely the situation the cache exists to prevent. The CLI throttles
+its writes to once every five seconds, since the file runs to several MB.
 
 Scores are deterministic, so a long TTL is fine and re-scoring old posts buys you nothing. The side effect is that the cache accumulates a few months of scored posts, which you can query directly if you want "best of the last quarter" rather than "best of today".
 

@@ -435,6 +435,16 @@ async function main(): Promise<void> {
     if (uncachedPosts.length > 0) {
       log(`Scoring ${uncachedPosts.length} posts with ${config.rankingApi.model}...`)
       const debug: DebugEntry[] = []
+
+      // Persist as we go. A long scoring run that is interrupted — a hung
+      // request, a killed unit, a reboot — would otherwise throw away every
+      // score it had already paid for.
+      const runningCache: ScoreCacheFile = {
+        updatedAt: new Date().toISOString(),
+        scores: { ...(scoreCache?.scores ?? {}) },
+      }
+      let lastFlush = Date.now()
+
       newScoredPosts = await ranker.score(uncachedPosts, {
         userPrompt: config.userPrompt,
         learnedPrompt,
@@ -442,6 +452,24 @@ async function main(): Promise<void> {
         debug,
         onProgress: (scored, total) => {
           log(`  Scored ${scored}/${total}`)
+        },
+        onBatchScored: (batch) => {
+          for (const sp of batch) {
+            if (!sp.defaultScore) {
+              runningCache.scores[sp.id] = {
+                score: sp.score,
+                justification: sp.justification,
+                createdAt: sp.createdAt,
+              }
+            }
+          }
+          // Throttled: the cache file runs to several MB, and rewriting it on
+          // every batch would cost more IO than the scoring saves.
+          if (Date.now() - lastFlush >= 5000) {
+            runningCache.updatedAt = new Date().toISOString()
+            saveScoreCache(scoreCachePath, runningCache)
+            lastFlush = Date.now()
+          }
         },
       })
 

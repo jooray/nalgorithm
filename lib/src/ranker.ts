@@ -566,6 +566,23 @@ export function createRanker(config: RankerConfig): Ranker {
           allScores.set(id, data)
         }
 
+        // Hand this batch to the caller straight away so it can be cached.
+        // Holding everything until the whole run resolves loses the lot on a
+        // reload or a crash.
+        if (options.onBatchScored) {
+          options.onBatchScored(
+            batches[index].map((post) => {
+              const data = batchScores.get(post.id)
+              return {
+                ...post,
+                score: data?.score ?? DEFAULT_SCORE,
+                justification: data?.justification || undefined,
+                defaultScore: data?.defaultScore || undefined,
+              }
+            })
+          )
+        }
+
         // Progress reflects completion order, not batch order — with a pool
         // those differ, and the count is what the caller displays.
         scoredSoFar += batches[index].length

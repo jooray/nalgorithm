@@ -110,6 +110,15 @@ async function scorePosts(
     profiles,
     debug,
     onProgress,
+    // Persist each batch the moment it lands. If the tab is reloaded or closed
+    // mid-run, everything scored so far is already in the cache — which is the
+    // whole point of having one.
+    onBatchScored: (batch) => {
+      const real = batch.filter((p) => !p.defaultScore)
+      if (real.length > 0) {
+        cacheScores(real.map((p) => ({ id: p.id, score: p.score, justification: p.justification })))
+      }
+    },
   })
 
   logDebug(debug)
@@ -271,11 +280,8 @@ async function runFeed(): Promise<void> {
         return
       }
 
-      // Save newly scored posts to cache (skip default/fallback scores)
-      const realScores = newlyScored.filter((p) => !p.defaultScore)
-      if (realScores.length > 0) {
-        cacheScores(realScores.map((p) => ({ id: p.id, score: p.score, justification: p.justification })))
-      }
+      // No cache write here: onBatchScored already persisted every batch as it
+      // completed, so by this point the cache is up to date.
     }
 
     // Merge cached + newly scored, sort by score descending
