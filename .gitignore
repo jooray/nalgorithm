@@ -11,3 +11,6 @@ digest.config.json
 digest.config.tts.json
 digest.learned.json
 digest.scores.json
+
+# Local deploy script (host-specific, not for the public repo)
+deploy.sh

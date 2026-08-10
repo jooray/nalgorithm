@@ -63,7 +63,10 @@ const DEFAULTS: AppSettings = {
   provider: 'venice',
   apiBaseUrl: 'https://api.venice.ai/api/v1',
   apiKey: '',
-  model: 'grok-3-mini',
+  // Cheap, fast, and reliable at the batched-JSON scoring this app does.
+  // Keep this pointing at a model that is actually live in the provider's
+  // catalog — a delisted default makes the first run fail for every new user.
+  model: 'deepseek-v4-flash-0731',
   userPrompt: '',
   learnedPrompt: '',
   hoursBack: 24,

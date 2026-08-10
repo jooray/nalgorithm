@@ -1,6 +1,6 @@
 {
   "name": "nalgorithm-web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "nalgorithm": "*",
-    "nostr-tools": "^2.10.4"
+    "nostr-tools": "^2.10.4",
+    "qrcode-generator": "^2.0.4"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

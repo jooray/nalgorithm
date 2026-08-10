@@ -9,6 +9,8 @@ import {
   PROVIDER_URLS,
   type AppSettings,
 } from './settings.js'
+import { openLoginDialog } from './login-ui.js'
+import { toNpub } from './nostr-login.js'
 
 type RefreshCallback = () => Promise<void>
 type RegenerateCallback = () => Promise<void>
@@ -70,6 +72,21 @@ export function initUI(
     // Enable refresh button if settings look valid
     const btnRefresh = $<HTMLButtonElement>('#btn-refresh')
     btnRefresh.disabled = false
+  })
+
+  // Connect Nostr identity (NIP-07 extension or NIP-46 remote signer)
+  const btnConnect = $<HTMLButtonElement>('#btn-connect')
+  const inputNpub = $<HTMLInputElement>('#input-npub')
+  btnConnect.addEventListener('click', () => {
+    openLoginDialog()
+      .then((pubkey) => {
+        if (!pubkey) return
+        // Store the npub form — it round-trips through pubkeyToHex either way,
+        // and it is the form a user recognizes when they look at the field.
+        inputNpub.value = pubkey.startsWith('npub') ? pubkey : toNpub(pubkey)
+        setStatus('Nostr identity connected')
+      })
+      .catch((err) => setStatus(`Login failed: ${(err as Error).message}`))
   })
 
   // Clear scores

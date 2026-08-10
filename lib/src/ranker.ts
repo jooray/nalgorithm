@@ -169,78 +169,258 @@ Scoring scale:
   return parts.join('\n')
 }
 
+/** Keys a model might plausibly use for the post number, score, and reason. */
+const INDEX_KEYS = ['post_number', 'postNumber', 'post', 'index', 'idx', 'number', 'n', 'id']
+const SCORE_KEYS = ['score', 'relevance', 'rating', 'value']
+const REASON_KEYS = ['justification', 'reason', 'explanation', 'why', 'rationale']
+
 /**
- * Validate the LLM response JSON against the expected schema.
+ * Strip reasoning-model artefacts that leak into the content field.
  *
- * Expected: array of [number, number, string] where each first number is
- * a 1-based post index and each second number is 0-10.
+ * Some Venice models emit their `<think>` block into `content` rather than
+ * `reasoning_content`, and under `response_format: json_object` the leaked tag
+ * can end up *inside* the JSON. Removing it first rescues an otherwise fine
+ * response.
+ */
+function stripThinkBlocks(raw: string): string {
+  return raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\/?think>/gi, '')
+    .trim()
+}
+
+/** Pull the first value present under any of `keys`. */
+function pick(obj: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (key in obj && obj[key] !== undefined && obj[key] !== null) return obj[key]
+  }
+  return undefined
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === 'number' && !isNaN(value)) return value
+  if (typeof value === 'string') {
+    const n = parseInt(value, 10)
+    if (!isNaN(n)) return n
+  }
+  return null
+}
+
+/**
+ * Coerce one entry into [index, score, justification].
  *
- * Returns validated scores or null if validation fails entirely.
+ * Accepts the documented tuple form, and also the object form
+ * (`{post_number, score, justification}`) that models drift into under JSON
+ * mode. `fallbackIndex` supplies the position when the entry carries no index
+ * of its own, which is how object-keyed maps and bare score lists are handled.
+ */
+function coerceEntry(item: unknown, fallbackIndex: number | null): [number, number, string] | null {
+  let idxRaw: unknown
+  let scoreRaw: unknown
+  let reasonRaw: unknown
+
+  if (Array.isArray(item)) {
+    if (item.length >= 3) {
+      ;[idxRaw, scoreRaw, reasonRaw] = item
+    } else if (item.length === 2) {
+      // Either [index, score] or [score, justification]
+      if (typeof item[1] === 'string') {
+        ;[scoreRaw, reasonRaw] = item
+      } else {
+        ;[idxRaw, scoreRaw] = item
+      }
+    } else {
+      return null
+    }
+  } else if (item !== null && typeof item === 'object') {
+    const obj = item as Record<string, unknown>
+    idxRaw = pick(obj, INDEX_KEYS)
+    scoreRaw = pick(obj, SCORE_KEYS)
+    reasonRaw = pick(obj, REASON_KEYS)
+  } else if (typeof item === 'number') {
+    scoreRaw = item
+  } else {
+    return null
+  }
+
+  const score = toNumber(scoreRaw)
+  if (score === null) return null
+
+  const idx = toNumber(idxRaw) ?? fallbackIndex
+  if (idx === null) return null
+
+  return [idx, Math.max(0, Math.min(10, score)), typeof reasonRaw === 'string' ? reasonRaw : '']
+}
+
+/**
+ * Reduce whatever the model returned to a flat list of entries.
+ *
+ * Handles: a bare array; an object wrapping the array under any key
+ * (`{scores: [...]}`, `{posts: [...]}`); and an object keyed by post number
+ * (`{"1": {...}, "2": {...}}`).
+ */
+function toEntryList(parsed: unknown): Array<{ item: unknown; fallbackIndex: number | null }> {
+  if (Array.isArray(parsed)) {
+    return parsed.map((item, i) => ({ item, fallbackIndex: i + 1 }))
+  }
+
+  if (parsed !== null && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>
+    const entries = Object.entries(obj)
+
+    // An object keyed by post number. Checked first: `{"1": [1, 9, "…"]}` is
+    // all-numeric-keyed *and* has array values, so the wrapper branch below
+    // would otherwise mistake the first entry's tuple for the whole list.
+    if (entries.length > 0 && entries.every(([key]) => /^\d+$/.test(key))) {
+      return entries.map(([key, item]) => ({ item, fallbackIndex: parseInt(key, 10) }))
+    }
+
+    // An object wrapping the real array under some key. Prefer an array whose
+    // elements are themselves entries over one holding bare scalars.
+    const arrays = entries.map(([, v]) => v).filter(Array.isArray) as unknown[][]
+    const structured = arrays.find((arr) =>
+      arr.some((el) => Array.isArray(el) || (el !== null && typeof el === 'object'))
+    )
+    const chosen = structured ?? arrays[0]
+    if (chosen) {
+      return chosen.map((item, i) => ({ item, fallbackIndex: i + 1 }))
+    }
+  }
+
+  return []
+}
+
+/**
+ * Pull individually-complete entries out of text that does not parse as JSON.
+ *
+ * Matches both the tuple form and the object form, anchored on their own
+ * brackets, so a response truncated mid-entry still yields everything that
+ * arrived intact before the cut.
+ */
+function salvageEntries(text: string): Array<{ item: unknown; fallbackIndex: number | null }> {
+  const out: Array<{ item: unknown; fallbackIndex: number | null }> = []
+
+  // [12, 8, "some justification"] — the documented shape.
+  const tuple = /\[\s*(\d+)\s*,\s*(-?\d+(?:\.\d+)?)\s*(?:,\s*("(?:[^"\\]|\\.)*"))?\s*\]/g
+  for (const m of text.matchAll(tuple)) {
+    let reason = ''
+    if (m[3]) {
+      try {
+        reason = JSON.parse(m[3]) as string
+      } catch {
+        reason = ''
+      }
+    }
+    out.push({ item: [Number(m[1]), Number(m[2]), reason], fallbackIndex: null })
+  }
+  if (out.length > 0) return out
+
+  // {"post_number": 12, "score": 8, "justification": "..."} — the object shape.
+  const object = /\{[^{}]*\}/g
+  for (const m of text.matchAll(object)) {
+    try {
+      out.push({ item: JSON.parse(m[0]), fallbackIndex: null })
+    } catch {
+      // Incomplete object at the truncation point — skip it.
+    }
+  }
+  return out
+}
+
+/**
+ * Validate the LLM response against the expected schema.
+ *
+ * The documented contract is an array of `[post_number, score, justification]`,
+ * but models drift — especially under `response_format: json_object`, which
+ * requires a top-level object and so pushes them into wrapper shapes. Rather
+ * than defaulting a whole batch to score 5 over a cosmetic difference, this
+ * accepts the common variants and reports what it had to coerce.
  */
 function validateScoreResponse(
   raw: string,
   postCount: number
 ): { scores: Array<[number, number, string]>; error?: string } | null {
-  let parsed: unknown
-  try {
-    // Try to extract JSON from the response (handles markdown code blocks)
-    let jsonStr = raw.trim()
-    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/)
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1].trim()
+  const cleaned = stripThinkBlocks(raw)
+
+  // Try progressively looser extractions and keep the first that yields entries.
+  const candidates: string[] = []
+  const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (fenced) candidates.push(fenced[1].trim())
+  candidates.push(cleaned)
+  const arrayMatch = cleaned.match(/(\[[\s\S]*\])/)
+  if (arrayMatch) candidates.push(arrayMatch[1])
+  const objectMatch = cleaned.match(/(\{[\s\S]*\})/)
+  if (objectMatch) candidates.push(objectMatch[1])
+
+  let entries: Array<{ item: unknown; fallbackIndex: number | null }> = []
+  let parseFailed = true
+
+  for (const candidate of candidates) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(candidate)
+    } catch {
+      continue
     }
-    // Also handle case where response starts with text before JSON
-    const arrayMatch = jsonStr.match(/(\[[\s\S]*\])/)
-    if (arrayMatch) {
-      jsonStr = arrayMatch[1]
+    parseFailed = false
+    const found = toEntryList(parsed)
+    if (found.length > 0) {
+      entries = found
+      break
     }
-    parsed = JSON.parse(jsonStr)
-  } catch {
-    return { scores: [], error: 'Failed to parse LLM response as JSON' }
   }
 
-  if (!Array.isArray(parsed)) {
-    return { scores: [], error: 'LLM response is not an array' }
+  // Last resort: scavenge whole entries out of text that will not parse.
+  // The usual cause is truncation — the provider cut the response mid-array,
+  // so the JSON is invalid but the entries before the cut are perfectly good.
+  // Salvaging them beats giving the whole batch the fallback score.
+  let salvaged = false
+  if (entries.length === 0) {
+    const found = salvageEntries(cleaned)
+    if (found.length > 0) {
+      entries = found
+      salvaged = true
+    }
+  }
+
+  if (entries.length === 0) {
+    return {
+      scores: [],
+      error: parseFailed
+        ? 'Failed to parse LLM response as JSON'
+        : 'LLM response contained no recognizable score entries',
+    }
   }
 
   const results: Array<[number, number, string]> = []
   const errors: string[] = []
 
-  for (const item of parsed) {
-    if (!Array.isArray(item) || item.length < 2) {
-      errors.push(`Invalid entry (not an array or too short): ${JSON.stringify(item)}`)
+  for (const { item, fallbackIndex } of entries) {
+    const coerced = coerceEntry(item, fallbackIndex)
+    if (!coerced) {
+      errors.push(`Unrecognized entry: ${JSON.stringify(item).slice(0, 120)}`)
       continue
     }
-
-    const [idx, score, justification] = item
-    const numIdx = typeof idx === 'string' ? parseInt(idx, 10) : idx
-
-    if (typeof numIdx !== 'number' || isNaN(numIdx)) {
-      errors.push(`Invalid index type: ${JSON.stringify(idx)}`)
+    const [idx, score, justification] = coerced
+    if (idx < 1 || idx > postCount) {
+      errors.push(`Index out of range: ${idx} (expected 1-${postCount})`)
       continue
     }
-
-    if (typeof score !== 'number') {
-      errors.push(`Invalid score type for index ${numIdx}: ${typeof score}`)
-      continue
-    }
-
-    if (numIdx < 1 || numIdx > postCount) {
-      errors.push(`Index out of range: ${numIdx} (expected 1-${postCount})`)
-      continue
-    }
-
-    const clampedScore = Math.max(0, Math.min(10, score))
-    const justStr = typeof justification === 'string' ? justification : ''
-    results.push([numIdx, clampedScore, justStr])
+    results.push([idx, score, justification])
   }
 
   if (results.length === 0) {
     return { scores: [], error: `No valid scores parsed. Errors: ${errors.join('; ')}` }
   }
 
-  const error = errors.length > 0 ? `Partial parse (${results.length}/${parsed.length}): ${errors.join('; ')}` : undefined
-  return { scores: results, error }
+  const notes: string[] = []
+  if (salvaged) {
+    notes.push(`Salvaged ${results.length} entries from unparseable output (likely truncated)`)
+  }
+  if (errors.length > 0) {
+    notes.push(`Partial parse (${results.length}/${entries.length}): ${errors.join('; ')}`)
+  }
+  return { scores: results, error: notes.length > 0 ? notes.join('. ') : undefined }
 }
 
 /**
@@ -260,10 +440,12 @@ function chunk<T>(arr: T[], size: number): T[][] {
 export function createRanker(config: RankerConfig): Ranker {
   const batchSize = config.batchSize ?? DEFAULT_BATCH_SIZE
   const concurrency = Math.max(1, config.concurrency ?? DEFAULT_CONCURRENCY)
+  const jsonMode = config.jsonMode ?? false
   const llmConfig: LLMConfig = {
     apiBaseUrl: config.apiBaseUrl,
     apiKey: config.apiKey,
     model: config.model,
+    reasoningEffort: config.reasoningEffort,
   }
 
   async function scoreBatch(
@@ -288,7 +470,7 @@ export function createRanker(config: RankerConfig): Ranker {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMsg },
         ],
-        true // JSON mode
+        jsonMode
       )
 
       const result = validateScoreResponse(rawResponse, posts.length)

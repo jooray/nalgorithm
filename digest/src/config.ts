@@ -6,12 +6,17 @@
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import type { TTSConfig } from 'nalgorithm'
+import type { TTSConfig, ReasoningEffort } from 'nalgorithm'
 
 export interface ApiConfig {
   apiBaseUrl: string
   apiKey: string
   model: string
+  /**
+   * Reasoning budget for models that support it (Venice: `deepseek-v4-flash-0731`,
+   * `kimi-k2-6`, ...). Omitted from the request when unset.
+   */
+  reasoningEffort?: ReasoningEffort
 }
 
 export interface DigestConfig {
@@ -24,6 +29,12 @@ export interface DigestConfig {
      * Set to 3-5 for significantly faster scoring. Be mindful of API rate limits.
      */
     concurrency?: number
+    /**
+     * Send `response_format: json_object` with scoring calls (default: false).
+     * See the README section on reasoning models and JSON for the measurements
+     * behind that default.
+     */
+    jsonMode?: boolean
   }
   digestApi: ApiConfig & {
     temperature?: number
@@ -233,6 +244,7 @@ export function loadConfig(path?: string): DigestConfig {
         apiKey: digestFallbackApi.apiKey as string,
         model: digestFallbackApi.model as string,
         temperature: (digestFallbackApi.temperature as number | undefined),
+        reasoningEffort: digestFallbackApi.reasoningEffort as ReasoningEffort | undefined,
       }
     : undefined
 
@@ -261,6 +273,7 @@ export function loadConfig(path?: string): DigestConfig {
         apiBaseUrl: learnerApi.apiBaseUrl as string,
         apiKey: learnerApi.apiKey as string,
         model: learnerApi.model as string,
+        reasoningEffort: learnerApi.reasoningEffort as ReasoningEffort | undefined,
       }
     : undefined
 
@@ -271,14 +284,17 @@ export function loadConfig(path?: string): DigestConfig {
       apiBaseUrl: rankingApi.apiBaseUrl as string,
       apiKey: rankingApi.apiKey as string,
       model: rankingApi.model as string,
+      reasoningEffort: rankingApi.reasoningEffort as ReasoningEffort | undefined,
       batchSize: (rankingApi.batchSize as number) ?? 20,
       concurrency: (rankingApi.concurrency as number) ?? 1,
+      jsonMode: (rankingApi.jsonMode as boolean | undefined) ?? false,
     },
     digestApi: {
       apiBaseUrl: digestApi.apiBaseUrl as string,
       apiKey: digestApi.apiKey as string,
       model: digestApi.model as string,
       temperature: (digestApi.temperature as number) ?? 0.7,
+      reasoningEffort: digestApi.reasoningEffort as ReasoningEffort | undefined,
     },
     digestFallbackApi: parsedDigestFallbackApi,
     learnerApi: parsedLearnerApi,

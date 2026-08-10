@@ -41,6 +41,8 @@ import {
   readFieldsToSettings,
 } from './ui.js'
 
+import { initVersionCheck, setUpdateBlocked } from './version-check.js'
+
 // ─── App state ───────────────────────────────────────────────────────────────
 
 let isRunning = false
@@ -127,6 +129,9 @@ async function runFeed(): Promise<void> {
 
   isRunning = true
   setRefreshEnabled(false)
+  // Hold off any pending auto-update until this run finishes — reloading
+  // mid-scoring would discard work already paid for.
+  setUpdateBlocked(true)
 
   // Compute the "since" timestamp so both phases use the same window
   const since = Math.floor(Date.now() / 1000) - settings.hoursBack * 3600
@@ -293,6 +298,7 @@ async function runFeed(): Promise<void> {
     setRefreshEnabled(true)
   } finally {
     isRunning = false
+    setUpdateBlocked(false)
   }
 }
 
@@ -428,4 +434,5 @@ async function regenerateLearnedPrompt(): Promise<void> {
 
 document.addEventListener('DOMContentLoaded', () => {
   initUI(runFeed, regenerateLearnedPrompt)
+  initVersionCheck()
 })

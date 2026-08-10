@@ -313,8 +313,10 @@ async function main(): Promise<void> {
     apiBaseUrl: config.rankingApi.apiBaseUrl,
     apiKey: config.rankingApi.apiKey,
     model: config.rankingApi.model,
+    reasoningEffort: config.rankingApi.reasoningEffort,
     batchSize: config.rankingApi.batchSize,
     concurrency: config.rankingApi.concurrency,
+    jsonMode: config.rankingApi.jsonMode,
   })
 
   try {
@@ -375,6 +377,7 @@ async function main(): Promise<void> {
           apiBaseUrl: learnerCfg.apiBaseUrl,
           apiKey: learnerCfg.apiKey,
           model: learnerCfg.model,
+          reasoningEffort: learnerCfg.reasoningEffort,
         }
 
         try {
@@ -518,6 +521,7 @@ ${postsBlock}`
           apiBaseUrl: config.digestApi.apiBaseUrl,
           apiKey: config.digestApi.apiKey,
           model: config.digestApi.model,
+          reasoningEffort: config.digestApi.reasoningEffort,
         },
         [
           { role: 'system', content: config.digestSystemPrompt! },
@@ -536,6 +540,7 @@ ${postsBlock}`
             apiBaseUrl: config.digestFallbackApi.apiBaseUrl,
             apiKey: config.digestFallbackApi.apiKey,
             model: config.digestFallbackApi.model,
+            reasoningEffort: config.digestFallbackApi.reasoningEffort,
           },
           [
             { role: 'system', content: config.digestSystemPrompt! },

@@ -44,6 +44,7 @@ export type {
 
   // LLM
   ChatMessage,
+  ReasoningEffort,
 
   // TTS
   TTSConfig,

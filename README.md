@@ -25,6 +25,26 @@ Scores are cached locally (localStorage in the web app, a JSON file for the CLI)
 
 Everything runs in the browser (web app) or locally (CLI). Settings, scores, and the learned prompt live in localStorage or local files. The app connects directly to Nostr relays for posts and to your chosen LLM provider for scoring. There's nothing in between.
 
+## Signing in
+
+The web app needs to know your public key and nothing else — it reads your
+follow list, your feed, and your likes. It never publishes, never reacts, never
+signs. Three ways to tell it who you are:
+
+- **Browser extension (NIP-07)** — one click, reads your pubkey from Alby, nos2x, or similar.
+- **Remote signer (NIP-46)** — scan a QR code with Amber or another bunker. The
+  connection requests **no permissions at all**: it calls `get_public_key`, then
+  closes. Your signer is never asked for the ability to sign, so granting this
+  cannot result in anything being posted as you.
+- **Paste an npub** — no signer involved. Works for reading any public feed,
+  including someone else's.
+
+A detail worth knowing if you implement this yourself: on NIP-46 the pubkey on
+the signer's response frames is a per-connection *routing* key, not the user's
+identity. Newer Amber builds generate a fresh one per connection, so treating it
+as the npub silently logs you in as an ephemeral key that follows nobody.
+`get_public_key` is the only correct source.
+
 ## LLM providers
 
 The app works with any OpenAI-compatible chat completions API. You configure the endpoint, key, and model.
@@ -127,6 +147,41 @@ should be cheap. The digest model runs once per day on ~15 posts, so it can
 afford to be good. The learner needs a large context window because it
 summarizes up to 50 likes in one prompt — small-context models return HTTP 400
 here.
+
+### Reasoning models and JSON
+
+Any API block accepts `reasoningEffort` (`none`, `low`, `medium`, `high`,
+`max`), sent as `reasoning_effort`. It's omitted from the request entirely when
+unset, so models that don't support it are unaffected.
+
+Scoring is high-volume and not hard, so it's the place to turn reasoning down.
+
+### Why JSON mode is off by default
+
+`rankingApi.jsonMode` controls whether scoring calls send
+`response_format: {type: "json_object"}`. It defaults to **false**, which is
+worth explaining because "ask for JSON, get JSON" sounds obviously right.
+
+The problem is that JSON mode requires a top-level *object* while the scoring
+prompt asks for an *array*. The model is pulled two ways and drifts into
+wrapper shapes — or, on a reasoning model, leaks its `<think>` block into the
+JSON and destroys the batch outright. Measured on Venice, 5 runs of a 20-post
+batch, counting runs where all 20 posts came back scored:
+
+| Model | JSON mode on | off |
+|-------|-------------:|----:|
+| `deepseek-v4-flash` (0423) | 4/5 | 5/5 |
+| `deepseek-v4-flash-0731` + `reasoningEffort: low` | 0/5 | 5/5 |
+| `google-gemma-3-27b-it` | 5/5 | 5/5 |
+
+Never better on, sometimes catastrophically worse — and the failure is quiet,
+because an unparseable batch just gives every post the fallback score of 5.
+The tolerance JSON mode used to buy is now in the parser instead, which accepts
+`{"scores": [...]}`, `{"posts": [{...}]}`, `{"1": {...}}`, fenced code blocks,
+prose preambles, and leaked think blocks.
+
+If you see `0 scored by LLM, N got default score` in the logs, that is this
+class of problem: check `jsonMode` first, then try `reasoningEffort: "none"`.
 
 ### Digest fallback
 
@@ -239,8 +294,8 @@ means listening to it read asterisks aloud.
 |--------|---------|-------------|
 | `npub` | required | Your Nostr npub |
 | `relays` | required | Array of relay WebSocket URLs |
-| `rankingApi` | required | `{apiBaseUrl, apiKey, model, batchSize?, concurrency?}` for post scoring |
-| `digestApi` | required | `{apiBaseUrl, apiKey, model, temperature?}` for digest generation |
+| `rankingApi` | required | `{apiBaseUrl, apiKey, model, reasoningEffort?, batchSize?, concurrency?}` for post scoring |
+| `digestApi` | required | `{apiBaseUrl, apiKey, model, temperature?, reasoningEffort?}` for digest generation |
 | `digestFallbackApi` | none | Same shape as `digestApi`. Used if the primary digest model fails after retries |
 | `learnerApi` | falls back to `rankingApi` | `{apiBaseUrl, apiKey, model}` for preference learning |
 | `ttsApi` | none | `{apiBaseUrl, apiKey, model, voice?, speed?, format?, maxChars?}` for speech synthesis |
@@ -341,6 +396,45 @@ To keep the text as well as the audio, redirect stdout:
 ```bash
 node dist/main.js digest.config.json --tts > "$HOME/digests/$(date +%F).md"
 ```
+
+## Hosting the web app
+
+`npm run build -w web` writes a static site to `web/dist/`. Copy it anywhere
+that serves files. For a subdirectory install, set the base path at build time:
+
+```bash
+VITE_BASE=/nalgorithm/ npm run build -w web
+```
+
+It's a PWA: installable, works offline once loaded, and **checks for new
+versions while running**. Each build stamps a version into the bundle, the
+service worker, and a `version.json`; the running page polls that file and
+reloads itself when it changes, so a deploy reaches people with the app already
+open without anyone being told to hard-refresh.
+
+That only works if your web server lets the shell revalidate. The trap is that
+`index.html` is usually served with just `Last-Modified`/`ETag` and no
+`Cache-Control`, so browsers apply heuristic freshness, keep serving the old
+shell, and the old shell keeps pulling the old content-hashed bundles — the
+update looks deployed but never lands. Under nginx:
+
+```nginx
+location ^~ /nalgorithm/ {
+    try_files $uri $uri/ =404;
+
+    # Content-hashed bundles are immutable.
+    location ^~ /nalgorithm/assets/ { expires max; }
+
+    # Anything that gates an update must revalidate.
+    location ~* \.(html|json|webmanifest)$ { expires -1; }
+    location = /nalgorithm/sw.js          { expires -1; }
+    location = /nalgorithm/               { expires -1; }
+}
+```
+
+Use the `expires` directive rather than `add_header Cache-Control ...`: an
+`add_header` inside a location block discards every `add_header` inherited from
+the server level, which will quietly strip your security headers.
 
 ## Caddy CORS proxy for Ollama Cloud
 

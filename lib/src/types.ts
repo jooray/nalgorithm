@@ -31,8 +31,36 @@ export interface RankerConfig {
   apiKey: string
   /** Model name */
   model: string
+  /**
+   * Reasoning budget, for models that support it. Scoring is a high-volume,
+   * low-difficulty job, so `low` (or `none`) keeps latency and cost down.
+   */
+  reasoningEffort?: ReasoningEffort
   /** Posts per batch (default: 20) */
   batchSize?: number
+  /**
+   * Send `response_format: {type: 'json_object'}` with scoring calls
+   * (default: **false**).
+   *
+   * Off by default because the mode requires a top-level *object* while the
+   * scoring prompt asks for an *array*, so models are pulled two ways and drift
+   * into wrapper shapes — or, on reasoning models, leak their `<think>` block
+   * into the JSON and destroy the batch.
+   *
+   * Measured on Venice over 5 runs of a 20-post batch, counting runs where all
+   * 20 posts were scored:
+   *
+   * | Model                              | JSON mode on | off |
+   * |------------------------------------|-------------:|----:|
+   * | `deepseek-v4-flash` (0423)         |          4/5 | 5/5 |
+   * | `deepseek-v4-flash-0731` + `low`   |          0/5 | 5/5 |
+   * | `google-gemma-3-27b-it`            |          5/5 | 5/5 |
+   *
+   * Never better on, sometimes catastrophically worse. The prose- and
+   * fence-tolerance that JSON mode used to provide now lives in the response
+   * parser instead. Set true only if a specific provider needs it.
+   */
+  jsonMode?: boolean
   /**
    * Number of batches to score in parallel (default: 1 = sequential).
    * Increase to 3-5 for faster scoring at the cost of higher API burst usage.
@@ -164,10 +192,21 @@ export interface ChatMessage {
   content: string
 }
 
+/**
+ * Reasoning budget for models that support it.
+ *
+ * Sent as OpenAI's `reasoning_effort`. Venice honours it on models whose
+ * `supportsReasoningEffort` is true (e.g. `deepseek-v4-flash-0731`, which
+ * otherwise defaults to `high`); models without support ignore the field.
+ */
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'max'
+
 export interface LLMConfig {
   apiBaseUrl: string
   apiKey: string
   model: string
+  /** Omitted from the request entirely when unset, so non-supporting models are unaffected. */
+  reasoningEffort?: ReasoningEffort
 }
 
 // ─── TTS types ───────────────────────────────────────────────────────────────

@@ -703,3 +703,158 @@ select {
     height: 32px;
   }
 }
+
+/* ─── Login dialog (NIP-07 / NIP-46) ───────────────────────────────────────── */
+
+.login-dialog {
+  width: min(420px, calc(100vw - 2rem));
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text);
+}
+
+.login-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.login-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.login-header h2 {
+  font-size: 1.1rem;
+}
+
+.login-readonly {
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.login-readonly strong {
+  color: var(--text);
+}
+
+.login-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.login-hint {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.login-divider {
+  position: relative;
+  margin: 0.5rem 0;
+  text-align: center;
+}
+
+.login-divider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: var(--border);
+}
+
+.login-divider span {
+  position: relative;
+  padding: 0 0.6rem;
+  background: var(--bg-surface);
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.login-signer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.login-qr {
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  line-height: 0;
+}
+
+.login-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.login-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.login-status {
+  min-height: 1.2rem;
+  margin-top: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.login-status-error {
+  color: var(--danger);
+}
+
+.field-hint {
+  margin: -0.25rem 0 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.feed-empty-sub {
+  margin-top: 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+/* ─── Update banner ────────────────────────────────────────────────────────── */
+
+.update-banner {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  z-index: 1000;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font-size: 0.85rem;
+  transform: translateX(-50%);
+}
+
+@media (max-width: 480px) {
+  .update-banner {
+    right: 1rem;
+    left: 1rem;
+    justify-content: space-between;
+    transform: none;
+  }
+}

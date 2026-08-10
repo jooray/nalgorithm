@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Nalgorithm — Nostr Relevance Feed</title>
+  <meta name="description" content="Rank your Nostr timeline by what you actually care about, using an LLM instead of reverse chronological order.">
+  <meta name="theme-color" content="#161b22">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
@@ -35,6 +42,8 @@
         <!-- Identity -->
         <section class="settings-section">
           <h3>Identity</h3>
+          <button id="btn-connect" class="btn btn-primary btn-full">Connect Nostr identity</button>
+          <p class="field-hint">Reads your public key only — Nalgorithm never signs or posts.</p>
           <label for="input-npub">npub or hex pubkey</label>
           <input type="text" id="input-npub" placeholder="npub1... or hex pubkey" spellcheck="false">
         </section>
@@ -64,7 +73,7 @@
           <input type="password" id="input-api-key" placeholder="sk-..." spellcheck="false">
 
           <label for="input-model">Model</label>
-          <input type="text" id="input-model" placeholder="grok-3-mini" spellcheck="false">
+          <input type="text" id="input-model" placeholder="deepseek-v4-flash-0731" spellcheck="false">
         </section>
 
         <!-- Prompts -->
@@ -102,7 +111,8 @@
     <!-- Main Feed -->
     <main id="feed">
       <div id="feed-empty" class="feed-empty">
-        <p>Configure your npub and API key in Settings, then click Refresh to load your feed.</p>
+        <p>Connect your Nostr identity and add an LLM API key in Settings, then click Refresh to load your feed.</p>
+        <p class="feed-empty-sub">Everything runs in your browser. Your key and settings stay in this device's local storage.</p>
       </div>
       <div id="feed-list" class="feed-list"></div>
     </main>

@@ -36,6 +36,12 @@ export async function chatCompletion(
     temperature,
   }
 
+  // Only sent when configured — models without reasoning-effort support reject
+  // or ignore the field, so an unset value must not appear in the request.
+  if (config.reasoningEffort) {
+    body.reasoning_effort = config.reasoningEffort
+  }
+
   if (jsonMode) {
     body.response_format = { type: 'json_object' }
   }
