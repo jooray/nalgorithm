@@ -118,7 +118,17 @@ export async function showDigest(
   } catch (err) {
     clearInterval(tick)
     const message = `Digest failed: ${(err as Error).message}`
-    status.textContent = message
+    // Whatever streamed in before the failure is real text and stays on screen;
+    // adopt it so Copy, Read aloud and Download work on what is actually there.
+    if (streamed.trim()) {
+      currentText = streamed.trim()
+      renderDigestText(body, currentText)
+      controls.classList.remove('hidden')
+      await populateVoices(el)
+      status.textContent = `${message} — keeping the ${wordCount(currentText)} words that arrived.`
+    } else {
+      status.textContent = message
+    }
     onStatus?.(message)
   }
 }
