@@ -95,7 +95,9 @@ async function scorePosts(
   learnedPrompt: string | undefined,
   settings: ReturnType<typeof loadSettings>,
   onProgress?: (scored: number, total: number) => void,
-  profiles?: Map<string, ProfileData>
+  profiles?: Map<string, ProfileData>,
+  /** Receives each batch as it lands, for progressive rendering. */
+  onBatch?: (batch: ScoredPost[]) => void
 ): Promise<ScoredPost[]> {
   const ranker = createRanker({
     concurrency: settings.concurrency,
