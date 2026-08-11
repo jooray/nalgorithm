@@ -136,12 +136,21 @@ async function queryWithTimeout(
   filter: Record<string, unknown>,
   timeout = QUERY_TIMEOUT
 ): Promise<NostrEvent[]> {
-  return Promise.race([
-    pool.querySync(relays, filter as Parameters<SimplePool['querySync']>[1]),
-    new Promise<NostrEvent[]>((resolve) =>
-      setTimeout(() => resolve([]), timeout)
-    ),
-  ])
+  // The loser of the race must be cleaned up: a pending setTimeout keeps the
+  // Node event loop alive, so leaving it armed means the process lingers for
+  // the full timeout after its work is finished. A digest run makes eight of
+  // these queries, so the strays outlive the run and delay exit by up to 30s.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      pool.querySync(relays, filter as Parameters<SimplePool['querySync']>[1]),
+      new Promise<NostrEvent[]>((resolve) => {
+        timer = setTimeout(() => resolve([]), timeout)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /**
