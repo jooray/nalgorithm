@@ -9,6 +9,13 @@ digest/dist/
 AGENTS.md
 digest.config.json
 digest.config.tts.json
+# Timestamped backups of the above hold live API keys — the bare names above
+# do not match `digest.config.json.bak-<ts>`, so cover the suffixes too.
+digest.config.json*
+digest.config.tts.json*
+*.bak
+*.bak-*
+*.bak2-*
 digest.learned.json
 digest.scores.json
 
