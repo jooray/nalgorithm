@@ -12,6 +12,13 @@ export { createLearner } from './learner.js'
 export { chatCompletion, chatCompletionWithRetry, chatCompletionStream } from './llm.js'
 export { synthesizeSpeech, splitTextForTTS, DEFAULT_TTS_MAX_CHARS } from './tts.js'
 export {
+  humanizeText,
+  buildHumanizeMessages,
+  HUMANIZER_SKILL,
+  HUMANIZER_SKILL_VERSION,
+} from './humanizer.js'
+export type { HumanizeOptions } from './humanizer.js'
+export {
   generateDigest,
   buildDigestMessages,
   buildDigestSystemPrompt,

@@ -134,9 +134,12 @@ nalgorithm/
 │       ├── ranker.ts    # LLM scoring: batching, worker pool, response parsing
 │       ├── learner.ts   # Like analysis, learned prompt generation
 │       ├── digest.ts    # Digest prompts and generation (shared by web + CLI)
+│       ├── humanizer.ts # Second-pass rewrite with the vendored humanizer skill
 │       ├── tts.ts       # OpenAI-compatible speech synthesis with chunking
 │       ├── llm.ts       # Generic OpenAI-compatible API client
 │       └── types.ts     # All shared types
+│   └── skills/
+│       └── humanizer/   # Vendored editing prompt (see its README before editing)
 ├── web/               # Web frontend (Vite, PWA)
 │   ├── public/          # Manifest, icons, service worker
 │   └── src/
@@ -154,6 +157,8 @@ nalgorithm/
 │   └── src/
 │       ├── main.ts      # Fetch, rank, generate spoken-word digest, optional TTS
 │       └── config.ts    # JSON config loader with env var interpolation
+├── scripts/
+│   └── sync-humanizer.mjs  # Turns the vendored skill into an importable module
 └── package.json       # npm workspaces root
 ```
 
@@ -343,6 +348,47 @@ If `learnFromLikes` is true (the default), the tool fetches your recent Nostr li
 
 The learned prompt is passed alongside your `userPrompt` to both the scoring and digest generation steps.
 
+### Humanizer pass
+
+The digest prompt already carries a short list of anti-AI-writing rules, but
+rules inside a system prompt compete with everything else the writer is being
+asked to do. Add a `humanizerApi` block and the finished digest goes through a
+second call whose whole job is editing:
+
+```json
+{
+  "humanizerApi": {
+    "apiBaseUrl": "https://api.venice.ai/api/v1",
+    "apiKey": "$VENICE_API_KEY",
+    "model": "kimi-k3"
+  }
+}
+```
+
+The system prompt for that call is the
+[humanizer](https://github.com/jooray/humanizer) skill, vendored at
+`lib/skills/humanizer/SKILL.md`. It strips inflated significance, promotional
+adjectives, rule-of-three, em-dash overuse, negative parallelism and performed
+rigor, and it has a Slovak/Czech section for digests that are not in English.
+
+Three things worth knowing before turning it on:
+
+- **It is a second full call.** The skill is ~16k input tokens, several times
+  the digest it is editing, so the pass usually costs more than the digest did.
+  Use a writing model; the scorer will not do this job.
+- **The rewrite stays speakable.** The pass is told that the text is headed for
+  a speech engine, so it keeps the plain-text, spelled-out-numbers shape the
+  digest prompt produced instead of putting markdown back.
+- **It cannot cost you a digest.** An API error, a refusal, or a suspiciously
+  short answer (below 60% of the input) logs a warning and publishes the
+  original text.
+
+`--no-humanize` skips the pass for one run without editing the config.
+
+To update the vendored skill, see `lib/skills/humanizer/README.md`. The
+importable module is generated at build time and is not checked in, so there is
+no second copy to drift.
+
 ### Text to speech
 
 The digest can read itself aloud. Add a `ttsApi` block and the finished text is
@@ -414,6 +460,7 @@ means listening to it read asterisks aloud.
 | `rankingApi` | required | `{apiBaseUrl, apiKey, model, reasoningEffort?, batchSize?, concurrency?, jsonMode?}` for post scoring |
 | `digestApi` | required | `{apiBaseUrl, apiKey, model, temperature?, reasoningEffort?}` for digest generation |
 | `digestFallbackApi` | none | Same shape as `digestApi`. Used if the primary digest model fails after retries |
+| `humanizerApi` | none | `{apiBaseUrl, apiKey, model, temperature?, reasoningEffort?}`. Set it to run the finished digest through the humanizer skill |
 | `learnerApi` | falls back to `rankingApi` | `{apiBaseUrl, apiKey, model}` for preference learning |
 | `ttsApi` | none | `{apiBaseUrl, apiKey, model, voice?, speed?, format?, maxChars?}` for speech synthesis |
 | `ttsOutputPath` | none | Where to write audio. Supports `%Y %m %d %H %M %S` |
@@ -436,6 +483,7 @@ means listening to it read asterisks aloud.
 | *(first positional arg)* | Path to the config file. Defaults to `./digest.config.json` |
 | `--score-only` | Score posts into the cache and exit. No digest, no stdout output |
 | `--tts [path]` | Also synthesize the digest to audio. Without a path, uses `ttsOutputPath` |
+| `--no-humanize` | Skip the humanizer pass for this run, even if `humanizerApi` is set |
 
 ## Running it on a schedule
 
@@ -572,4 +620,8 @@ Run with `caddy run --config Caddyfile`, then set `http://localhost:9292/v1` as 
 
 ## License
 
-MIT
+MIT.
+
+`lib/skills/humanizer/SKILL.md` is vendored from
+[jooray/humanizer](https://github.com/jooray/humanizer), a fork of
+[blader/humanizer](https://github.com/blader/humanizer), also MIT.

@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ../scripts/sync-humanizer.mjs",
     "dev": "vite",
+    "prebuild": "node ../scripts/sync-humanizer.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "pretypecheck": "node ../scripts/sync-humanizer.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

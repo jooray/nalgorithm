@@ -15,6 +15,8 @@ import {
   createRanker,
   chatCompletion,
   chatCompletionWithRetry,
+  humanizeText,
+  HUMANIZER_SKILL_VERSION,
   synthesizeSpeech,
   pubkeyToHex,
   scoreCacheKey,
@@ -586,11 +588,34 @@ ${postsBlock}`
       }
     }
 
-    // 9. Output to stdout
+    // 9. Humanizer pass — an editing call over the finished digest.
+    // Before stdout, so what is published is what was edited; on any failure
+    // humanizeText returns the original, so this step cannot cost a digest.
+    if (config.humanizerApi && !args.noHumanize) {
+      log(`Humanizing with ${config.humanizerApi.model} (humanizer ${HUMANIZER_SKILL_VERSION})...`)
+      const before = digest.length
+      digest = await humanizeText(
+        {
+          apiBaseUrl: config.humanizerApi.apiBaseUrl,
+          apiKey: config.humanizerApi.apiKey,
+          model: config.humanizerApi.model,
+          reasoningEffort: config.humanizerApi.reasoningEffort,
+        },
+        digest,
+        {
+          forSpeech: true,
+          temperature: config.humanizerApi.temperature,
+          onWarning: (message) => log(message),
+        },
+      )
+      log(`Humanizer pass: ${before} chars in, ${digest.length} out`)
+    }
+
+    // 10. Output to stdout
     process.stdout.write(digest)
     process.stdout.write('\n')
 
-    // 10. Optionally synthesize the digest to audio.
+    // 11. Optionally synthesize the digest to audio.
     // Deliberately after stdout: the text is the primary product, so a TTS
     // failure must not cost you the digest you already paid to generate.
     if (ttsTarget && config.ttsApi) {

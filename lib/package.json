@@ -12,10 +12,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "skills"
   ],
   "scripts": {
+    "prebuild": "node ../scripts/sync-humanizer.mjs",
     "build": "tsc",
+    "predev": "node ../scripts/sync-humanizer.mjs",
     "dev": "tsc --watch"
   },
   "dependencies": {

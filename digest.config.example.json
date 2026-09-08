@@ -25,6 +25,11 @@
     "model": "qwen-3-6-plus",
     "temperature": 0.7
   },
+  "humanizerApi": {
+    "apiBaseUrl": "https://api.venice.ai/api/v1",
+    "apiKey": "$VENICE_API_KEY",
+    "model": "kimi-k3"
+  },
   "learnerApi": {
     "apiBaseUrl": "https://api.venice.ai/api/v1",
     "apiKey": "$VENICE_API_KEY",

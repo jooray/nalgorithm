@@ -49,6 +49,19 @@ export interface DigestConfig {
   digestFallbackApi?: ApiConfig & {
     temperature?: number
   }
+  /**
+   * Optional second pass that rewrites the finished digest with the humanizer
+   * skill (`lib/skills/humanizer/SKILL.md`) as its system prompt.
+   *
+   * Setting this block turns the pass on; `--no-humanize` skips it for one run.
+   * It costs a full extra call whose prompt is the ~16k-token skill, so it is
+   * off unless you ask for it. A failed or truncated rewrite keeps the original
+   * digest rather than losing it.
+   */
+  humanizerApi?: ApiConfig & {
+    /** Defaults to the skill's own frontmatter value (0.4). */
+    temperature?: number
+  }
   /** Optional separate LLM for preference learning. Falls back to rankingApi if not set. */
   learnerApi?: ApiConfig
   userPrompt: string
@@ -133,6 +146,8 @@ export interface ParsedArgs {
    * (use `ttsOutputPath` from the config), or `false` when not passed.
    */
   tts: string | boolean
+  /** `--no-humanize`: skip the humanizer pass for this run even if configured. */
+  noHumanize: boolean
 }
 
 /**
@@ -142,13 +157,15 @@ export interface ParsedArgs {
  * (`--tts out.mp3`) is never mistaken for the positional config path.
  */
 export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedArgs {
-  const result: ParsedArgs = { scoreOnly: false, tts: false }
+  const result: ParsedArgs = { scoreOnly: false, tts: false, noHumanize: false }
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
 
     if (arg === '--score-only') {
       result.scoreOnly = true
+    } else if (arg === '--no-humanize') {
+      result.noHumanize = true
     } else if (arg === '--tts') {
       const next = argv[i + 1]
       if (next && !next.startsWith('--')) {
@@ -243,6 +260,22 @@ export function loadConfig(path?: string): DigestConfig {
     }
   }
 
+  // Parse optional humanizerApi
+  const humanizerApi = config.humanizerApi as Record<string, unknown> | undefined
+  let parsedHumanizerApi: DigestConfig['humanizerApi']
+  if (humanizerApi) {
+    if (!humanizerApi.apiBaseUrl || !humanizerApi.apiKey || !humanizerApi.model) {
+      throw new Error('Config: "humanizerApi" requires apiBaseUrl, apiKey, and model')
+    }
+    parsedHumanizerApi = {
+      apiBaseUrl: humanizerApi.apiBaseUrl as string,
+      apiKey: humanizerApi.apiKey as string,
+      model: humanizerApi.model as string,
+      reasoningEffort: humanizerApi.reasoningEffort as ReasoningEffort | undefined,
+      temperature: humanizerApi.temperature as number | undefined,
+    }
+  }
+
   // Parse optional learnerApi (falls back to rankingApi in main.ts)
   const learnerApi = config.learnerApi as Record<string, unknown> | undefined
   const parsedLearnerApi = (learnerApi?.apiBaseUrl && learnerApi?.apiKey && learnerApi?.model)
@@ -274,6 +307,7 @@ export function loadConfig(path?: string): DigestConfig {
       reasoningEffort: digestApi.reasoningEffort as ReasoningEffort | undefined,
     },
     digestFallbackApi: parsedDigestFallbackApi,
+    humanizerApi: parsedHumanizerApi,
     learnerApi: parsedLearnerApi,
     userPrompt: config.userPrompt as string,
     learnFromLikes: (config.learnFromLikes as boolean) ?? true,

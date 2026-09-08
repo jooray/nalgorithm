@@ -21,3 +21,6 @@ digest.scores.json
 
 # Local deploy script (host-specific, not for the public repo)
 deploy.sh
+
+# Generated from lib/skills/humanizer/SKILL.md by scripts/sync-humanizer.mjs
+lib/src/humanizer-skill.generated.ts
