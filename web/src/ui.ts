@@ -154,6 +154,9 @@ export function initUI(
   const selectClient = $<HTMLSelectElement>('#select-client')
   selectClient.addEventListener('change', () => toggleCustomClientField(selectClient.value))
 
+  const selectScorer = $<HTMLSelectElement>('#select-scorer')
+  selectScorer.addEventListener('change', () => toggleDecisionFields(selectScorer.value))
+
   // Clear scores
   const btnClearScores = $<HTMLButtonElement>('#btn-clear-scores')
   btnClearScores.addEventListener('click', () => {
@@ -265,6 +268,8 @@ export function readFieldsToSettings(): AppSettings {
     apiBaseUrl: $<HTMLInputElement>('#input-api-base').value.trim(),
     apiKey: $<HTMLInputElement>('#input-api-key').value.trim(),
     model: $<HTMLInputElement>('#input-model').value.trim(),
+    scorer: $<HTMLSelectElement>('#select-scorer').value === 'decision' ? 'decision' : 'chat',
+    decisionModel: $<HTMLInputElement>('#input-decision-model').value.trim() || 'jev-latest',
     digestModel: $<HTMLInputElement>('#input-digest-model').value.trim(),
     learnerModel: $<HTMLInputElement>('#input-learner-model').value.trim(),
     digestTopN: parseInt($<HTMLInputElement>('#input-digest-topn').value, 10) || 15,
@@ -312,6 +317,10 @@ export function updateIdentityState(): void {
   }
 }
 
+function toggleDecisionFields(scorer: string): void {
+  $('#decision-fields').classList.toggle('hidden', scorer !== 'decision')
+}
+
 function toggleCustomClientField(preset: string): void {
   $('#input-client-custom').classList.toggle('hidden', preset !== 'custom')
   $('#client-hint').classList.toggle('hidden', preset !== 'custom')
@@ -346,6 +355,9 @@ function populateFields(settings: AppSettings): void {
   $<HTMLInputElement>('#input-api-base').value = settings.apiBaseUrl
   $<HTMLInputElement>('#input-api-key').value = settings.apiKey
   $<HTMLInputElement>('#input-model').value = settings.model
+  $<HTMLSelectElement>('#select-scorer').value = settings.scorer
+  $<HTMLInputElement>('#input-decision-model').value = settings.decisionModel
+  toggleDecisionFields(settings.scorer)
   $<HTMLInputElement>('#input-digest-model').value = settings.digestModel
   $<HTMLInputElement>('#input-learner-model').value = settings.learnerModel
   $<HTMLInputElement>('#input-digest-topn').value = String(settings.digestTopN)

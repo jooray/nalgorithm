@@ -7,7 +7,15 @@
  */
 
 export { createFetcher, pubkeyToHex } from './fetcher.js'
-export { createRanker, sortByRelevance, scoreCacheKey } from './ranker.js'
+export {
+  createRanker,
+  sortByRelevance,
+  scoreCacheKey,
+  buildDecisionRequest,
+  DECISION_RUBRIC,
+} from './ranker.js'
+export { decisionCompletion, decisionCompletionWithRetry, createPacer } from './decision.js'
+export type { DecisionRequest, DecisionResponse, DecisionScoreAnswer, DecisionScoreQuestion } from './decision.js'
 export { createLearner } from './learner.js'
 export { chatCompletion, chatCompletionWithRetry, chatCompletionStream } from './llm.js'
 export { synthesizeSpeech, splitTextForTTS, DEFAULT_TTS_MAX_CHARS } from './tts.js'
@@ -53,6 +61,8 @@ export type {
   ScoredPost,
   ScoreOptions,
   DebugEntry,
+  ScorerKind,
+  DecisionShape,
 
   // Learner
   Learner,

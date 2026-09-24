@@ -93,6 +93,17 @@
           <input type="text" id="input-model" list="model-list" placeholder="deepseek-v4-flash-0731" spellcheck="false">
           <p class="field-hint">Does the bulk of the work. Keep it cheap and fast.</p>
 
+          <label for="select-scorer">Scoring method</label>
+          <select id="select-scorer">
+            <option value="chat">Chat model (scoring model above)</option>
+            <option value="decision">Decision model (Venice, beta)</option>
+          </select>
+          <div id="decision-fields" class="hidden">
+            <label for="input-decision-model">Decision model</label>
+            <input type="text" id="input-decision-model" placeholder="jev-latest" spellcheck="false">
+          </div>
+          <p class="field-hint" id="scorer-hint">A decision model (Venice's <code>jev-latest</code>) rates each post against a fixed rubric instead of writing a reply: much faster and cheaper, and a post scores the same on every run. It writes no justification, and its scores run lower than a chat model's. Venice runs it on the <em>anonymized</em> tier, not the private one. The scoring model above still writes digests and learns from likes. Switching re-scores the feed.</p>
+
           <label for="input-digest-model">Model (digest)</label>
           <input type="text" id="input-digest-model" list="model-list" placeholder="same as scoring model" spellcheck="false">
           <p class="field-hint">Runs once over your top posts, so a stronger model costs little. Blank reuses the scoring model.</p>

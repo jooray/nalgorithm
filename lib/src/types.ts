@@ -69,7 +69,41 @@ export interface RankerConfig {
    * value your provider's rate limits will tolerate.
    */
   concurrency?: number
+  /**
+   * How posts are scored (default: `'chat'`).
+   *
+   * - `'chat'`: a chat-completions model reads a numbered batch and returns
+   *   `[post, score, justification]` tuples. Works with any OpenAI-compatible
+   *   provider and writes a real justification.
+   * - `'decision'`: a typed-decision model (Venice `jev-latest`, at
+   *   `POST {apiBaseUrl}/decisions`) scores each post against a fixed rubric
+   *   and returns a probability distribution. Much faster and cheaper, with a
+   *   continuous score that reproduces across runs; the justification is the
+   *   distribution in words, not prose. `model` must be a decision model,
+   *   and `reasoningEffort` / `jsonMode` do not apply.
+   */
+  scorer?: ScorerKind
+  /** Decision scorer only: where the user profile goes. See {@link DecisionShape}. */
+  decisionShape?: DecisionShape
+  /**
+   * Decision scorer only: client-side ceiling on request starts per minute
+   * (default: 90). Venice allows 100 per key, and counts 429s toward a
+   * lockout, so pacing beats retrying.
+   */
+  requestsPerMinute?: number
 }
+
+export type ScorerKind = 'chat' | 'decision'
+
+/**
+ * Where the decision scorer puts the user's profile.
+ *
+ * - `'profile-in-question'` (default): repeated inside every post's question.
+ *   The profile is policy, and decision models follow policy in the question
+ *   more reliably than in the state.
+ * - `'profile-in-state'`: sent once per request as the state. Fewer tokens.
+ */
+export type DecisionShape = 'profile-in-question' | 'profile-in-state'
 
 export interface LearnerConfig {
   /** OpenAI-compatible API base URL */

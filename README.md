@@ -338,6 +338,75 @@ a run that spends its time backing off is slower than one that never triggered
 the limit. If you start seeing 429s in the console, come back down. Somewhere
 around 3-5 is a reasonable starting point on a paid Venice key.
 
+### Decision-model scoring (optional)
+
+Scoring can use a typed-decision model instead of a chat model: Venice's
+`jev-latest`, served at `/decisions` rather than `/chat/completions`. It isn't
+asked to write anything. Each post gets one question against a fixed
+six-level rubric, and the model returns a probability for each level. The
+score is the weighted level mapped to 0-10, so it is continuous where a chat
+model's is an integer.
+
+```json
+"rankingApi": {
+  "apiBaseUrl": "https://api.venice.ai/api/v1",
+  "apiKey": "$VENICE_API_KEY",
+  "model": "jev-latest",
+  "scorer": "decision",
+  "concurrency": 4
+}
+```
+
+In the web app it's **Scoring method → Decision model** in settings. The
+scoring model field stays a chat model and keeps writing digests and learning
+from likes. Chat scoring stays the default.
+
+Measured on one real feed: 602 posts (a 48-hour window from 765 follows plus
+152 posts the account had liked), each scorer run twice:
+
+| | chat `deepseek-v4-flash-0731` (low) | decision `jev-latest` |
+|---|---:|---:|
+| Wall time for 602 posts | 292-338 s | 21 s (limited by pacing) |
+| Distinct score values | 11 | 271 |
+| Posts tied at the #15 cutoff | 41-48 | 1 |
+| Run-to-run Spearman | 0.945 | 0.997 |
+| Same top 15 across two runs (Jaccard) | 0.50 | 0.88 |
+| Mean score change between runs | 0.46 | 0.08 |
+| Liked vs. feed AUC | 0.62-0.64 | 0.60 |
+| Approximate cost per 602 posts | ~$0.02 | $0.018 |
+
+What that means:
+
+- **Speed and stability are the gain.** The chat scorer gave 41-48 posts the
+  same score as the 15th, so the digest's top 15 was mostly picked by recency,
+  and a rerun kept only half of it. Jev's ordering holds still.
+- **Cost is about even.** Jev is cheap per token, but the default shape
+  repeats your profile in every question.
+  `"decisionShape": "profile-in-state"` cuts that to ~$0.010, at the cost of a
+  less stable top 15 (0.76).
+- **Quality is about even, and it's a different kind of judgement.** The two
+  agree at Spearman 0.86. Jev is literal: posts that match an interest you
+  wrote down score high, and posts a chat model would link to your interests
+  by inference score in the middle (a residency comparison of Paraguay,
+  Uruguay and Panama got 9 from DeepSeek and 5 from jev, since the profile
+  never mentions residency). If you want those, write them into the profile.
+- **Jev's scores run lower.** Keep that in mind if you threshold on them.
+- **There is no justification.** The card shows the level distribution in
+  words instead ("70% clearly relevant…; 25% directly about a core interest…").
+- **Privacy tier.** Venice runs `jev-latest` on its *anonymized* tier.
+  `deepseek-v4-flash-0731` is on the *private* one.
+- **It's a beta endpoint.** If a call fails, those posts get the usual
+  fallback score and aren't cached, the same as a failed chat batch.
+
+Switching scorer re-scores: cache entries record which scorer made them, and
+entries from the other scorer are ignored. Requests are paced to
+`requestsPerMinute` (default 90) because Venice allows 100 a minute per key and
+locks out a key after 50 failed calls, so retrying into 429s is the wrong
+fix.
+
+`scripts/bench-scorers.mjs` reruns this comparison against your own
+config: `node scripts/bench-scorers.mjs digest.config.json --out /tmp/bench`.
+
 ### Learned prompt
 
 If `learnFromLikes` is true (the default), the tool fetches your recent Nostr likes and uses them to build a preference summary. This learned prompt is saved to a file (`digest.learned.json`) and evolves with each run:
@@ -457,7 +526,7 @@ means listening to it read asterisks aloud.
 |--------|---------|-------------|
 | `npub` | required | Your Nostr npub |
 | `relays` | required | Array of relay WebSocket URLs |
-| `rankingApi` | required | `{apiBaseUrl, apiKey, model, reasoningEffort?, batchSize?, concurrency?, jsonMode?}` for post scoring |
+| `rankingApi` | required | `{apiBaseUrl, apiKey, model, reasoningEffort?, batchSize?, concurrency?, jsonMode?, scorer?, decisionShape?, requestsPerMinute?}` for post scoring |
 | `digestApi` | required | `{apiBaseUrl, apiKey, model, temperature?, reasoningEffort?}` for digest generation |
 | `digestFallbackApi` | none | Same shape as `digestApi`. Used if the primary digest model fails after retries |
 | `humanizerApi` | none | `{apiBaseUrl, apiKey, model, temperature?, reasoningEffort?}`. Set it to run the finished digest through the humanizer skill |

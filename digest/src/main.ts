@@ -52,6 +52,11 @@ interface ScoreCacheFile {
     justification?: string
     /** Unix timestamp (seconds) of the post */
     createdAt: number
+    /**
+     * Which scorer produced it. Absent means chat, so caches written before
+     * the decision scorer existed stay valid without a re-score.
+     */
+    scorer?: 'decision'
   }>
 }
 
@@ -320,6 +325,9 @@ async function main(): Promise<void> {
     batchSize: config.rankingApi.batchSize,
     concurrency: config.rankingApi.concurrency,
     jsonMode: config.rankingApi.jsonMode,
+    scorer: config.rankingApi.scorer,
+    decisionShape: config.rankingApi.decisionShape,
+    requestsPerMinute: config.rankingApi.requestsPerMinute,
   })
 
   try {
@@ -418,6 +426,13 @@ async function main(): Promise<void> {
     const maxCacheAge = (config.scoreCacheTTLDays ?? 90) * 86400
     const scoreCache = loadScoreCache(scoreCachePath, maxCacheAge)
 
+    const cacheEntry = (sp: ScoredPost): ScoreCacheFile['scores'][string] => ({
+      score: sp.score,
+      justification: sp.justification,
+      createdAt: sp.createdAt,
+      ...(config.rankingApi.scorer === 'decision' ? { scorer: 'decision' as const } : {}),
+    })
+
     // Split posts into cached and uncached
     const cachedScores = new Map<string, { score: number; justification?: string }>()
     const uncachedPosts: FetchedPost[] = []
@@ -425,7 +440,9 @@ async function main(): Promise<void> {
     for (const post of posts) {
       // Keyed by the boosted event where there is one — see scoreCacheKey.
       const cached = scoreCache?.scores[scoreCacheKey(post)]
-      if (cached) {
+      // The two scorers sit on different scales (a decision score runs lower),
+      // so a score from the other one would mis-rank rather than save a call.
+      if (cached && (cached.scorer ?? 'chat') === config.rankingApi.scorer) {
         cachedScores.set(post.id, { score: cached.score, justification: cached.justification })
       } else {
         uncachedPosts.push(post)
@@ -437,7 +454,7 @@ async function main(): Promise<void> {
     // Score only the uncached posts
     let newScoredPosts: ScoredPost[] = []
     if (uncachedPosts.length > 0) {
-      log(`Scoring ${uncachedPosts.length} posts with ${config.rankingApi.model}...`)
+      log(`Scoring ${uncachedPosts.length} posts with ${config.rankingApi.model} (${config.rankingApi.scorer} scorer)...`)
       const debug: DebugEntry[] = []
 
       // Persist as we go. A long scoring run that is interrupted — a hung
@@ -460,11 +477,7 @@ async function main(): Promise<void> {
         onBatchScored: (batch) => {
           for (const sp of batch) {
             if (!sp.defaultScore) {
-              runningCache.scores[scoreCacheKey(sp)] = {
-                score: sp.score,
-                justification: sp.justification,
-                createdAt: sp.createdAt,
-              }
+              runningCache.scores[scoreCacheKey(sp)] = cacheEntry(sp)
             }
           }
           // Throttled: the cache file runs to several MB, and rewriting it on
@@ -509,11 +522,7 @@ async function main(): Promise<void> {
     }
     for (const sp of allScoredPosts) {
       if (!sp.defaultScore) {
-        updatedCache.scores[scoreCacheKey(sp)] = {
-          score: sp.score,
-          justification: sp.justification,
-          createdAt: sp.createdAt,
-        }
+        updatedCache.scores[scoreCacheKey(sp)] = cacheEntry(sp)
       }
     }
     saveScoreCache(scoreCachePath, updatedCache)

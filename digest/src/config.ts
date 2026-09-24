@@ -6,7 +6,7 @@
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import type { TTSConfig, ReasoningEffort } from 'nalgorithm'
+import type { TTSConfig, ReasoningEffort, ScorerKind, DecisionShape } from 'nalgorithm'
 import { buildDigestSystemPrompt, DEFAULT_DIGEST_PROMPT } from 'nalgorithm'
 
 export interface ApiConfig {
@@ -36,6 +36,16 @@ export interface DigestConfig {
      * behind that default.
      */
     jsonMode?: boolean
+    /**
+     * `"chat"` (default) or `"decision"`. With `"decision"`, `model` must be a
+     * typed-decision model (Venice `jev-latest`), scored at `/decisions`.
+     * Switching re-scores: cached scores from the other scorer are ignored.
+     */
+    scorer?: ScorerKind
+    /** Decision scorer only. See the library's `DecisionShape`. */
+    decisionShape?: DecisionShape
+    /** Decision scorer only: request starts per minute (default 90). */
+    requestsPerMinute?: number
   }
   digestApi: ApiConfig & {
     temperature?: number
@@ -184,6 +194,12 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): ParsedArgs {
   return result
 }
 
+function parseScorer(value: unknown): ScorerKind {
+  if (value === undefined || value === 'chat') return 'chat'
+  if (value === 'decision') return 'decision'
+  throw new Error(`Config: "rankingApi.scorer" must be "chat" or "decision", got ${JSON.stringify(value)}`)
+}
+
 export function loadConfig(path?: string): DigestConfig {
   const configPath = resolve(path ?? parseArgs().configPath ?? './digest.config.json')
 
@@ -298,6 +314,9 @@ export function loadConfig(path?: string): DigestConfig {
       batchSize: (rankingApi.batchSize as number) ?? 20,
       concurrency: (rankingApi.concurrency as number) ?? 1,
       jsonMode: (rankingApi.jsonMode as boolean | undefined) ?? false,
+      scorer: parseScorer(rankingApi.scorer),
+      decisionShape: rankingApi.decisionShape as DecisionShape | undefined,
+      requestsPerMinute: rankingApi.requestsPerMinute as number | undefined,
     },
     digestApi: {
       apiBaseUrl: digestApi.apiBaseUrl as string,

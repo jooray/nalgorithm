@@ -99,11 +99,13 @@ async function scorePosts(
   /** Receives each batch as it lands, for progressive rendering. */
   onBatch?: (batch: ScoredPost[]) => void
 ): Promise<ScoredPost[]> {
+  const decision = settings.scorer === 'decision'
   const ranker = createRanker({
     concurrency: settings.concurrency,
     apiBaseUrl: settings.apiBaseUrl,
     apiKey: settings.apiKey,
-    model: settings.model,
+    model: decision ? settings.decisionModel : settings.model,
+    scorer: settings.scorer,
     batchSize: settings.batchSize,
   })
 
@@ -125,6 +127,7 @@ async function scorePosts(
             id: scoreCacheKey(p),
             score: p.score,
             justification: p.justification,
+            ...(decision ? { scorer: 'decision' as const } : {}),
           }))
         )
       }
@@ -273,7 +276,9 @@ async function runFeed(): Promise<void> {
       // Keyed by the boosted event where there is one, so a boost of something
       // already scored is a cache hit rather than a fresh LLM call.
       const cached = scoreCache.get(scoreCacheKey(p))
-      if (cached) {
+      // A score from the other scorer sits on a different scale, so it would
+      // mis-rank the feed rather than save a call.
+      if (cached && (cached.scorer ?? 'chat') === settings.scorer) {
         cachedPosts.push({ ...p, score: cached.score, justification: cached.justification })
       } else {
         uncachedPosts.push(p)

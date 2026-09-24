@@ -86,6 +86,8 @@ All three modules accept an OpenAI-compatible API configuration:
 | `apiKey` | API key | (required) |
 | `model` | Model name | `grok-3-mini` |
 | `batchSize` | Posts per LLM call (ranker only) | `20` |
+| `scorer` | `chat` or `decision` (ranker only). `decision` scores at `/decisions` with a typed-decision model such as Venice's `jev-latest`; see the main README | `chat` |
+| `decisionShape` | `profile-in-question` or `profile-in-state` (decision scorer only) | `profile-in-question` |
 | `relays` | Nostr relay URLs (fetcher only) | (required) |
 
 Works with any OpenAI-compatible endpoint: Venice AI, OpenRouter, Ollama, etc.

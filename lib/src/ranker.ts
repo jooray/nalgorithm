@@ -1,12 +1,18 @@
 /**
  * Nalgorithm — Ranker module
  *
- * Scores posts for relevance using an LLM. Sends posts in batches
- * using short numeric indexes (not hex IDs) to avoid LLM truncation.
- * Validates the JSON response and returns sorted results with justifications.
+ * Scores posts for relevance, with one of two scorers:
+ *
+ * - chat (default): sends posts in batches to a chat model using short numeric
+ *   indexes (not hex IDs) to avoid LLM truncation, and validates the JSON
+ *   response it gets back, justifications included.
+ * - decision: asks a typed-decision model (Venice `jev-latest`) one rubric
+ *   question per post and reads the score off the returned distribution.
  */
 
 import { chatCompletionWithRetry } from './llm.js'
+import { createPacer, decisionCompletionWithRetry } from './decision.js'
+import type { DecisionScoreQuestion } from './decision.js'
 import type {
   RankerConfig,
   Ranker,
@@ -16,6 +22,7 @@ import type {
   DebugEntry,
   LLMConfig,
   ProfileData,
+  DecisionShape,
 } from './types.js'
 
 const DEFAULT_BATCH_SIZE = 20
@@ -443,6 +450,105 @@ function validateScoreResponse(
   return { scores: results, error: notes.length > 0 ? notes.join('. ') : undefined }
 }
 
+// ─── Decision-model scoring ─────────────────────────────────────────────────
+
+/**
+ * The rubric a decision model scores each post against, lowest level first.
+ *
+ * With a decision model the rubric *is* the prompt: the levels are what it
+ * scores against, and the question text only frames them. These are the chat
+ * prompt's 0-10 bands collapsed to six levels, kept drab and literal on
+ * purpose. Level `i` maps to `i * 2` on the 0-10 scale, and because the
+ * answer is a probability-weighted level the result is continuous.
+ */
+export const DECISION_RUBRIC = [
+  'Spam, completely irrelevant, or content the user explicitly wants filtered out.',
+  'Off-topic, low-effort, or noise (greetings, bare images, memes). No meaningful connection to the user\'s interests.',
+  'Mostly irrelevant but not objectionable. Weak or indirect connection at best.',
+  'Tangentially related to the user\'s interests, or generic content that is not off-topic.',
+  'Clearly relevant to one of the user\'s interests, with reasonable depth or insight.',
+  'Directly about a core interest of the user, substantive, high signal. The user would actively seek this out.',
+]
+
+const DECISION_MAX_LEVEL = DECISION_RUBRIC.length - 1
+
+/** A post as the text a decision question carries: no numbering, no framing. */
+function formatPostForDecision(post: FetchedPost, profiles?: Map<string, ProfileData>): string {
+  // Reuse the chat formatter and drop its "1. " prefix, so both scorers see
+  // exactly the same truncation, boost and quote handling.
+  return formatPostForPrompt(post, 0, profiles).replace(/^1\. /, '')
+}
+
+function buildUserDescription(userPrompt: string, learnedPrompt?: string): string {
+  const parts = ['=== User Profile ===', userPrompt.trim()]
+  if (learnedPrompt && learnedPrompt.trim()) {
+    parts.push('', '=== Learned Preferences (from posts the user liked) ===', learnedPrompt.trim())
+  }
+  return parts.join('\n')
+}
+
+const DECISION_MECHANICS = `Score a boosted post by the original content being boosted. Score a quote post by the quote and the quoted post together. Short low-effort posts (greetings, a single emoji, a bare link or image) score low unless the user's profile explicitly values them. A post matching several of the user's interests scores higher than one matching a single interest. Anything the user says they do not care about or want filtered out scores at the bottom, however well made it is.`
+
+/**
+ * Build one decision request for a batch of posts.
+ *
+ * Every post gets its own `score` question, so posts never share a state and
+ * cannot pull each other's scores around (they do when several items sit in
+ * one state). Where the user's profile goes depends on `shape`:
+ *
+ * - `profile-in-question`: the profile rides inside every question and the
+ *   state is empty. Rules like "I don't care about price speculation" are
+ *   policy, and a decision model follows policy written in the question more
+ *   reliably than policy left in the state. Costs the profile once per post,
+ *   which at decision-model prices is a rounding error.
+ * - `profile-in-state`: the profile is the state, sent once per request, and
+ *   each question carries only its post. Cheaper on tokens.
+ */
+export function buildDecisionRequest(
+  posts: FetchedPost[],
+  userPrompt: string,
+  learnedPrompt: string | undefined,
+  shape: DecisionShape,
+  profiles?: Map<string, ProfileData>
+): { state: string; questions: Record<string, DecisionScoreQuestion> } {
+  const user = buildUserDescription(userPrompt, learnedPrompt)
+  const questions: Record<string, DecisionScoreQuestion> = {}
+
+  posts.forEach((post, i) => {
+    const postText = formatPostForDecision(post, profiles)
+    const instructions =
+      shape === 'profile-in-question'
+        ? `How relevant is the Nostr post below to this user's interests and preferences?\n\n${user}\n\n${DECISION_MECHANICS}\n\n=== Post ===\n${postText}`
+        : `How relevant is the Nostr post below to the interests and preferences of the user described in the state? ${DECISION_MECHANICS}\n\n=== Post ===\n${postText}`
+    questions[`p${i + 1}`] = { type: 'score', instructions, criteria: DECISION_RUBRIC }
+  })
+
+  const state =
+    shape === 'profile-in-question'
+      ? 'Relevance scoring of Nostr posts for one user. Everything needed is in each question.'
+      : user
+
+  return { state, questions }
+}
+
+/**
+ * Turn a level distribution into a one-line justification.
+ *
+ * A decision model writes no prose, but its distribution is itself a reason:
+ * "74% clearly relevant, 20% core interest" says why a post sits where it does,
+ * and how sure the model was.
+ */
+function describeDistribution(probabilities: Record<string, number>): string {
+  const ranked = Object.entries(probabilities)
+    .map(([level, p]) => ({ level: Number(level), p }))
+    .filter((e) => e.p >= 0.15)
+    .sort((a, b) => b.p - a.p)
+    .slice(0, 2)
+  return ranked
+    .map((e) => `${Math.round(e.p * 100)}% ${DECISION_RUBRIC[e.level]?.split('.')[0].toLowerCase() ?? `level ${e.level}`}`)
+    .join('; ')
+}
+
 /**
  * Chunk an array into smaller arrays.
  */
@@ -461,6 +567,9 @@ export function createRanker(config: RankerConfig): Ranker {
   const batchSize = config.batchSize ?? DEFAULT_BATCH_SIZE
   const concurrency = Math.max(1, config.concurrency ?? DEFAULT_CONCURRENCY)
   const jsonMode = config.jsonMode ?? false
+  const scorer = config.scorer ?? 'chat'
+  const decisionShape = config.decisionShape ?? 'profile-in-question'
+  const pace = createPacer(config.requestsPerMinute)
   const llmConfig: LLMConfig = {
     apiBaseUrl: config.apiBaseUrl,
     apiKey: config.apiKey,
@@ -468,7 +577,60 @@ export function createRanker(config: RankerConfig): Ranker {
     reasoningEffort: config.reasoningEffort,
   }
 
-  async function scoreBatch(
+  async function scoreBatchDecision(
+    posts: FetchedPost[],
+    userPrompt: string,
+    learnedPrompt: string | undefined,
+    batchIndex: number,
+    debug?: DebugEntry[],
+    profiles?: Map<string, ProfileData>
+  ): Promise<Map<string, { score: number; justification: string; defaultScore?: boolean }>> {
+    const scoreMap = new Map<string, { score: number; justification: string; defaultScore?: boolean }>()
+    let rawResponse: string | undefined
+    let debugError: string | undefined
+
+    try {
+      const request = buildDecisionRequest(posts, userPrompt, learnedPrompt, decisionShape, profiles)
+      const response = await decisionCompletionWithRetry(llmConfig, request, pace)
+      rawResponse = JSON.stringify(response)
+
+      posts.forEach((post, i) => {
+        const answer = response.answers[`p${i + 1}`]
+        if (!answer || typeof answer.score !== 'number' || isNaN(answer.score)) return
+        const level = Math.max(0, Math.min(DECISION_MAX_LEVEL, answer.score))
+        scoreMap.set(post.id, {
+          // Two decimals: the second is near the model's run-to-run jitter,
+          // but rounding coarser recreates the ties at the top-N cutoff that
+          // a continuous score is meant to remove.
+          score: Math.round((level / DECISION_MAX_LEVEL) * 1000) / 100,
+          justification: describeDistribution(answer.probabilities ?? {}),
+        })
+      })
+      if (scoreMap.size < posts.length) {
+        debugError = `Decision response answered ${scoreMap.size}/${posts.length} questions`
+      }
+    } catch (err) {
+      debugError = `Decision call failed: ${(err as Error).message}`
+    }
+
+    debug?.push({
+      batch: batchIndex,
+      rawResponse,
+      error: debugError,
+      postCount: posts.length,
+      scoredCount: scoreMap.size,
+    })
+    if (debugError) console.warn(`[Ranker] Batch ${batchIndex}: ${debugError}`)
+
+    for (const post of posts) {
+      if (!scoreMap.has(post.id)) {
+        scoreMap.set(post.id, { score: DEFAULT_SCORE, justification: '', defaultScore: true })
+      }
+    }
+    return scoreMap
+  }
+
+  async function scoreBatchChat(
     posts: FetchedPost[],
     userPrompt: string,
     learnedPrompt: string | undefined,
@@ -589,9 +751,9 @@ export function createRanker(config: RankerConfig): Ranker {
         const index = nextBatch++
         if (index >= batches.length) return
 
-        // scoreBatch handles its own errors and falls back to default scores,
+        // Both scorers handle their own errors and falls back to default scores,
         // so one bad batch cannot kill a worker and strand the rest.
-        const batchScores = await scoreBatch(
+        const batchScores = await (scorer === 'decision' ? scoreBatchDecision : scoreBatchChat)(
           batches[index],
           options.userPrompt,
           options.learnedPrompt,

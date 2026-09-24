@@ -21,6 +21,13 @@ export interface AppSettings {
   apiBaseUrl: string
   apiKey: string
   model: string
+  /**
+   * How posts are scored: `chat` uses `model`, `decision` uses
+   * `decisionModel` on the provider's `/decisions` endpoint (Venice only).
+   */
+  scorer: 'chat' | 'decision'
+  /** Decision model used when `scorer` is `decision`. */
+  decisionModel: string
   /** Model for digest writing. Falls back to `model` when blank. */
   digestModel: string
   /** Model for learning from likes. Falls back to `model` when blank. */
@@ -59,6 +66,8 @@ export interface AppSettings {
 export interface CachedScore {
   score: number
   justification?: string
+  /** Which scorer produced it; absent means chat, as every older entry was. */
+  scorer?: 'decision'
 }
 
 /** Max age for cache date-keys before pruning (30 days) */
@@ -91,6 +100,8 @@ const DEFAULTS: AppSettings = {
   // Keep this pointing at a model that is actually live in the provider's
   // catalog — a delisted default makes the first run fail for every new user.
   model: 'deepseek-v4-flash-0731',
+  scorer: 'chat',
+  decisionModel: 'jev-latest',
   // Blank means "reuse the scoring model". A digest runs once over ~15 posts,
   // so a stronger model here costs little; scoring is the expensive part.
   digestModel: '',
@@ -129,6 +140,8 @@ export function loadSettings(): AppSettings {
     apiBaseUrl: getItem('apiBaseUrl') ?? DEFAULTS.apiBaseUrl,
     apiKey: getItem('apiKey') ?? DEFAULTS.apiKey,
     model: getItem('model') ?? DEFAULTS.model,
+    scorer: getItem('scorer') === 'decision' ? 'decision' : 'chat',
+    decisionModel: getItem('decisionModel') || DEFAULTS.decisionModel,
     digestModel: getItem('digestModel') ?? DEFAULTS.digestModel,
     learnerModel: getItem('learnerModel') ?? DEFAULTS.learnerModel,
     digestTopN: parseInt(getItem('digestTopN') ?? '', 10) || DEFAULTS.digestTopN,
@@ -175,6 +188,8 @@ export function saveSettings(settings: AppSettings): void {
   setItem('apiBaseUrl', settings.apiBaseUrl)
   setItem('apiKey', settings.apiKey)
   setItem('model', settings.model)
+  setItem('scorer', settings.scorer)
+  setItem('decisionModel', settings.decisionModel)
   setItem('digestModel', settings.digestModel)
   setItem('learnerModel', settings.learnerModel)
   setItem('digestTopN', String(settings.digestTopN))
@@ -228,7 +243,7 @@ export function loadScoreCache(): Map<string, CachedScore> {
  * Add scored entries to the cache and save (writes to today's date-key).
  */
 export function cacheScores(
-  entries: Array<{ id: string; score: number; justification?: string }>
+  entries: Array<{ id: string; score: number; justification?: string; scorer?: 'decision' }>
 ): void {
   const key = SCORE_CACHE_PREFIX + todayKey()
   let bucket: Record<string, CachedScore> = {}
@@ -239,7 +254,7 @@ export function cacheScores(
     // start fresh
   }
   for (const e of entries) {
-    bucket[e.id] = { score: e.score, justification: e.justification }
+    bucket[e.id] = { score: e.score, justification: e.justification, ...(e.scorer ? { scorer: e.scorer } : {}) }
   }
   localStorage.setItem(key, JSON.stringify(bucket))
 }
@@ -299,6 +314,7 @@ export function validateSettings(settings: AppSettings): string | null {
   if (!settings.apiBaseUrl.trim()) return 'API Base URL is required'
   if (!settings.apiKey.trim()) return 'API Key is required'
   if (!settings.model.trim()) return 'Model name is required'
+  if (settings.scorer === 'decision' && !settings.decisionModel.trim()) return 'Decision model name is required'
   if (!settings.userPrompt.trim()) return 'User prompt is required — describe your interests'
   return null
 }

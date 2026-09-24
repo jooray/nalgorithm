@@ -15,6 +15,8 @@ sortByRelevance(posts: ScoredPost[]): ScoredPost[]
 pubkeyToHex(input: string): string
 chatCompletion(config: LLMConfig, messages: ChatMessage[], jsonMode?: boolean): Promise<string>
 chatCompletionWithRetry(config: LLMConfig, messages: ChatMessage[], jsonMode?: boolean): Promise<string>
+decisionCompletion(config: LLMConfig, request: DecisionRequest): Promise<DecisionResponse>
+buildDecisionRequest(posts, userPrompt, learnedPrompt, shape, profiles?): DecisionRequest
 ```
 
 ---
@@ -90,8 +92,29 @@ interface RankerConfig {
   apiKey: string       // API key
   model: string        // Model name
   batchSize?: number   // Posts per LLM call (default: 20)
+  concurrency?: number // Batches in flight at once (default: 1)
+  reasoningEffort?: ReasoningEffort // chat scorer only
+  jsonMode?: boolean   // chat scorer only (default: false)
+  scorer?: 'chat' | 'decision'      // default: 'chat'
+  decisionShape?: 'profile-in-question' | 'profile-in-state' // decision only
+  requestsPerMinute?: number        // decision only (default: 90)
 }
 ```
+
+`scorer: 'decision'` sends each batch to `POST {apiBaseUrl}/decisions` instead
+of `/chat/completions`, with `model` set to a typed-decision model (Venice's
+`jev-latest`). Every post becomes one `score` question against a six-level
+rubric (`DECISION_RUBRIC`), and the returned probability-weighted level is
+mapped to 0-10 (level × 2), so scores are continuous rather than integers. The
+`justification` is the level distribution in words ("70% clearly relevant…;
+25% directly about a core interest…"), since the model writes no prose.
+Requests are paced to `requestsPerMinute` rather than retried into 429s: Venice
+allows 100 a minute per key and locks a key out after 50 failed calls.
+
+`decisionShape` picks where the user's profile goes: inside every question
+(`profile-in-question`, default) or once in the request's state
+(`profile-in-state`, ~45% fewer tokens). Posts always get their own question
+and never share a state.
 
 ### Returns: `Ranker`
 
@@ -110,7 +133,7 @@ Scores an array of posts for relevance using the LLM.
 - **options.learnedPrompt**: Auto-generated prompt from likes (optional)
 - **Returns**: Array of `ScoredPost` objects, sorted by relevance (highest first)
 
-How scoring works:
+How chat scoring works:
 1. Posts are split into batches (default: 20 per batch)
 2. Each batch is sent to the LLM with the user prompt and learned prompt as context
 3. The LLM returns `[[post_id, score], ...]` JSON
