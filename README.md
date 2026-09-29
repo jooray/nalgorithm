@@ -2,6 +2,20 @@
 
 A Nostr relevance feed. Fetches posts from your follows and ranks them by what you actually care about, using an LLM instead of reverse chronological order.
 
+<!-- jooray-links:start -->
+### More from me
+
+**Related projects**
+
+- [lievik](https://github.com/jooray/lievik): Nostr-first content curation for creators with several audiences
+- [nostr-emanator](https://github.com/jooray/nostr-emanator): schedule Nostr posts, paired over NIP-46 and Amber
+- [oracolo](https://github.com/jooray/oracolo): a Nostr blog in a single HTML file
+
+**Full project showcase:** [Nalgorithm in my project showcase](https://juraj.bednar.io/showcase/#AI-02), or [all my projects](https://juraj.bednar.io/showcase/).
+
+I write about building things on [my blog](https://juraj.bednar.io/en/blog-en/). I also wrote a cypherpunk novel, [Tamers of Entropy](https://tamersofentropy.net/), and there is a [trailer](https://tamersofentropy.net/#trailer).
+<!-- jooray-links:end -->
+
 **Live demo:** https://cypherpunk.today/nalgorithm/
 
 ## How it works
