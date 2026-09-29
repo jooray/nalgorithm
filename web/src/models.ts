@@ -38,7 +38,7 @@ export function isVenice(apiBaseUrl: string): boolean {
  */
 const VENICE_PREFERENCES = {
   scoring: ['deepseek-v4-flash-0731', 'deepseek-v4-flash', 'google-gemma-3-27b-it', 'qwen3-6-27b'],
-  digest: ['kimi-k3', 'kimi-k2-6', 'claude-sonnet-5', 'qwen-3-6-plus'],
+  digest: ['kimi-k3', 'kimi-k2-6', 'claude-sonnet-5-5', 'qwen-3-6-plus'],
   learner: ['kimi-k3', 'kimi-k2-6', 'qwen-3-6-plus'],
 } as const
 
