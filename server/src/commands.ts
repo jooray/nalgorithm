@@ -2,6 +2,8 @@ import type { BillingClient, ProductState } from './billing-client.js'
 import type { Db } from './db.js'
 import { applySchedulePatch, loadSchedule, saveSchedule, ScheduleError } from './schedule.js'
 import type { Schedule } from './schedule.js'
+import { DigestRunning } from './digest-jobs.js'
+import { ShuttingDown } from './drain.js'
 import { applySettings, loadSettings, saveSettings, SettingsError } from './settings.js'
 
 export type Command =
@@ -110,7 +112,7 @@ function describeSubscription(state: ProductState, tz: string): string {
 /** Erase everything stored about an npub except billing records, which live in the billing service. */
 export async function deleteUserData(db: Db, npub: string): Promise<void> {
   await db.transaction(async (tx) => {
-    for (const table of ['scores', 'learned', 'settings', 'sessions', 'schedules', 'digests', 'deliveries', 'peers', 'accounts']) {
+    for (const table of ['scores', 'feed_snapshots', 'digest_jobs', 'learned', 'settings', 'sessions', 'schedules', 'digests', 'deliveries', 'peers', 'accounts']) {
       await tx.run(`DELETE FROM ${table} WHERE npub = ?`, [npub])
     }
   })
@@ -185,7 +187,13 @@ export async function handleCommand(deps: CommandDeps, npub: string, cmd: Comman
       }
 
       case 'digest':
-        return await deps.runDigestNow(npub)
+        try {
+          return await deps.runDigestNow(npub)
+        } catch (err) {
+          if (err instanceof DigestRunning) return 'A digest is already being made for you. It will arrive here shortly.'
+          if (err instanceof ShuttingDown) return 'I am restarting for a moment. Please send that again in a minute.'
+          throw err
+        }
 
       case 'pay': {
         let charge

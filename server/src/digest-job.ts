@@ -3,6 +3,7 @@ import type { PipelineLogger, ProfileData } from 'nalgorithm'
 import type { DigestSourceNote } from 'nalgorithm'
 import { digestSourceNotes, synthesizeSpeech as libSynthesize, writeDigest as libWriteDigest } from 'nalgorithm'
 import { notesSection, serializeNotes } from './digest-notes.js'
+import { mp3DurationSeconds } from './mp3-duration.js'
 import { MAX_TEXT_LENGTH } from './dm/send.js'
 import type { BillingClient } from './billing-client.js'
 import type { UploadedAudio } from './blossom.js'
@@ -126,6 +127,7 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   let text: string
   let notes: DigestSourceNote[] = []
   let audioUrl: string | null = null
+  let durationSeconds: number | null = null
   try {
     const feed = await deps.feed(npub, settings, store)
     if (feed.posts.length === 0) return { status: 'no_posts' }
@@ -157,6 +159,7 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
       if (deps.upload) {
         try {
           audioUrl = (await deps.upload(audio)).url
+          durationSeconds = mp3DurationSeconds(audio)
         } catch (err) {
           log.warn(`digest audio upload failed for ${npub.slice(0, 8)}: ${(err as Error).message}`)
         }
@@ -169,7 +172,7 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   }
 
   const digestId = (
-    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status, notes) VALUES (?, ?, ?, ?, ?, ?)', [npub, now, text, audioUrl, 'ok', serializeNotes(notes)])
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status, notes, duration_s) VALUES (?, ?, ?, ?, ?, ?, ?)', [npub, now, text, audioUrl, 'ok', serializeNotes(notes), durationSeconds])
   ).lastInsertId
 
   const format = await effectiveFormat(db, npub, schedule)

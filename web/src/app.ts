@@ -46,6 +46,24 @@ import {
 } from './ui.js'
 
 import { initShell } from './shell.js'
+import {
+  feedVisible,
+  hideNewPill,
+  scrollY,
+  setAgeLabel,
+  setBackgroundBusy,
+  setQuietNotice,
+  showNewPill,
+  startLiveChecks,
+} from './feed-live.js'
+import {
+  ageLabel,
+  decideMerge,
+  loadLocalSnapshot,
+  saveLocalSnapshot,
+  shouldAutoRun,
+  type LocalSnapshot,
+} from './snapshot-logic.js'
 import { initDigestView, setDigests, setMakeStatus } from './digest-view.js'
 import { byokBackend, loadLocalDigests } from './byok-digest.js'
 import { rememberProfiles } from './profiles.js'
@@ -61,6 +79,133 @@ import { initHosted } from './hosted/app.js'
 let isRunning = false
 let currentPosts: ScoredPost[] = []
 let currentProfiles = new Map<string, ProfileData>()
+
+// The stored feed (see snapshot-logic.ts). `shownAt` is the run behind what is on screen,
+// `fetchedAt` the newest run, which is ahead while the "N new notes" pill waits for a tap.
+let shownIds: string[] = []
+let shownAt: number | null = null
+let fetchedAt: number | null = null
+let pending: { posts: ScoredPost[]; at: number } | null = null
+/** No automatic run before this time (unix seconds) after a failed one. */
+let pausedUntil = 0
+/** The settings the ranking on screen was made with; a different current value means it is out of date. */
+let rankedSig: string | null = null
+
+const FEED_KEY_PREFIX = 'nalgorithm_byok_feed_'
+const nowSec = (): number => Math.floor(Date.now() / 1000)
+const sigOf = (s: ReturnType<typeof loadSettings>): string => `${s.npub.trim()}|${s.hoursBack}|${s.userPrompt}`
+
+function feedStore(): Storage | null {
+  try {
+    return localStorage
+  } catch {
+    return null
+  }
+}
+
+function paintAge(): void {
+  setAgeLabel(ageLabel(shownAt, nowSec()))
+}
+
+/** Keep the newest ranking on this device, and drop the copies of other identities. */
+function saveByokFeed(posts: ScoredPost[], at: number, settings: ReturnType<typeof loadSettings>): void {
+  const store = feedStore()
+  if (!store) return
+  try {
+    for (let i = store.length - 1; i >= 0; i--) {
+      const k = store.key(i)
+      if (k?.startsWith(FEED_KEY_PREFIX) && k !== FEED_KEY_PREFIX + settings.npub.trim()) store.removeItem(k)
+    }
+  } catch {
+    // Cleanup is best-effort.
+  }
+  const snap: LocalSnapshot = {
+    v: 1,
+    createdAt: at,
+    hoursBack: settings.hoursBack,
+    sig: sigOf(settings),
+    posts: posts as unknown as LocalSnapshot['posts'],
+    profiles: Object.fromEntries(currentProfiles),
+  }
+  saveLocalSnapshot(store, FEED_KEY_PREFIX + settings.npub.trim(), snap, (kept) => new Set(collectPostPubkeys(kept as never, Infinity)))
+}
+
+/** Draw the feed this device remembers, before any network call. True when there was one. */
+function showStoredFeed(settings: ReturnType<typeof loadSettings>): boolean {
+  if (!settings.npub.trim()) return false
+  const snap = loadLocalSnapshot(feedStore(), FEED_KEY_PREFIX + settings.npub.trim())
+  if (!snap || snap.posts.length === 0) return false
+  currentPosts = snap.posts as unknown as ScoredPost[]
+  currentProfiles = new Map(Object.entries(snap.profiles).map(([k, v]) => [k, v as ProfileData]))
+  rememberProfiles(currentProfiles)
+  renderCurrent(settings)
+  shownAt = fetchedAt = snap.createdAt
+  rankedSig = snap.sig ?? null
+  setStatus(`Showing ${aggregateBoosts(currentPosts).length} posts, ranked by relevance`)
+  paintAge()
+  return true
+}
+
+/**
+ * Take a finished ranking. It is always remembered; whether it replaces the list on
+ * screen depends on whether the reader is in the middle of it.
+ */
+function applyRanking(posts: ScoredPost[], settings: ReturnType<typeof loadSettings>, manual: boolean): void {
+  const at = nowSec()
+  fetchedAt = at
+  rankedSig = sigOf(settings)
+  saveByokFeed(posts, at, settings)
+  const d = decideMerge({ shownIds, incomingIds: posts.map((p) => p.id), scrollY: scrollY(), feedVisible: feedVisible(), manual })
+  if (d.action === 'pill') {
+    pending = { posts, at }
+    showNewPill(d.newCount, () => mergePending(settings))
+    return
+  }
+  if (d.action === 'keep') {
+    if (d.same) shownAt = at
+    paintAge()
+    return
+  }
+  pending = null
+  hideNewPill()
+  currentPosts = posts
+  renderCurrent(settings)
+  shownAt = at
+  paintAge()
+  const shown = aggregateBoosts(posts).length
+  setStatus(`Showing ${shown} posts, ranked by relevance`)
+}
+
+function mergePending(settings: ReturnType<typeof loadSettings>): void {
+  if (!pending) return
+  const { posts, at } = pending
+  pending = null
+  currentPosts = posts
+  renderCurrent(settings)
+  shownAt = at
+  paintAge()
+  setStatus(`Showing ${aggregateBoosts(posts).length} posts, ranked by relevance`)
+}
+
+/** Open, return to the app, every five minutes: rank quietly when the stored feed is stale. */
+function autoCheck(): void {
+  const settings = loadSettings()
+  if (
+    !shouldAutoRun({
+      enabled: settings.autoRefresh,
+      ready: !validateSettings(settings),
+      running: isRunning,
+      hidden: document.visibilityState !== 'visible',
+      createdAt: fetchedAt,
+      nowSec: nowSec(),
+      settingsChanged: rankedSig !== null && rankedSig !== sigOf(settings),
+      pausedUntil,
+    })
+  ) {
+    return
+  }
+  void runFeed({ auto: true }).catch((err) => setStatus(`Error: ${(err as Error).message}`))
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -138,6 +283,7 @@ async function scorePosts(
  * up instead of staring at a spinner until the last batch lands.
  */
 function renderCurrent(settings: ReturnType<typeof loadSettings>): void {
+  shownIds = currentPosts.map((p) => p.id)
   showEmptyState(false)
   renderFeed(aggregateBoosts(currentPosts), getFeedContainer(), {
     profiles: currentProfiles,
@@ -148,8 +294,9 @@ function renderCurrent(settings: ReturnType<typeof loadSettings>): void {
 
 // ─── Main flow ───────────────────────────────────────────────────────────────
 
-async function runFeed(): Promise<void> {
+async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
   if (isRunning) return
+  const auto = opts.auto === true
 
   // Read latest settings from form fields and save
   const settings = readFieldsToSettings()
@@ -161,8 +308,35 @@ async function runFeed(): Promise<void> {
     return
   }
 
+  // A run the reader did not ask for, beside a feed they can read: it works in the
+  // background and never redraws the list itself (see `applyRanking`).
+  const quiet = auto && currentPosts.length > 0
+  if (!auto) pausedUntil = 0
+  const progress = (text: string): void => {
+    if (!quiet) setStatusLoading(text)
+  }
+  /** A problem: a quiet run leaves the stored feed alone and says so in one line. */
+  const report = (text: string): void => {
+    if (quiet) {
+      pausedUntil = nowSec() + 300
+      setQuietNotice(`${text}. Showing your last ranking.`)
+    } else {
+      setStatus(text)
+    }
+  }
+  let working: ScoredPost[] = []
+  const setWorking = (list: ScoredPost[]): void => {
+    working = list
+    if (!quiet) {
+      currentPosts = list
+      renderCurrent(settings)
+    }
+  }
+
   isRunning = true
   setRefreshEnabled(false)
+  setQuietNotice(null)
+  if (quiet) setBackgroundBusy('Ranking new posts…')
   if (currentPosts.length === 0) {
     showEmptyState(true, true, 'Loading and ranking your feed. The line above shows progress.')
   }
@@ -179,6 +353,8 @@ async function runFeed(): Promise<void> {
   } catch {
     setStatus('Invalid npub or pubkey')
     isRunning = false
+    setUpdateBlocked(false)
+    setBackgroundBusy(null)
     setRefreshEnabled(true)
     return
   }
@@ -190,12 +366,12 @@ async function runFeed(): Promise<void> {
     // ── Phase 1: fetch → score → display ───────────────────────────────
 
     // 1. Fetch follows
-    setStatusLoading('Fetching follow list...')
+    progress('Fetching follow list...')
     let follows: string[]
     try {
       follows = await fetcher.getFollows(pubkeyHex)
     } catch (err) {
-      setStatus(`Failed to fetch follows: ${(err as Error).message}`)
+      report(`Failed to fetch follows: ${(err as Error).message}`)
       fetcher.destroy()
       isRunning = false
       setRefreshEnabled(true)
@@ -203,14 +379,14 @@ async function runFeed(): Promise<void> {
     }
 
     if (follows.length === 0) {
-      setStatus('No follows found for this pubkey')
+      report('No follows found for this pubkey')
       fetcher.destroy()
       isRunning = false
       setRefreshEnabled(true)
       return
     }
 
-    setStatusLoading(`Found ${follows.length} follows. Fetching posts...`)
+    progress(`Found ${follows.length} follows. Fetching posts...`)
 
     // 2. Fetch posts
     let posts: FetchedPost[]
@@ -219,7 +395,7 @@ async function runFeed(): Promise<void> {
         hoursBack: settings.hoursBack,
       })
     } catch (err) {
-      setStatus(`Failed to fetch posts: ${(err as Error).message}`)
+      report(`Failed to fetch posts: ${(err as Error).message}`)
       fetcher.destroy()
       isRunning = false
       setRefreshEnabled(true)
@@ -227,8 +403,8 @@ async function runFeed(): Promise<void> {
     }
 
     if (posts.length === 0) {
-      setStatus('No posts found in the time window')
-      showEmptyState(true, true, `No posts from the people you follow in the last ${settings.hoursBack} hours. Try a longer window in Tune.`)
+      report('No posts found in the time window')
+      if (!quiet) showEmptyState(true, true, `No posts from the people you follow in the last ${settings.hoursBack} hours. Try a longer window in Tune.`)
       fetcher.destroy()
       isRunning = false
       setRefreshEnabled(true)
@@ -236,7 +412,7 @@ async function runFeed(): Promise<void> {
     }
 
     // 3. Fetch profiles for all post authors (including embedded + referenced in content)
-    setStatusLoading(`Fetched ${posts.length} posts. Loading profiles...`)
+    progress(`Fetched ${posts.length} posts. Loading profiles...`)
     const allPubkeys = collectPostPubkeys(posts)
     try {
       currentProfiles = await fetcher.getProfiles(allPubkeys)
@@ -279,12 +455,11 @@ async function runFeed(): Promise<void> {
     // Show whatever is already cached before any network call — with a warm
     // cache the feed appears instantly, and new scores slot in as they arrive.
     if (cachedPosts.length > 0) {
-      currentPosts = [...cachedPosts].sort((a, b) => b.score - a.score)
-      renderCurrent(settings)
+      setWorking([...cachedPosts].sort((a, b) => b.score - a.score))
     }
 
     if (uncachedPosts.length > 0) {
-      setStatusLoading(`Scoring ${uncachedPosts.length} new posts (${cachedPosts.length} cached)...`)
+      progress(`Scoring ${uncachedPosts.length} new posts (${cachedPosts.length} cached)...`)
       try {
         newlyScored = await scorePosts(
           uncachedPosts,
@@ -292,7 +467,7 @@ async function runFeed(): Promise<void> {
           existingLearnedPrompt,
           settings,
           (scored, total) =>
-            setStatusLoading(
+            progress(
               `Scoring posts ${scored}/${total} (${cachedPosts.length} cached)...`
             ),
           currentProfiles,
@@ -300,12 +475,11 @@ async function runFeed(): Promise<void> {
           // rather than all at once when the slowest batch finishes.
           (batch) => {
             newlyScored.push(...batch)
-            currentPosts = [...cachedPosts, ...newlyScored].sort((a, b) => b.score - a.score)
-            renderCurrent(settings)
+            setWorking([...cachedPosts, ...newlyScored].sort((a, b) => b.score - a.score))
           }
         )
       } catch (err) {
-        setStatus(`Scoring failed: ${(err as Error).message}`)
+        report(`Scoring failed: ${(err as Error).message}`)
         fetcher.destroy()
         isRunning = false
         setRefreshEnabled(true)
@@ -318,14 +492,13 @@ async function runFeed(): Promise<void> {
 
     // Merge cached + newly scored, sort by score descending
     const allScored = [...cachedPosts, ...newlyScored].sort((a, b) => b.score - a.score)
-    currentPosts = allScored
-    renderCurrent(settings)
+    applyRanking(allScored, settings, !auto)
 
     const shown = aggregateBoosts(allScored).length
     const collapsed = allScored.length - shown
     const cachedLabel = cachedPosts.length > 0 ? ` (${cachedPosts.length} from cache)` : ''
     const boostLabel = collapsed > 0 ? `, ${collapsed} duplicate boosts merged` : ''
-    setStatus(`Showing ${shown} posts, ranked by relevance${cachedLabel}${boostLabel}`)
+    if (!quiet) setStatus(`Showing ${shown} posts, ranked by relevance${cachedLabel}${boostLabel}`)
     setRefreshEnabled(true)
 
     // ── Phase 2: background likes → re-rate ────────────────────────────
@@ -333,13 +506,14 @@ async function runFeed(): Promise<void> {
     // Fire and forget — runs in background, doesn't block UI
     backgroundLearnAndRerate(fetcher, pubkeyHex, since, settings)
   } catch (err) {
-    setStatus(`Error: ${(err as Error).message}`)
+    report(`Error: ${(err as Error).message}`)
     console.error('Feed error:', err)
     fetcher.destroy()
     setRefreshEnabled(true)
   } finally {
     isRunning = false
     setUpdateBlocked(false)
+    setBackgroundBusy(null)
   }
 }
 
@@ -529,12 +703,11 @@ document.addEventListener('DOMContentLoaded', () => {
   )
   setDigests(loadLocalDigests())
 
-  // Start loading straight away when everything needed is configured. Clicking
-  // Refresh to see the feed you already set up is a step with no decision in it.
-  if (settings.autoRefresh && !validateSettings(settings)) {
-    void runFeed().catch((err) => setStatus(`Error: ${(err as Error).message}`))
-  } else if (!validateSettings(settings)) {
-    showEmptyState(true, true)
-  }
+  // The feed from last time is on screen at once; a background run follows when it is stale
+  // and the reader allows it (Tune: "Update my feed automatically when I open the app").
+  const stored = showStoredFeed(settings)
+  const valid = !validateSettings(settings)
+  if (!stored && valid && !settings.autoRefresh) showEmptyState(true, true)
+  if (valid) startLiveChecks({ check: autoCheck, tick: paintAge })
 })
 

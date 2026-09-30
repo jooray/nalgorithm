@@ -34,6 +34,8 @@ export interface PlayerSource {
   subtitle: string
   audioUrl: string | null
   text: string
+  /** Exact length of the audio from the server, so the first render needs no guess. */
+  durationSeconds?: number
 }
 
 export interface PlayerState {
@@ -96,7 +98,8 @@ export class DigestPlayer {
         this.audio.currentTime = Math.min(this.pendingSeek, dur || this.pendingSeek)
         this.pendingSeek = null
       }
-      this.set({ dur, durApprox: false, loading: false, pos: this.audio.currentTime })
+      // The server measured this digest frame by frame; the element's first figure is a bitrate guess.
+      this.set({ ...(this.hasServerLength() ? {} : { dur, durApprox: false }), loading: false, pos: this.audio.currentTime })
       this.updatePositionState()
     })
     // A streamed MP3 without a length header reports a first guess from its bitrate and
@@ -105,7 +108,7 @@ export class DigestPlayer {
       const dur = this.audio.duration
       if (!Number.isFinite(dur) || dur <= 0 || this.state.mode !== 'audio') return
       if (this.state.source) this.resume.saveDuration(this.state.source.key, dur)
-      this.set({ dur, durApprox: false })
+      if (!this.hasServerLength()) this.set({ dur, durApprox: false })
       this.updatePositionState()
     })
     this.audio.addEventListener('timeupdate', () => {
@@ -148,6 +151,12 @@ export class DigestPlayer {
     return this.state
   }
 
+  /** The server gave this digest's exact length, so the element's streamed guess must not replace it. */
+  private hasServerLength(): boolean {
+    const src = this.state.source
+    return this.state.mode === 'audio' && Boolean(src?.durationSeconds && src.durationSeconds > 0)
+  }
+
   /** Select a digest. Stops whatever was playing; never starts playback. */
   load(source: PlayerSource | null): void {
     if (this.state.source?.key === source?.key) {
@@ -168,6 +177,8 @@ export class DigestPlayer {
     const resumeAt = this.resume.resumeAt(source.key)
     const knownDur = this.resume.durationOf(source.key)
     const usesAudio = Boolean(source.audioUrl)
+    // What the audio element measures still wins once it reports; this is the start value.
+    const serverDur = usesAudio && source.durationSeconds && source.durationSeconds > 0 ? source.durationSeconds : 0
     const speechOk = isSpeechSupported() && source.text.trim().length > 0
 
     this.state = {
@@ -175,8 +186,8 @@ export class DigestPlayer {
       mode: usesAudio ? 'audio' : speechOk ? 'speech' : 'none',
       playing: false,
       pos: resumeAt,
-      dur: knownDur || estimateSeconds(source.text),
-      durApprox: !knownDur,
+      dur: serverDur || knownDur || estimateSeconds(source.text),
+      durApprox: !knownDur && !serverDur,
       speed,
       loading: false,
       error: usesAudio || speechOk ? '' : 'This digest has no audio, and this browser cannot read it aloud.',

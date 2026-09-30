@@ -11,19 +11,26 @@ import { icon, type IconName } from './icons.js'
 export type TabName = 'digest' | 'feed' | 'tune'
 
 const TABS: Array<{ name: TabName; label: string; icon: IconName }> = [
-  { name: 'digest', label: 'Digest', icon: 'digest' },
   { name: 'feed', label: 'Feed', icon: 'feed' },
+  { name: 'digest', label: 'Digest', icon: 'digest' },
   { name: 'tune', label: 'Tune', icon: 'tune' },
 ]
 
 const HERO_VIOLET = '#6B3DF5'
 
-let active: TabName = 'digest'
+let active: TabName = 'feed'
 const scrollAt: Record<TabName, number> = { digest: 0, feed: 0, tune: 0 }
 let toastTimer: number | undefined
 
 export function currentTab(): TabName {
   return active
+}
+
+const tabListeners: Array<(tab: TabName) => void> = []
+
+/** Called after a tab is shown (including the first, initial one). */
+export function onTabShown(listener: (tab: TabName) => void): void {
+  tabListeners.push(listener)
 }
 
 export function showTab(name: TabName): void {
@@ -38,6 +45,7 @@ export function showTab(name: TabName): void {
   }
   window.scrollTo({ top: scrollAt[name] })
   setChromeColor()
+  for (const l of tabListeners) l(name)
 }
 
 function setChromeColor(): void {
@@ -70,7 +78,7 @@ export function initShell(): void {
       else showTab(tab.name)
     })
   }
-  showTab('digest')
+  showTab('feed')
 
   // Offline notice.
   const banner = document.getElementById('offline-banner')!

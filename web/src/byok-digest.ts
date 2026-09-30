@@ -98,6 +98,7 @@ export function byokBackend(deps: {
   return {
     mode: 'byok',
     makeLabel: 'Write a digest',
+    makeAnotherLabel: 'Write another digest',
     emptyText:
       'I write a spoken digest from the notes your feed ranks highest, and read it to you. Nothing plays until you press play.',
     async make() {

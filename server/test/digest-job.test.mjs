@@ -35,7 +35,7 @@ function rig(db, over = {}) {
     },
     feed: async () => { calls.feed++; if (over.feedThrows) throw new Error('relays down'); return { fetched: 3, profiles: { ['b'.repeat(64)]: { name: 'bob' } }, learnedPrompt: 'learned', posts: over.posts ?? [post('p1', 9), post('p2', 8), post('p3', 7)] } },
     writeDigest: async (o) => { calls.write.push(o); return over.text ?? 'Good morning, nostrich! Here is your digest.' },
-    synthesize: async (cfg, text) => { calls.synth.push({ cfg, text }); if (over.synthThrows) throw new Error('tts down'); return new Uint8Array([1, 2, 3]) },
+    synthesize: async (cfg, text) => { calls.synth.push({ cfg, text }); if (over.synthThrows) throw new Error('tts down'); return over.audioBytes ?? new Uint8Array([1, 2, 3]) },
     upload: over.noUpload ? undefined : async (audio) => { calls.upload.push(audio); if (over.uploadThrows) throw new Error('blossom down'); return { url: 'https://cdn.test/abc.mp3', server: 'https://cdn.test', sha256: 'abc' } },
     dm: { async send(to, text, opts) { calls.dm.push({ to, text, opts }); if (over.dmThrows) throw new Error('relays refused'); return over.dmResult ?? [{ delivered: true, tier: 'inbox' }] } },
   }
@@ -69,6 +69,17 @@ test('happy path: speech-tuned digest with humanizer, audio uploaded, DM has the
   assert.equal(d.audio_url, 'https://cdn.test/abc.mp3'); assert.equal(d.status, 'ok')
   const del = await db.get('SELECT * FROM deliveries WHERE npub = ?', [NPUB])
   assert.equal(Number(del.delivered), 1); assert.equal(del.tier, 'inbox'); assert.equal(del.protocol, 'nip17')
+})
+
+test('the exact audio length is measured from the MP3 and stored; unreadable audio stores null', async () => {
+  const { mp3 } = await import('./mp3-fixture.mjs')
+  const db = await freshDb(); await withPrompt(db)
+  await runDigest(rig(db, { audioBytes: mp3({ frames: 100, version: 1, bitrate: 64, rate: 44100 }) }).deps, NPUB)
+  const seconds = Number((await db.get('SELECT duration_s FROM digests WHERE npub = ?', [NPUB])).duration_s)
+  assert.ok(Math.abs(seconds - (100 * 1152) / 44100) < 0.001, String(seconds))
+  const db2 = await freshDb(); await withPrompt(db2)
+  await runDigest(rig(db2).deps, NPUB)
+  assert.equal((await db2.get('SELECT duration_s FROM digests WHERE npub = ?', [NPUB])).duration_s, null)
 })
 
 test('the user\'s voice and DM format choices are honoured', async () => {

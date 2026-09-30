@@ -6,12 +6,17 @@ import type { BillingClient } from './billing-client.js'
 import { BillingUnavailable } from './billing-client.js'
 import { createStore } from './db.js'
 import type { Db } from './db.js'
+import { DigestRunning, digestJobStatus } from './digest-jobs.js'
 import { parseNotes } from './digest-notes.js'
+import { ShuttingDown } from './drain.js'
+import type { JobTracker } from './drain.js'
 import type { FeedRunner } from './feed.js'
 import { PreviewError } from './preview/service.js'
 import type { PreviewService } from './preview/service.js'
 import { ScheduleError, applySchedulePatch, loadSchedule, saveSchedule } from './schedule.js'
 import type { Schedule } from './schedule.js'
+import { SNAPSHOT_FRESH_SECONDS, flagNew, loadSnapshot, saveSnapshot, settingsSignature } from './snapshot.js'
+import type { StoredSnapshot } from './snapshot.js'
 import { SettingsError, applySettings, loadSettings, saveSettings } from './settings.js'
 
 export interface AppDeps {
@@ -27,6 +32,8 @@ export interface AppDeps {
   runDigestNow?: (npub: string) => Promise<string>
   /** Link previews. Absent means `/preview` answers `{unavailable: true}`. */
   previews?: PreviewService
+  /** In-flight work, so a shutdown can wait for it. Absent means nothing is tracked. */
+  jobs?: JobTracker
 }
 
 const COOKIE = 'nalgorithm_session'
@@ -87,10 +94,18 @@ interface DigestRow {
   body: string
   audio_url: string | null
   notes: string | null
+  duration_s: number | null
 }
 
 function publicDigest(r: DigestRow): Record<string, unknown> {
-  return { id: Number(r.id), createdAt: Number(r.created_at), text: r.body, audioUrl: r.audio_url, notes: parseNotes(r.notes) }
+  return {
+    id: Number(r.id),
+    createdAt: Number(r.created_at),
+    text: r.body,
+    audioUrl: r.audio_url,
+    notes: parseNotes(r.notes),
+    durationSeconds: r.duration_s === null || r.duration_s === undefined ? null : Number(r.duration_s),
+  }
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -247,7 +262,7 @@ export function createApp(deps: AppDeps) {
     if (method === 'GET' && path === '/digests') {
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 10) || 10, 1), 30)
       const rows = await db.all<DigestRow>(
-        'SELECT id, created_at, body, audio_url, notes FROM digests WHERE npub = ? ORDER BY created_at DESC LIMIT ?',
+        'SELECT id, created_at, body, audio_url, notes, duration_s FROM digests WHERE npub = ? ORDER BY created_at DESC LIMIT ?',
         [npub, limit],
       )
       return send(res, 200, { digests: rows.map(publicDigest) })
@@ -255,14 +270,17 @@ export function createApp(deps: AppDeps) {
 
     const digestMatch = method === 'GET' ? /^\/digests\/(\d{1,15})$/.exec(path) : null
     if (digestMatch) {
-      const row = await db.get<DigestRow>('SELECT id, created_at, body, audio_url, notes FROM digests WHERE id = ? AND npub = ?', [Number(digestMatch[1]), npub])
+      const row = await db.get<DigestRow>('SELECT id, created_at, body, audio_url, notes, duration_s FROM digests WHERE id = ? AND npub = ?', [Number(digestMatch[1]), npub])
       if (!row) throw new HttpError(404, 'digest not found')
       return send(res, 200, publicDigest(row))
     }
 
+    if (method === 'GET' && path === '/digest/status') return send(res, 200, await digestJobStatus(db, npub, nowSec()))
+
     if (method === 'POST' && path === '/digest/now') {
       if (!deps.runDigestNow) throw new HttpError(503, 'digests are not available on this server', { code: 'digests_unavailable' })
-      return send(res, 202, { message: await deps.runDigestNow(npub) })
+      const message = await deps.runDigestNow(npub)
+      return send(res, 202, { message, ...(await digestJobStatus(db, npub, nowSec())) })
     }
 
     if (method === 'POST' && path === '/billing/checkout') {
@@ -281,12 +299,15 @@ export function createApp(deps: AppDeps) {
       }
     }
 
-    if (method === 'GET' && path === '/feed') {
+    if (method === 'GET' && (path === '/feed' || path === '/feed/latest')) {
+      const latest = path === '/feed/latest'
       const settings = await loadSettings(db, npub)
-      if (!settings.userPrompt) throw new HttpError(400, 'set a prompt first', { code: 'no_prompt' })
+      if (!latest && !settings.userPrompt) throw new HttpError(400, 'set a prompt first', { code: 'no_prompt' })
 
-      // Entitlement: a never-seen npub starts its trial here, on first real use.
+      // Entitlement. A run starts a never-seen npub's trial; reading the last
+      // snapshot never does, and a never-seen npub has no snapshot anyway.
       let state = await billing.entitlement(npub)
+      if (state.state === 'none' && latest) return send(res, 200, { snapshot: null, entitlement: state })
       if (state.state === 'none') {
         try {
           state = await billing.startTrial(npub)
@@ -300,30 +321,62 @@ export function createApp(deps: AppDeps) {
         throw new HttpError(402, 'a subscription is required', { code: 'paywall', state: state.state, until: state.until })
       }
 
-      if (running.has(npub)) throw new HttpError(429, 'a feed run is already in progress', { code: 'in_progress' })
-      const cap = await billing.consume(npub, 'feed', 1, `feed:${npub}:${nowSec()}`)
-      if (!cap.allowed) {
-        if (cap.reason === 'billing_unavailable') throw new HttpError(503, 'billing is unavailable, try again shortly', { code: 'billing_unavailable' })
-        throw new HttpError(429, 'daily limit reached, try again tomorrow', { code: 'daily_cap' })
+      const previous = await loadSnapshot(db, npub)
+      const sig = settingsSignature(settings)
+      const answer = (snap: StoredSnapshot, posts: Array<Record<string, unknown>>, cached: boolean) => ({
+        entitlement: state,
+        fetched: snap.fetched,
+        hoursBack: snap.hoursBack,
+        posts,
+        profiles: snap.profiles,
+        learnedPrompt: snap.learnedPrompt,
+        createdAt: snap.createdAt,
+        ageSeconds: Math.max(0, nowSec() - snap.createdAt),
+        cached,
+        settingsChanged: snap.sig !== sig,
+      })
+
+      // Reading the snapshot never ranks and never touches the daily cap.
+      if (latest) {
+        if (!previous) return send(res, 200, { snapshot: null, entitlement: state })
+        return send(res, 200, { snapshot: answer(previous, previous.posts.map((p) => ({ ...p, isNew: false })), true), entitlement: state })
       }
 
-      running.add(npub)
+      // A fresh snapshot for the same settings answers a repeat call without a
+      // run, so several tabs or an auto-refresh loop cost nothing.
+      const force = url.searchParams.get('force') === '1'
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 200)
+      if (!force && previous && previous.sig === sig && nowSec() - previous.createdAt < SNAPSHOT_FRESH_SECONDS) {
+        return send(res, 200, answer(previous, previous.posts.slice(0, limit).map((p) => ({ ...p, isNew: false })), true))
+      }
+
+      if (running.has(npub)) throw new HttpError(429, 'a feed run is already in progress', { code: 'in_progress' })
+      const endJob = deps.jobs?.begin() ?? (() => {})
       try {
-        const result = await deps.feed(npub, settings, createStore(db, npub, nowSec))
-        const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 200)
-        const posts = result.posts.slice(0, limit)
-        // Authors plus anyone mentioned in the text, so mentions render as names.
-        const authors = new Set(collectPostPubkeys(posts, Infinity))
-        const profiles = Object.fromEntries(Object.entries(result.profiles).filter(([k]) => authors.has(k)))
-        return send(res, 200, {
-          entitlement: state,
-          fetched: result.fetched,
-          hoursBack: settings.hoursBack,
-          posts: posts.map(publicPost),
-          profiles,
-        })
+        // One unit per real run, as before. Served-from-snapshot answers above
+        // never reach this line, so they are free.
+        const cap = await billing.consume(npub, 'feed', 1, `feed:${npub}:${nowSec()}`)
+        if (!cap.allowed) {
+          if (cap.reason === 'billing_unavailable') throw new HttpError(503, 'billing is unavailable, try again shortly', { code: 'billing_unavailable' })
+          throw new HttpError(429, 'daily limit reached, try again tomorrow', { code: 'daily_cap' })
+        }
+
+        running.add(npub)
+        try {
+          const result = await deps.feed(npub, settings, createStore(db, npub, nowSec))
+          const posts = result.posts.slice(0, limit).map(publicPost)
+          // Authors plus anyone mentioned in the text, so mentions render as names.
+          const authors = new Set(collectPostPubkeys(result.posts.slice(0, limit), Infinity))
+          const profiles = Object.fromEntries(Object.entries(result.profiles).filter(([k]) => authors.has(k)))
+          const snap = { posts, profiles, fetched: result.fetched, hoursBack: settings.hoursBack, learnedPrompt: result.learnedPrompt, sig }
+          // A failed save must not turn a good ranking into an error.
+          await saveSnapshot(db, npub, snap, nowSec()).catch((err) => log.warn(`snapshot save failed: ${(err as Error).message}`))
+          return send(res, 200, answer({ ...snap, createdAt: nowSec() }, flagNew(posts, previous), false))
+        } finally {
+          running.delete(npub)
+        }
       } finally {
-        running.delete(npub)
+        endJob()
       }
     }
 
@@ -335,6 +388,8 @@ export function createApp(deps: AppDeps) {
       await route(req, res)
     } catch (err) {
       if (err instanceof HttpError) return send(res, err.status, { error: err.message, ...err.extra })
+      if (err instanceof DigestRunning) return send(res, 409, { error: 'a digest is already being made for you', code: 'digest_running', startedAt: err.startedAt })
+      if (err instanceof ShuttingDown) return send(res, 503, { error: err.message, code: 'shutting_down' })
       if (err instanceof PreviewError) return send(res, err.status, { error: err.message })
       if (err instanceof BillingUnavailable) return send(res, 503, { error: 'billing is unavailable, try again shortly', code: 'billing_unavailable' })
       log.warn(`${req.method} ${req.url} failed: ${(err as Error).message}`)
