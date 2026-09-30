@@ -12,6 +12,8 @@
 
 import type { ProfileData, ScoredPost } from 'nalgorithm'
 import { renderFeed, aggregateBoosts } from '../render.js'
+import { attachLinkPreviews } from './previews.js'
+import { previewsEnabled } from './previews-logic.js'
 import { resolveTemplate } from '../client-url.js'
 import { loadSettings } from '../settings.js'
 import { openHostedLoginDialog } from '../login-ui.js'
@@ -216,6 +218,9 @@ async function signOut(closeSettings: () => void): Promise<void> {
   showLogin()
 }
 
+/** Whether link cards are shown; set from the saved settings. */
+let linkPreviewsOn = true
+
 async function onSignedIn(npub: string, ent: Entitlement): Promise<void> {
   userNpub = npub
   document.body.dataset.signedIn = 'true'
@@ -229,6 +234,7 @@ async function onSignedIn(npub: string, ent: Entitlement): Promise<void> {
   $<HTMLInputElement>('#hosted-hours').value = String(s.hoursBack)
   $<HTMLInputElement>('#hosted-topn').value = String(s.topN)
   $<HTMLInputElement>('#hosted-learn').checked = s.learnFromLikes
+  $<HTMLInputElement>('#hosted-previews').checked = linkPreviewsOn = previewsEnabled(s)
   updatePromptCount()
   void loadDigestSection()
 
@@ -318,6 +324,7 @@ function renderResult(feed: FeedResponse): void {
     profiles,
     eventUrlTemplate: resolveTemplate(settings.clientPreset, settings.clientCustomUrl),
     clientPreset: settings.clientPreset,
+    linkPreviews: linkPreviewsOn ? attachLinkPreviews : undefined,
   })
   setStatus(`Showing ${display.length} posts, ranked by relevance`)
 }
@@ -370,6 +377,7 @@ async function saveSettingsForm(closeSettings: () => void): Promise<void> {
     hoursBack: parseWholeNumber($<HTMLInputElement>('#hosted-hours').value),
     topN: parseWholeNumber($<HTMLInputElement>('#hosted-topn').value),
     learnFromLikes: $<HTMLInputElement>('#hosted-learn').checked,
+    linkPreviews: $<HTMLInputElement>('#hosted-previews').checked,
   }
   const problem = validateHostedSettings(draft)
   if (problem) return setMsg(problem, true)
@@ -380,6 +388,7 @@ async function saveSettingsForm(closeSettings: () => void): Promise<void> {
   try {
     const saved = await putSettings({ ...draft, userPrompt: draft.userPrompt.trim() })
     $<HTMLTextAreaElement>('#hosted-prompt').value = saved.userPrompt
+    linkPreviewsOn = previewsEnabled(saved)
     updatePromptCount()
     setMsg('')
     setStatus('Settings saved')

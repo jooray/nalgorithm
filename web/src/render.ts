@@ -20,6 +20,8 @@ export interface RenderOptions {
   eventUrlTemplate?: string
   /** Which preset is selected, for the menu label. */
   clientPreset?: ClientPreset
+  /** Hosted mode only: add link cards for the URLs in `content` to `card`. */
+  linkPreviews?: (content: string, card: HTMLElement) => void
 }
 
 /**
@@ -159,6 +161,7 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
     const content = el('div', 'post-content')
     content.innerHTML = formatContent(post.content, options)
     card.appendChild(content)
+    options.linkPreviews?.(post.content, card)
 
     // Media
     const media = extractMedia(post.content, post.rawEvent?.tags ?? [])
@@ -325,6 +328,7 @@ function renderEmbeddedPost(post: EmbeddedPost, options: RenderOptions): HTMLEle
   const content = el('div', 'embedded-content')
   content.innerHTML = formatContent(post.content, options)
   container.appendChild(content)
+  options.linkPreviews?.(post.content, container)
 
   // Extract and render media from embedded post content
   const media = extractMediaFromContent(post.content)
