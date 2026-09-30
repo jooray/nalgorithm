@@ -199,9 +199,9 @@ One Node process behind a reverse proxy, with the API on the same origin as the 
 ## 10. Phases
 
 0. Core refactor (mostly done, uncommitted): `lib/src/pipeline.ts` with `PipelineStore`/`PipelineLogger`, `refreshLearnedPrompt`, `scorePostsCached`, `writeDigest`; CLI switched to it with a JSON-file store; 10 tests in `lib/test`. Not yet verified against live relays and Venice. Still to do: fix stale `lib/docs/API.md`, decide on a `RateLimiter` seam (dropped for now).
-1. Server MVP (skeleton done, uncommitted before this commit, 23 tests): `server/` workspace with SQLite storage behind the lib's `PipelineStore`, login by signed kind 27235 challenge with HttpOnly SameSite cookie sessions, settings, a billing client (60 s cache, 24 h stale-while-error, circuit breaker), a feed endpoint using the decision scorer with entitlement, first-use trial, daily-cap and in-flight checks, and a checkout call. Not done: SSE progress, the web app's hosted mode, a systemd unit and nginx location, an admin CLI for the server, and live runs against relays and Venice.
-2. Payments: BTCPay provider (invoice, signed webhook, poll fallback), ledger, expiry.
-3. Digests: scheduler, TTS, Blossom, NIP-17 delivery, caps.
+1. Server MVP (done): `server/` workspace, SQLite or MariaDB storage, login by signed challenge, settings, feed with the decision scorer, billing client with trial, daily cap and outage policy. The web app's hosted mode (login by NIP-07 or NIP-46, settings, feed, paywall with checkout) is done; it has not been exercised against a real NIP-46 signer such as Amber.
+2. Payments (done): BTCPay provider through the separate billing service, ledger, trials, gifts, trial credit, expiry; verified with a real payment.
+3. Digests (done, first live run pending): scheduler with per-zone times, TTS, Blossom upload, NIP-17 delivery with a kind 4 fallback, DM commands, schedule UI. Verified end to end against an in-process relay and, for the command loop, against the public relays. The first real scheduled digest with audio for a user with follows has still to be observed.
 4. Zap activation: LNURL endpoint, zap receipts.
 5. Optional: BTCPay provider.
 
