@@ -66,6 +66,9 @@ header.top { display: flex; align-items: center; justify-content: space-between;
 .wave i { flex: 1; min-width: 2px; border-radius: 2px; background: rgba(255,255,255,.3); }
 .wave i.on { background: #fff; }
 .speed { margin-left: auto; min-width: 56px; min-height: 44px; border-radius: 999px; border: 2px solid rgba(255,255,255,.5); background: transparent; color: #fff; font: 700 .95rem/1 inherit; cursor: pointer; }
+.transcript { color: rgba(255,255,255,.88); font-size: .95rem; }
+.transcript summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+.transcript p { margin: .5rem 0; }
 .caption { margin: 0; font-size: .85rem; color: rgba(255,255,255,.75); }
 
 section { padding: clamp(2.5rem, 7vw, 5rem) 0 0; }
@@ -147,11 +150,12 @@ footer a { text-decoration-color: var(--line); }
           <button class="play" id="play" aria-label="Play the sample digest" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true" id="play-icon"><path d="M8 5v14l11-7z"/></svg>
           </button>
-          <div class="player-meta"><strong>A sample morning digest</strong><span><span id="time">0:00</span> / <span id="dur">0:23</span></span></div>
+          <div class="player-meta"><strong>A real morning digest (excerpt)</strong><span><span id="time">0:00</span> / <span id="dur">0:56</span></span></div>
           <button class="speed" id="speed" type="button" aria-label="Playback speed">1×</button>
         </div>
         <div class="wave" id="wave" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0"></div>
-        <p class="caption">Voice: Kokoro “Bella”. Sample text, real voice. It plays only when you press play.</p>
+        <details class="transcript"><summary>Read the transcript</summary><p>Good morning, nostrich!</p><p>Releases. Nostr Compass is on a run. Issue forty-two of the newsletter is out, and the Android app went through one dot one, one dot one dot one, and one dot one dot two in a day. You get full signature-verified newsletters, podcast playback, one hundred ten offline topic guides, local search, and voice notes you can review before sending, signed through Amber. Minibits shipped an over-the-air update for iOS that fixes a memory problem where the app picked ecash inputs in a wasteful way and iOS killed it mid-transaction. It also auto-recovers sats stuck in pending. Hodlbod released Coracle zero dot six dot thirty-eight, which retries decrypting direct messages instead of dropping them, backs off from unreachable relays, and upgrades insecure requests to https.</p><p>That&#x27;s your digest. Go build something.</p></details>
+        <p class="caption">An excerpt from a digest written for a real feed, voiced by Kokoro “Bella”. It plays only when you press play.</p>
       </div>
     </div>
 
@@ -238,7 +242,7 @@ footer a { text-decoration-color: var(--line); }
   for (var i = 0; i < N; i++) { var b = document.createElement('i'); b.style.height = (22 + ((i * 37 + (i * i) % 29) % 78)) + '%'; wave.appendChild(b); bars.push(b) }
   function fmt(s) { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') }
   function paint() {
-    var d = audio.duration || 23, p = (audio.currentTime || 0) / d
+    var d = audio.duration || 56, p = (audio.currentTime || 0) / d
     bars.forEach(function (b, i) { b.className = i / N < p ? 'on' : '' })
     timeEl.textContent = fmt(audio.currentTime || 0)
     wave.setAttribute('aria-valuenow', String(Math.round(p * 100)))
