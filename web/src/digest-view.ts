@@ -1,5 +1,5 @@
 /**
- * Nalgorithm Web — the Digest tab
+ * Nalgorithm Web — the Digests tab
  *
  * Hero player, show notes for the selected digest, and the digest feed below.
  * Mode-agnostic: hosted and bring-your-own-key each provide a `DigestBackend`
@@ -26,6 +26,8 @@ import { clockLabel, dayLabel } from './time.js'
 import { Waveform } from './waveform.js'
 import { safeAudioUrl } from './hosted/logic.js'
 import { ANOTHER_DIGEST_HINT, makeButtonView } from './digest-job-logic.js'
+import { miniView, scrollAfterInsert } from './mini-player-logic.js'
+import { showTab } from './shell.js'
 
 export interface DigestBackend {
   mode: 'hosted' | 'byok'
@@ -74,6 +76,10 @@ let makeBusy = false
 /** A digest is being written somewhere else (the server), reported by the backend. */
 let jobRunning = false
 let lastShell = ''
+/** When the digest being written started (seconds), for the mini player's clock. */
+let runStartedAt: number | null = null
+let miniTick: number | undefined
+let miniShown = false
 /** Audio files made in this session (bring your own key): digest id to blob URL. */
 const madeAudio = new Map<string, { url: string; filename: string }>()
 
@@ -109,6 +115,7 @@ export function initDigestView(b: DigestBackend): void {
   $('btn-audio').addEventListener('click', () => void onAudioButton())
   initSpeedMenu()
   initNotesTabs()
+  initMini()
 
   player.onChange((s) => paint(s))
   renderAll()
@@ -158,6 +165,7 @@ export function setMakeStatus(text: string, isError = false): void {
 
 export function setMakeBusy(busy: boolean): void {
   makeBusy = busy
+  syncRunClock()
   applyMakeState()
 }
 
@@ -165,8 +173,9 @@ export function setMakeBusy(busy: boolean): void {
  * A digest is (or is no longer) being written on the server. While it is, every
  * make button is disabled and says so, and a progress bar shows where the reader looks.
  */
-export function setDigestJobRunning(running: boolean): void {
+export function setDigestJobRunning(running: boolean, startedAtSec?: number | null): void {
   jobRunning = running
+  syncRunClock(startedAtSec ?? undefined)
   applyMakeState()
 }
 
@@ -200,6 +209,7 @@ export function applyMakeState(): void {
     tune.classList.toggle('is-busy', running)
   }
   document.getElementById('make-bar-tune')?.classList.toggle('hidden', !running)
+  paintMini()
 }
 
 /** Streaming progress of a digest being written in the browser. */
@@ -423,6 +433,126 @@ function paint(s: PlayerState): void {
   hint.setAttribute('role', s.error ? 'alert' : 'status')
 
   paintEntries(s)
+  paintMini()
+}
+
+// ─── mini player (Feed tab) ──────────────────────────────────────────────────
+
+/** Start or stop the running clock, and the once-a-second repaint that draws it. */
+function syncRunClock(startedAtSec?: number): void {
+  const running = jobRunning || makeBusy
+  if (!running) runStartedAt = null
+  else if (startedAtSec !== undefined) runStartedAt = startedAtSec
+  else if (runStartedAt === null) runStartedAt = Math.floor(Date.now() / 1000)
+  if (running && miniTick === undefined) {
+    miniTick = window.setInterval(() => {
+      if (document.visibilityState === 'visible') paintMini()
+    }, 1000)
+  } else if (!running && miniTick !== undefined) {
+    clearInterval(miniTick)
+    miniTick = undefined
+  }
+}
+
+/** The latest digest, and the parts of the player state the mini bar shows for it. */
+function miniLatest(s: PlayerState) {
+  const d = digests[0]
+  if (!d) return null
+  const key = keyOf(d)
+  const isSel = d.id === selectedId
+  const playing = isSel && (s.playing || s.loading)
+  const resumeAt = isSel ? s.resumeAt : resume.resumeAt(key)
+  return {
+    when: `${dayLabel(d.createdAt)}, ${clockLabel(d.createdAt)}`,
+    length: entryLength(d),
+    playing,
+    pos: playing ? s.pos : resumeAt,
+    dur: isSel ? s.dur : resume.durationOf(key) || exactSeconds(d) || 0,
+    resumeHint: resumeHint(resumeAt),
+  }
+}
+
+/** Go to the Digests tab with the latest digest in the main player; optionally start it (from a press only). */
+function openLatest(play: boolean): void {
+  const d = digests[0]
+  if (d && d.id !== selectedId) {
+    selectInternal(d.id, false)
+    renderAll()
+  }
+  showTab('digest')
+  window.scrollTo({ top: 0 })
+  // Called inside the click handler, so the browser counts it as the reader's press.
+  if (play && d) player.play()
+}
+
+function initMini(): void {
+  $('mini-play').addEventListener('click', () => {
+    const d = digests[0]
+    if (d && d.id === selectedId && (player.current.playing || player.current.loading)) player.pause()
+    else openLatest(true)
+  })
+  $('mini-open').addEventListener('click', () => openLatest(false))
+}
+
+function setText(id: string, text: string): void {
+  const el = $(id)
+  if (el.textContent !== text) el.textContent = text
+}
+
+function paintMini(): void {
+  const box = document.getElementById('mini')
+  if (!box || !player) return
+  const nowSec = Math.floor(Date.now() / 1000)
+  const v = miniView({
+    running: jobRunning || makeBusy,
+    elapsedSeconds: runStartedAt === null ? 0 : nowSec - runStartedAt,
+    latest: miniLatest(player.current),
+  })
+  const show = v.kind !== 'none'
+  if (show !== miniShown) {
+    // Keep a scrolled reader where they are: the bar is part of the flow above the notes.
+    const visible = box.offsetParent !== null
+    const y = window.scrollY
+    const height = (): number => box.offsetHeight + (parseFloat(getComputedStyle(box).marginTop) || 0)
+    if (show) {
+      box.classList.remove('hidden')
+      if (visible) window.scrollTo({ top: scrollAfterInsert(y, height()) })
+    } else {
+      const h0 = visible ? height() : 0
+      box.classList.add('hidden')
+      if (visible && y > 4) window.scrollTo({ top: Math.max(0, y - h0) })
+    }
+    miniShown = show
+  }
+  if (v.kind === 'none') return
+  const play = $<HTMLButtonElement>('mini-play')
+  const line = $('mini-line')
+  box.classList.toggle('is-running', v.kind === 'running')
+  play.classList.toggle('hidden', v.kind === 'running')
+  line.classList.toggle('is-indet', v.kind === 'running')
+  if (v.kind === 'running') {
+    setText('mini-title', v.title)
+    setText('mini-meta', 'It will appear here when it is ready.')
+    setText('mini-hint', '')
+    box.setAttribute('aria-label', 'Digest being written')
+    $('mini-open').setAttribute('aria-label', 'Open your digests')
+    line.classList.remove('hidden')
+    $('mini-fill').style.transform = ''
+    return
+  }
+  box.setAttribute('aria-label', 'Latest digest')
+  setText('mini-title', v.title)
+  setText('mini-meta', v.meta)
+  setText('mini-hint', v.hint ?? '')
+  $('mini-open').setAttribute('aria-label', `${v.openLabel}. ${v.title}, ${v.meta}${v.hint ? `, ${v.hint}` : ''}`)
+  const glyph = v.playing ? 'pause' : 'play'
+  if (play.dataset.glyph !== glyph) {
+    play.dataset.glyph = glyph
+    play.innerHTML = icon(glyph, 22)
+  }
+  play.setAttribute('aria-label', v.buttonLabel)
+  line.classList.toggle('hidden', v.progress === null)
+  $('mini-fill').style.transform = `scaleX(${v.progress ?? 0})`
 }
 
 // ─── speed menu ──────────────────────────────────────────────────────────────

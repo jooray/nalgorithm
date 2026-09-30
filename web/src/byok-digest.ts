@@ -88,7 +88,7 @@ export async function writeDigest(
     : `Digest ready: ${summary}`
 }
 
-/** The Digest tab's view of bring-your-own-key mode. */
+/** The Digests tab's view of bring-your-own-key mode. */
 export function byokBackend(deps: {
   /** Posts currently ranked on screen, and their profiles; loads the feed first when there are none. */
   ensureFeed: () => Promise<{ posts: ScoredPost[]; profiles: Map<string, ProfileData> }>

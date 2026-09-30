@@ -2,7 +2,7 @@
  * Nalgorithm Web — app shell: bottom tab bar, toast, offline banner
  *
  * The tab bar is the only navigation. Each tab keeps its scroll position.
- * The browser chrome colour follows the tab: violet over the Digest hero,
+ * The browser chrome colour follows the tab: violet over the Digests hero,
  * the page ground elsewhere.
  */
 
@@ -12,7 +12,7 @@ export type TabName = 'digest' | 'feed' | 'tune'
 
 const TABS: Array<{ name: TabName; label: string; icon: IconName }> = [
   { name: 'feed', label: 'Feed', icon: 'feed' },
-  { name: 'digest', label: 'Digest', icon: 'digest' },
+  { name: 'digest', label: 'Digests', icon: 'digest' },
   { name: 'tune', label: 'Tune', icon: 'tune' },
 ]
 

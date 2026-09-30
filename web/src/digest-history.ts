@@ -3,7 +3,7 @@
  *
  * Bring-your-own-key mode has no server, so digests written in the browser are
  * kept here: newest first, at most `HISTORY_CAP`, each with the notes it was
- * composed from. The hosted digest list is cached the same way so the Digest
+ * composed from. The hosted digest list is cached the same way so the Digests
  * tab opens offline. Pure (storage is passed in) so it runs under plain node.
  */
 

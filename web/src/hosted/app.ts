@@ -195,7 +195,7 @@ export function initHosted(): void {
 
   initDigestForm(closeSettings)
 
-  // The Digest tab and coming back to the app both re-read the digest list and the job status.
+  // The Digests tab and coming back to the app both re-read the digest list and the job status.
   onTabShown((tab) => {
     if (tab === 'digest') void refreshDigests()
   })
@@ -1021,7 +1021,7 @@ function stopJobTimers(): void {
   jobPoll = jobTick = undefined
 }
 
-/** Both places that show the running digest: the Digest tab line and the Tune line. */
+/** Both places that show the running digest: the Digests tab line and the Tune line. */
 function paintJob(): void {
   const text = job.running ? progressText(job, nowSec()) : ''
   if (job.running) setMakeStatus(text)
@@ -1044,7 +1044,7 @@ function applyDigestStatus(status: DigestStatus): void {
   if (status.running && !jobWasRunning) knownBeforeRun = digestIds()
   job = status
   jobWasRunning = status.running
-  setDigestJobRunning(status.running)
+  setDigestJobRunning(status.running, status.startedAt)
 
   if (status.running) {
     // Status every 10 s even in the background (the browser slows timers there); a tick draws the elapsed time.
@@ -1079,7 +1079,7 @@ async function announceArrival(): Promise<void> {
   else toast(text)
 }
 
-/** Re-read the digest list and the job status: on opening the Digest tab and on returning to the app. */
+/** Re-read the digest list and the job status: on opening the Digests tab and on returning to the app. */
 async function refreshDigests(): Promise<void> {
   if (!userNpub) return
   // Two triggers often fire together (tab shown + visible): one read is enough.

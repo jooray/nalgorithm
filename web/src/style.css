@@ -2748,3 +2748,159 @@ body[data-mode='hosted']:has(#hosted-login:not(.hidden)) #views::before {
     animation: none;
   }
 }
+
+/* ─── Mini player (Feed tab) ─────────────────────────────────────────────────
+   A compact violet bar over the feed: the latest digest, or the one being
+   written. Not a second player: its button starts playback on the Digests tab. */
+
+.mini {
+  position: sticky;
+  top: calc(env(safe-area-inset-top) + 8px);
+  z-index: 6;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-height: 60px;
+  margin: calc(env(safe-area-inset-top) + 8px) var(--gutter) 0;
+  padding: 8px 14px 8px 8px;
+  border-radius: 20px;
+  background: var(--hero);
+  color: var(--on-hero);
+  box-shadow: 0 8px 20px rgba(20, 0, 80, 0.3), 0 2px 6px rgba(20, 0, 80, 0.25);
+  overflow: hidden;
+}
+
+.mini.hidden {
+  display: none;
+}
+
+.mini.is-running {
+  padding-left: 16px;
+}
+
+.mini :focus-visible {
+  outline-color: #fff;
+}
+
+.mini-play {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--hero);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.18s var(--ease-out);
+}
+
+.mini-play:active {
+  transform: scale(0.94);
+}
+
+.mini-play .icon-play {
+  margin-left: 2px;
+}
+
+.mini-open {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  align-content: center;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 4px 0 10px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mini.is-running .mini-open {
+  padding-left: 0;
+}
+
+.mini-top {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.mini-title {
+  overflow: hidden;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-hint {
+  flex: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mini-meta {
+  overflow: hidden;
+  color: var(--on-hero-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-line {
+  position: absolute;
+  right: 22px;
+  bottom: 6px;
+  left: 62px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.mini.is-running .mini-line {
+  left: 16px;
+}
+
+.mini-line > i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: #fff;
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.mini-line.is-indet > i {
+  width: 38%;
+  transform: none;
+  animation: indet-slide 1.5s var(--ease-out) infinite;
+}
+
+.mini-line.hidden,
+.mini-play.hidden {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mini-line.is-indet > i {
+    width: 100%;
+    opacity: 0.55;
+    animation: none;
+  }
+}

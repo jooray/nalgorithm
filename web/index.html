@@ -57,8 +57,8 @@
         <button id="btn-hosted-to-byok" class="btn btn-ghost btn-full" type="button">Use my own API key instead (free)</button>
       </section>
 
-      <!-- ─── Digest tab ───────────────────────────────────────────────────── -->
-      <section id="view-digest" class="view hidden" data-view="digest" aria-label="Digest">
+      <!-- ─── Digests tab ───────────────────────────────────────────────────── -->
+      <section id="view-digest" class="view hidden" data-view="digest" aria-label="Digests">
         <div id="hero" class="hero">
           <div class="hero-head">
             <h1 class="hero-title" id="hero-title"><span id="hero-line1">Your morning,</span> <span id="hero-line2" class="hero-len"></span></h1>
@@ -130,6 +130,15 @@
 
       <!-- ─── Feed tab ─────────────────────────────────────────────────────── -->
       <section id="view-feed" class="view" data-view="feed" aria-label="Feed">
+        <!-- Mini player: shows the latest digest, plays it on the Digests tab. Not a second player. -->
+        <div id="mini" class="mini hidden" role="region" aria-label="Latest digest">
+          <button id="mini-play" class="mini-play" type="button"></button>
+          <button id="mini-open" class="mini-open" type="button">
+            <span class="mini-top"><span id="mini-title" class="mini-title"></span><span id="mini-hint" class="mini-hint"></span></span>
+            <span id="mini-meta" class="mini-meta"></span>
+          </button>
+          <div id="mini-line" class="mini-line" aria-hidden="true"><i id="mini-fill"></i></div>
+        </div>
         <header class="view-head">
           <h1>Feed</h1>
           <button id="btn-refresh" class="btn btn-primary byok-only" type="button" disabled></button>
