@@ -48,6 +48,9 @@ import { showDigest, stopDigestSpeech } from './digest-ui.js'
 
 import { initVersionCheck, setUpdateBlocked } from './version-check.js'
 
+import { resolveMode, switchMode } from './hosted/mode.js'
+import { initHosted } from './hosted/app.js'
+
 // ─── App state ───────────────────────────────────────────────────────────────
 
 let isRunning = false
@@ -503,8 +506,23 @@ async function runDigest(): Promise<void> {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const settings = initUI(runFeed, regenerateLearnedPrompt, runDigest)
   initVersionCheck()
+
+  // Exactly one mode's UI is wired up per page load; switching reloads.
+  const mode = resolveMode()
+  document.body.dataset.mode = mode
+  if (mode === 'choose') {
+    document.getElementById('btn-choose-hosted')!.addEventListener('click', () => switchMode('hosted'))
+    document.getElementById('btn-choose-byok')!.addEventListener('click', () => switchMode('byok'))
+    return
+  }
+  if (mode === 'hosted') {
+    initHosted()
+    return
+  }
+
+  document.getElementById('btn-switch-hosted')!.addEventListener('click', () => switchMode('hosted'))
+  const settings = initUI(runFeed, regenerateLearnedPrompt, runDigest)
 
   // Start loading straight away when everything needed is configured. Clicking
   // Refresh to see the feed you already set up is a step with no decision in it.

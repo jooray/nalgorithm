@@ -4,18 +4,44 @@
  * Presents the two ways to tell Nalgorithm who you are: a NIP-07 browser
  * extension, or a NIP-46 remote signer (Amber and friends) via QR code.
  *
- * Both are read-only. The dialog says so explicitly, because "connect your
- * Nostr signer" normally implies granting signing power, and here it does not.
+ * In bring-your-own-key mode both are read-only. The dialog says so explicitly,
+ * because "connect your Nostr signer" normally implies granting signing power,
+ * and there it does not.
+ *
+ * The hosted variant of the same dialog additionally needs one signature over
+ * a login event, so it has no "paste an npub" option: a public key alone
+ * cannot prove anyone holds the key.
  */
 
 import qrcode from 'qrcode-generator'
 import {
   hasNip07,
   loginWithExtension,
+  signWithExtension,
   startRemoteSignerLogin,
   toNpub,
   type RemoteSignerSession,
+  type SignFn,
 } from './nostr-login.js'
+
+/** A completed login. `sign`/`close` are present only for hosted logins. */
+export interface LoginResult {
+  pubkey: string
+  sign?: SignFn
+  /** Release the signer connection once the signature has been used. */
+  close?: () => void
+}
+
+const READONLY_NOTICE = `
+  <strong>Read-only.</strong> Nalgorithm only needs your public key, so it can
+  read your follow list, your feed, and your likes. It never signs, posts,
+  or reacts on your behalf, and it asks your signer for no permission to do so.`
+
+const HOSTED_NOTICE = `
+  <strong>One signature, nothing posted.</strong> Signing in to the hosted service
+  asks your signer to sign a single one-time login event for this site. It is
+  never published to a relay and cannot post or spend anything for you. No API
+  key is involved.`
 
 let dialog: HTMLDialogElement | null = null
 let activeSession: RemoteSignerSession | null = null
@@ -25,20 +51,38 @@ let activeSession: RemoteSignerSession | null = null
  *
  * @returns the user's hex pubkey, or null if they closed the dialog.
  */
-export function openLoginDialog(signerRelays?: string[]): Promise<string | null> {
+export async function openLoginDialog(signerRelays?: string[]): Promise<string | null> {
+  return (await openDialog(signerRelays, false))?.pubkey ?? null
+}
+
+/**
+ * Open the login dialog for hosted mode: signer only, and the result can sign
+ * one login event. The caller must call `close()` on the result when done.
+ */
+export function openHostedLoginDialog(signerRelays?: string[]): Promise<LoginResult | null> {
+  return openDialog(signerRelays, true)
+}
+
+function openDialog(signerRelays: string[] | undefined, hosted: boolean): Promise<LoginResult | null> {
   return new Promise((resolve) => {
     const el = ensureDialog()
+    el.querySelector<HTMLElement>('.login-readonly')!.innerHTML = hosted ? HOSTED_NOTICE : READONLY_NOTICE
+    el.querySelector<HTMLElement>('.login-header h2')!.textContent = hosted
+      ? 'Sign in to hosted Nalgorithm'
+      : 'Connect your Nostr identity'
     const body = el.querySelector<HTMLElement>('.login-body')!
     const status = el.querySelector<HTMLElement>('.login-status')!
 
     let settled = false
-    const finish = (pubkey: string | null): void => {
+    const finish = (result: LoginResult | null): void => {
       if (settled) return
       settled = true
-      activeSession?.cancel()
+      // A finished hosted login keeps its signer open for the caller; anything
+      // else (closed dialog, failure) tears the handshake down.
+      if (!result?.close) activeSession?.cancel()
       activeSession = null
       el.close()
-      resolve(pubkey)
+      resolve(result)
     }
 
     status.textContent = ''
@@ -55,7 +99,8 @@ export function openLoginDialog(signerRelays?: string[]): Promise<string | null>
     extBtn.addEventListener('click', async () => {
       setStatus(status, 'Waiting for the extension…')
       try {
-        finish(await loginWithExtension())
+        const pubkey = await loginWithExtension()
+        finish(hosted ? { pubkey, sign: signWithExtension, close: () => {} } : { pubkey })
       } catch (err) {
         setStatus(status, (err as Error).message, true)
       }
@@ -65,7 +110,9 @@ export function openLoginDialog(signerRelays?: string[]): Promise<string | null>
     const hint = document.createElement('p')
     hint.className = 'login-hint'
     hint.textContent = hasNip07()
-      ? 'Reads your public key from Alby, nos2x, or a similar extension.'
+      ? hosted
+        ? 'Reads your public key from Alby, nos2x, or a similar extension, then asks it to sign one login event.'
+        : 'Reads your public key from Alby, nos2x, or a similar extension.'
       : 'Install Alby or nos2x to use this option, or scan the code below.'
     body.appendChild(hint)
 
@@ -81,29 +128,39 @@ export function openLoginDialog(signerRelays?: string[]): Promise<string | null>
     startBtn.textContent = 'Use a remote signer (Amber)'
     startBtn.addEventListener('click', () => {
       startBtn.remove()
-      beginRemoteSigner(signerWrap, status, finish, signerRelays)
+      beginRemoteSigner(signerWrap, status, finish, signerRelays, hosted)
     })
     signerWrap.appendChild(startBtn)
 
-    // ── Manual entry escape hatch ────────────────────────────────────────
     body.appendChild(divider('or'))
 
-    const manual = document.createElement('div')
-    manual.className = 'login-manual'
-    manual.innerHTML = `
+    if (hosted) {
+      // No manual entry: an npub someone pasted proves nothing about who holds
+      // the key, and the server only accepts a signed login.
+      const why = document.createElement('p')
+      why.className = 'login-hint'
+      why.textContent =
+        'Pasting an npub is not available here. Hosted mode keeps your settings and subscription under your key, so the server needs a signature to know it is really you. To only look at a feed without signing anything, use bring-your-own-key mode.'
+      body.appendChild(why)
+    } else {
+      // ── Manual entry escape hatch ──────────────────────────────────────
+      const manual = document.createElement('div')
+      manual.className = 'login-manual'
+      manual.innerHTML = `
       <label for="login-manual-npub">Paste an npub</label>
       <input type="text" id="login-manual-npub" placeholder="npub1… or hex pubkey" spellcheck="false">
       <button class="btn btn-small btn-full" id="login-manual-go">Use this npub</button>
     `
-    body.appendChild(manual)
-    manual.querySelector<HTMLButtonElement>('#login-manual-go')!.addEventListener('click', () => {
-      const value = manual.querySelector<HTMLInputElement>('#login-manual-npub')!.value.trim()
-      if (!value) {
-        setStatus(status, 'Enter an npub or hex pubkey', true)
-        return
-      }
-      finish(value)
-    })
+      body.appendChild(manual)
+      manual.querySelector<HTMLButtonElement>('#login-manual-go')!.addEventListener('click', () => {
+        const value = manual.querySelector<HTMLInputElement>('#login-manual-npub')!.value.trim()
+        if (!value) {
+          setStatus(status, 'Enter an npub or hex pubkey', true)
+          return
+        }
+        finish({ pubkey: value })
+      })
+    }
 
     el.querySelector<HTMLButtonElement>('.login-close')!.onclick = () => finish(null)
     el.onclose = () => finish(null)
@@ -115,12 +172,13 @@ export function openLoginDialog(signerRelays?: string[]): Promise<string | null>
 function beginRemoteSigner(
   wrap: HTMLElement,
   status: HTMLElement,
-  finish: (pubkey: string | null) => void,
-  relays?: string[]
+  finish: (result: LoginResult | null) => void,
+  relays?: string[],
+  hosted = false
 ): void {
   let session: RemoteSignerSession
   try {
-    session = startRemoteSignerLogin(relays?.length ? relays : undefined)
+    session = startRemoteSignerLogin(relays?.length ? relays : undefined, { sign: hosted })
   } catch (err) {
     setStatus(status, (err as Error).message, true)
     return
@@ -136,7 +194,9 @@ function beginRemoteSigner(
 
   const caption = document.createElement('p')
   caption.className = 'login-hint'
-  caption.textContent = 'Scan with Amber, or open the link below if your signer is on this device.'
+  caption.textContent = hosted
+    ? 'Scan with Amber, or open the link below if your signer is on this device. Approve the connection and the login signature.'
+    : 'Scan with Amber, or open the link below if your signer is on this device.'
   wrap.appendChild(caption)
 
   const link = document.createElement('a')
@@ -164,7 +224,7 @@ function beginRemoteSigner(
   session.pubkey.then(
     (pubkey) => {
       setStatus(status, `Connected as ${toNpub(pubkey).slice(0, 20)}…`)
-      finish(pubkey)
+      finish(hosted ? { pubkey, sign: session.sign, close: session.close } : { pubkey })
     },
     (err: Error) => {
       setStatus(status, err.message, true)
@@ -191,11 +251,7 @@ function ensureDialog(): HTMLDialogElement {
       <h2>Connect your Nostr identity</h2>
       <button class="btn-icon login-close" aria-label="Close">&times;</button>
     </div>
-    <p class="login-readonly">
-      <strong>Read-only.</strong> Nalgorithm only needs your public key, so it can
-      read your follow list, your feed, and your likes. It never signs, posts,
-      or reacts on your behalf, and it asks your signer for no permission to do so.
-    </p>
+    <p class="login-readonly"></p>
     <div class="login-body"></div>
     <p class="login-status"></p>
   `

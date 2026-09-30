@@ -24,9 +24,12 @@
       </div>
       <div class="header-right">
         <span id="status" class="status"></span>
-        <button id="btn-refresh" class="btn btn-primary" disabled>Refresh</button>
-        <button id="btn-digest" class="btn btn-secondary" disabled title="Summarize the top posts into a narrative">Digest</button>
-        <button id="btn-settings" class="btn btn-secondary">Settings</button>
+        <button id="btn-refresh" class="btn btn-primary byok-only" disabled>Refresh</button>
+        <button id="btn-digest" class="btn btn-secondary byok-only" disabled title="Summarize the top posts into a narrative">Digest</button>
+        <button id="btn-settings" class="btn btn-secondary byok-only">Settings</button>
+        <button id="btn-hosted-refresh" class="btn btn-primary hosted-only needs-auth" type="button">Refresh</button>
+        <button id="btn-hosted-digest" class="btn btn-secondary hosted-only needs-auth" type="button" aria-disabled="true" title="Coming soon: daily voice digest by Nostr DM">Digest</button>
+        <button id="btn-hosted-settings" class="btn btn-secondary hosted-only needs-auth" type="button">Settings</button>
         <a href="https://github.com/jooray/nalgorithm" target="_blank" rel="noopener" class="btn-icon github-link" title="Source on GitHub">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         </a>
@@ -35,12 +38,19 @@
 
     <!-- Settings Panel (slide-out) -->
     <div id="settings-overlay" class="overlay hidden"></div>
-    <aside id="settings-panel" class="settings-panel hidden">
+    <aside id="settings-panel" class="settings-panel byok-only hidden">
       <div class="settings-header">
         <h2>Settings</h2>
         <button id="btn-close-settings" class="btn-icon">&times;</button>
       </div>
       <div class="settings-body">
+        <!-- Mode -->
+        <section class="settings-section">
+          <h3>Mode</h3>
+          <p class="field-hint">You are using your own API key. Hosted mode needs no key: 3-day free trial, then 10,000 sats per month.</p>
+          <button id="btn-switch-hosted" class="btn btn-small btn-full" type="button">Switch to hosted mode</button>
+        </section>
+
         <!-- Identity -->
         <section class="settings-section">
           <h3>Identity</h3>
@@ -182,13 +192,125 @@
       </div>
     </aside>
 
+    <!-- Hosted settings panel (slide-out) -->
+    <aside id="hosted-settings-panel" class="settings-panel hosted-only hidden" aria-label="Hosted settings">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button id="btn-close-hosted-settings" class="btn-icon" type="button" aria-label="Close settings">&times;</button>
+      </div>
+      <div class="settings-body">
+        <section class="settings-section">
+          <h3>Account</h3>
+          <div class="identity-connected">
+            <span class="identity-dot"></span>
+            <span class="identity-label">Signed in</span>
+            <code id="hosted-npub" class="identity-npub"></code>
+          </div>
+          <p id="hosted-subscription" class="field-hint"></p>
+          <button id="btn-hosted-subscribe" class="btn btn-small btn-full" type="button">Subscribe or add time</button>
+          <button id="btn-hosted-logout" class="btn btn-small btn-full" type="button">Log out</button>
+          <button id="btn-hosted-switch-byok" class="btn btn-small btn-full" type="button">Use my own API key instead</button>
+        </section>
+
+        <section class="settings-section">
+          <h3>Prompt</h3>
+          <label for="hosted-prompt">Describe your interests</label>
+          <textarea id="hosted-prompt" rows="6" maxlength="2000" placeholder="I like cypherpunk culture, decentralized technology, Bitcoin, and thoughtful longform posts. I don't care about price speculation or GM posts."></textarea>
+          <p id="hosted-prompt-count" class="field-hint" aria-live="polite"></p>
+        </section>
+
+        <section class="settings-section">
+          <h3>Feed</h3>
+          <label for="hosted-hours">Time window (hours, 1 to 72)</label>
+          <input type="number" id="hosted-hours" min="1" max="72" step="1" value="24">
+          <label for="hosted-topn">Posts to show (1 to 30)</label>
+          <input type="number" id="hosted-topn" min="1" max="30" step="1" value="15">
+          <label class="checkbox-label">
+            <input type="checkbox" id="hosted-learn" checked>
+            Learn from my likes
+          </label>
+        </section>
+
+        <section class="settings-section">
+          <button id="btn-hosted-save" class="btn btn-primary btn-full" type="button">Save Settings</button>
+          <p id="hosted-settings-status" class="hosted-status" role="status"></p>
+        </section>
+      </div>
+    </aside>
+
     <!-- Main Feed -->
     <main id="feed">
-      <div id="feed-empty" class="feed-empty">
+      <div id="feed-empty" class="feed-empty byok-only">
         <p>Connect your Nostr identity and add an LLM API key in Settings, then click Refresh to load your feed.</p>
         <p class="feed-empty-sub">Everything runs in your browser. Your key and settings stay in this device's local storage.</p>
       </div>
-      <div id="feed-list" class="feed-list"></div>
+      <div id="feed-list" class="feed-list byok-only"></div>
+
+      <!-- First run: pick a mode -->
+      <section id="mode-choice" class="choose-only mode-choice" aria-labelledby="mode-choice-title">
+        <h2 id="mode-choice-title">How do you want to run Nalgorithm?</h2>
+        <div class="mode-cards">
+          <div class="hosted-panel">
+            <h3>Hosted</h3>
+            <p>No API key. 3-day free trial, then 10,000 sats per month. Sign in with a Nostr signer.</p>
+            <button id="btn-choose-hosted" class="btn btn-primary btn-full" type="button">Use hosted mode</button>
+          </div>
+          <div class="hosted-panel">
+            <h3>Bring your own API key</h3>
+            <p>Free. Everything runs in your browser with your own LLM key, which stays on this device.</p>
+            <button id="btn-choose-byok" class="btn btn-secondary btn-full" type="button">Use my own key</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Hosted mode -->
+      <section id="hosted-view" class="hosted-only hosted-view">
+        <div id="hosted-login" class="hosted-panel hidden">
+          <h2>Sign in</h2>
+          <p>Hosted mode needs no API key: 3-day free trial, then 10,000 sats per month. Sign in with a Nostr extension or a remote signer such as Amber. You sign one login event; nothing is posted.</p>
+          <button id="btn-hosted-login" class="btn btn-primary btn-full" type="button">Sign in with Nostr</button>
+          <p id="hosted-login-status" class="hosted-status" role="status"></p>
+          <button id="btn-hosted-to-byok" class="btn btn-small btn-full" type="button">Use my own API key instead (free)</button>
+        </div>
+
+        <div id="hosted-banner" class="hosted-banner hidden" role="status">
+          <span id="hosted-banner-text"></span>
+          <button id="btn-banner-action" class="btn btn-small hidden" type="button"></button>
+        </div>
+
+        <div id="hosted-notice" class="hosted-panel hidden" role="alert">
+          <p id="hosted-notice-text"></p>
+          <button id="btn-notice-action" class="btn btn-small hidden" type="button"></button>
+        </div>
+
+        <div id="hosted-paywall" class="hosted-panel hidden" aria-labelledby="paywall-title">
+          <h2 id="paywall-title">Subscribe</h2>
+          <fieldset class="plan-options">
+            <legend>Plan</legend>
+            <label class="plan-card"><input type="radio" name="hosted-plan" value="nalgorithm" checked>
+              <span><strong>Nalgorithm</strong><br>10,000 sats for 30 days</span></label>
+            <label class="plan-card"><input type="radio" name="hosted-plan" value="all-access">
+              <span><strong>All-access</strong><br>25,000 sats for 30 days, also unlocks two sibling apps</span></label>
+          </fieldset>
+          <label for="pay-sats">Amount in sats (minimum 1,000)</label>
+          <input type="number" id="pay-sats" min="1000" step="1" value="10000" inputmode="numeric">
+          <p id="pay-days" class="field-hint" aria-live="polite"></p>
+          <button id="btn-pay" class="btn btn-primary btn-full" type="button">Pay</button>
+          <p id="pay-status" class="hosted-status" role="status"></p>
+          <a id="pay-link" class="hidden" href="#" target="_blank" rel="noopener noreferrer">Payment page not open? Open it here</a>
+          <button id="btn-pay-cancel" class="btn btn-small btn-full hidden" type="button">Stop waiting</button>
+        </div>
+
+        <div id="hosted-loading" class="hosted-panel hidden" role="status">
+          <span class="spinner"></span>
+          <span id="hosted-loading-text">Ranking your feed. This can take up to a minute.</span>
+        </div>
+
+        <div id="hosted-empty" class="feed-empty hidden">
+          <p id="hosted-empty-text">Click Refresh to rank your feed.</p>
+        </div>
+        <div id="hosted-feed" class="feed-list"></div>
+      </section>
     </main>
   </div>
 

@@ -1,6 +1,6 @@
 {
   "name": "nalgorithm-web",
-  "version": "0.8.3",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "pretypecheck": "node ../scripts/sync-humanizer.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "nalgorithm": "*",

@@ -1053,3 +1053,146 @@ select {
   color: var(--text-muted);
   font-size: 0.78rem;
 }
+
+/* ─── Modes (hosted / bring your own key) ──────────────────────────────────── */
+
+/* Exactly one mode's UI shows; before the mode is known, none of it does. */
+body:not([data-mode="byok"]) .byok-only,
+body:not([data-mode="hosted"]) .hosted-only,
+body:not([data-mode="choose"]) .choose-only,
+body:not([data-signed-in="true"]) .needs-auth {
+  display: none !important;
+}
+
+.hosted-view .hidden,
+.hosted-panel.hidden,
+.mode-choice .hidden {
+  display: none !important;
+}
+
+.mode-choice h2 {
+  margin-bottom: 1rem;
+  font-size: 1.15rem;
+  text-align: center;
+}
+
+.mode-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.hosted-panel {
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.hosted-panel h2,
+.hosted-panel h3 {
+  margin-bottom: 6px;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.hosted-panel p {
+  margin-bottom: 4px;
+}
+
+.hosted-status {
+  min-height: 1.2rem;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.hosted-status.is-error {
+  color: var(--danger);
+}
+
+.hosted-banner {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  font-size: 0.85rem;
+}
+
+.hosted-banner.is-warning {
+  border-left-color: var(--score-mid);
+}
+
+.hosted-banner.is-danger {
+  border-left-color: var(--danger);
+}
+
+.plan-options {
+  margin-bottom: 8px;
+  padding: 0;
+  border: 0;
+}
+
+.plan-options legend {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.plan-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.plan-card:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--bg-card-hover);
+}
+
+.plan-card:has(input:focus-visible) {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.plan-card input {
+  margin-top: 3px;
+}
+
+#pay-link {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 600px) {
+  .mode-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .hosted-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  #header .header-right {
+    flex-wrap: wrap;
+  }
+}
