@@ -140,7 +140,7 @@ Privacy: the server sees follows, likes and the user's taste prompt. Retention l
 ## 7. Feed and digest jobs
 
 - Feed request: `runDigestPipeline` in feed mode (score only), cache-first, SSE progress. Rate limited per npub.
-- Digest job per user at their local time: pipeline, then `generateDigest(forSpeech)`, optional `humanizeText`, then delivery. Humanizer adds a ~16k-token prompt call, so it is a plan option.
+- Digest job per user at their local time: pipeline, then `generateDigest(forSpeech: true)` and `humanizeText` (both on by default, decided 2026-09-30, so no markdown reaches the voice), then delivery. Humanizer adds a ~16k-token prompt call, so it is a plan option.
 - Scheduler: in-process tick every minute reading the `jobs` table (survives restart). Jobs are staggered with jitter to respect the shared Venice limit.
 - Hosted default is `scorer: 'decision'`, `jev-latest`. Cross-user rate limiting is out of scope until there are many users; jobs are still staggered with jitter and the `RateLimiter` interface stays as a seam.
 - Cost guard: per-user daily caps (posts scored, digests, TTS characters), so a paid npub cannot exceed margin.
@@ -215,7 +215,7 @@ One Node process behind a reverse proxy, with the API on the same origin as the 
 
 ## 12. Open questions
 
-Answered: Q1 (settlement), Q2 (paid feed, 3-day trial), Q3 (10k sats/month), Q4 (pro rata, zap on behalf via comment npub), Q5 (widest reach: kind 14 + plain URL), Q6 (humanizer on, `deepseek-v4-1-flash` to start), Q7 (BTCPay direct), Q8 (new bot npub, relay whitelist and mirror done), Q11 (kind 4 rule in 8.3).
+Answered: Q1 (settlement), Q2 (paid feed, 3-day trial), Q3 (10k sats/month), Q4 (pro rata, zap on behalf via comment npub), Q5 (widest reach: kind 14 + plain URL), Q6 (humanizer on by default, with the speech prompt; `deepseek-v4-1-flash` to start), Q7 (BTCPay direct), Q8 (new bot npub, relay whitelist and mirror done), Q11 (kind 4 rule in 8.3).
 
 Still open:
 Q9. Data retention, and self-service deletion (a `delete my data` DM command?).
