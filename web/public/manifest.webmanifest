@@ -1,13 +1,13 @@
 {
-  "name": "Nalgorithm — Nostr Relevance Feed",
-  "short_name": "Nalgorithm",
+  "name": "nalgorithm",
+  "short_name": "nalgorithm",
   "description": "Rank your Nostr timeline by what you actually care about, using an LLM instead of reverse chronological order.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#0d1117",
-  "theme_color": "#161b22",
+  "background_color": "#0B0B10",
+  "theme_color": "#6B3DF5",
   "icons": [
     {
       "src": "icon-192.png",

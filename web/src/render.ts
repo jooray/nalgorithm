@@ -1,17 +1,13 @@
 /**
  * Nalgorithm Web — Rich post rendering
  *
- * Layout per card:
- *   [profile pic] [author name or npub] [type label]    [timestamp]
- *   [Boosted by a, b, c ...]
- *   [post content]
- *   [media]
- *   [embedded post for quotes]
- *   [score bar — clickable to expand justification]
- *   [...] menu (copy npub / nprofile / nevent, open in client or app)
+ * One note, as a modern Nostr client draws it: avatar, name, handle and time,
+ * "Boosted by" line, body, media, link cards, quoted note, then the score pill
+ * with its reason, then the action row. Tapping a note opens the detail sheet.
  *
  * Nothing here prints a hex key: a person is a profile name or their npub.
- * All text goes in through textContent, never innerHTML.
+ * All text goes in through textContent, never innerHTML (icons excepted: those
+ * are static strings from icons.ts).
  */
 
 import type { ScoredPost, EmbeddedPost, ProfileData } from 'nalgorithm'
@@ -37,6 +33,11 @@ import {
   type Folded,
 } from './identity.js'
 import type { AppSettings } from './settings.js'
+import { copyText } from './clipboard.js'
+import { noteActions, renderActionRow, type NoteLinks } from './actions.js'
+import { icon, type IconName } from './icons.js'
+import { openSheet } from './sheet.js'
+import { relativeTime } from './time.js'
 
 export interface RenderOptions {
   profiles?: Map<string, ProfileData>
@@ -50,6 +51,8 @@ export interface RenderOptions {
   relayHints?: string[]
   /** Hosted mode only: add link cards for the URLs in `content` to `card`. */
   linkPreviews?: (content: string, card: HTMLElement) => void
+  /** Tapping a note opens the detail sheet (default true). */
+  detail?: boolean
 }
 
 /** Link options derived from the reader's settings; shared by both modes. */
@@ -90,9 +93,10 @@ export function renderFeed(
     return
   }
 
-  for (const post of posts) {
-    container.appendChild(renderPostCard(post, options))
-  }
+  posts.forEach((post, i) => {
+    // The feed is ranked best first, so the first note is the top-ranked one.
+    container.appendChild(renderPostCard(post, options, i === 0))
+  })
 }
 
 // ─── People ──────────────────────────────────────────────────────────────────
@@ -200,112 +204,215 @@ function renderBoostedBy(pubkeys: string[], options: RenderOptions): HTMLElement
 
 // ─── Cards ───────────────────────────────────────────────────────────────────
 
-/**
- * Render a single post card.
- */
-function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement {
-  const card = el('article', 'post-card')
+/** The grey handle next to a name: the profile's NIP-05, without the `_@` of a root identifier. */
+function handleOf(pubkey: string, options: RenderOptions): string {
+  const nip05 = options.profiles?.get(pubkey)?.nip05?.trim()
+  if (!nip05) return ''
+  return nip05.replace(/^_@/, '')
+}
 
-  // ── Header: profile pic + name + type label + timestamp ──
-  const header = el('div', 'post-header')
-  header.appendChild(renderAvatar(post.author, options, 'post-avatar'))
+/** Identifiers and links for a note, computed once and used by the row, the menu and the sheet. */
+function linksFor(post: DisplayPost, options: RenderOptions): NoteLinks & { eventTemplate: string } {
+  const preset = options.clientPreset ?? 'njump'
+  const npub = npubOf(post.author)
+  const nprofile = nprofileOf(post.author, options.relayHints)
+  const relay = (post as { relay?: string }).relay
+  const relays = [...(relay ? [relay] : []), ...(options.relayHints ?? [])].slice(0, 3)
+  let nevent = ''
+  try {
+    nevent = nip19.neventEncode({ id: post.id, author: post.author, kind: post.rawEvent?.kind ?? 1, relays })
+  } catch {
+    // invalid id: the note actions are left out
+  }
+  const eventTemplate = options.eventUrlTemplate ?? ''
+  return {
+    id: post.id,
+    author: post.author,
+    npub,
+    nprofile,
+    nevent,
+    eventHref: nevent ? (safeLink(buildEventUrl(eventTemplate, nevent)) ?? '') : '',
+    clientLabel: clientLabel(preset),
+    eventTemplate,
+  }
+}
 
-  const meta = el('div', 'post-meta')
-  const author = el('div', 'post-author')
+/** Name, handle and time on one line, as Primal, Damus and Amethyst set them. */
+function renderNoteHead(post: DisplayPost, options: RenderOptions): HTMLElement {
+  const head = el('div', 'note-head')
+  const author = el('span', 'post-author')
   author.appendChild(personLink(post.author, options, 'author-link'))
-  meta.appendChild(author)
-
+  head.appendChild(author)
+  const handle = handleOf(post.author, options)
+  if (handle) {
+    const h = el('span', 'note-handle')
+    h.textContent = handle
+    head.appendChild(h)
+  }
   if (post.type !== 'original') {
-    const typeLabel = el('span', 'post-type-label')
-    typeLabel.textContent = post.type === 'boost' ? 'Boosted' : 'Quoted'
-    meta.appendChild(typeLabel)
+    const t = el('span', 'post-type-label')
+    t.textContent = post.type === 'boost' ? 'Boosted' : 'Quoted'
+    head.appendChild(t)
   }
-  header.appendChild(meta)
+  const time = document.createElement('time')
+  time.className = 'post-time'
+  time.dateTime = new Date(post.createdAt * 1000).toISOString()
+  time.textContent = relativeTime(post.createdAt)
+  time.title = new Date(post.createdAt * 1000).toLocaleString()
+  head.appendChild(time)
+  return head
+}
 
-  const time = el('span', 'post-time')
-  time.textContent = formatTime(post.createdAt)
-  header.appendChild(time)
-  card.appendChild(header)
-
-  if (post.boostedBy && post.boostedBy.length > 0) {
-    card.appendChild(renderBoostedBy(post.boostedBy, options))
-  }
-
-  // ── Content ──
+/** Body, media and quoted note: the part a note and its detail sheet share. */
+function renderNoteContent(post: DisplayPost, options: RenderOptions, into: HTMLElement): void {
   const content = el('div', 'post-content')
   content.appendChild(renderContent(post.content, options))
-  card.appendChild(content)
-  options.linkPreviews?.(post.content, card)
+  into.appendChild(content)
+  options.linkPreviews?.(post.content, into)
 
   const media = extractMedia(post.content, post.rawEvent?.tags ?? [])
   if (media.length > 0) {
     const mediaContainer = el('div', 'post-media')
     for (const m of media) mediaContainer.appendChild(renderMedia(m))
-    card.appendChild(mediaContainer)
+    into.appendChild(mediaContainer)
   }
 
   if (post.type === 'quote' && post.quotedPost) {
-    card.appendChild(renderEmbeddedPost(post.quotedPost, options))
+    into.appendChild(renderEmbeddedPost(post.quotedPost, options))
   } else if (post.type === 'boost' && post.originalPost) {
     // Only reached for a boost that was not folded (kept for safety).
-    card.appendChild(renderEmbeddedPost(post.originalPost, options))
+    into.appendChild(renderEmbeddedPost(post.originalPost, options))
   }
+}
 
-  // ── Score row (below content) ──
-  const scoreRow = el('div', 'post-score-row')
-  scoreRow.title = 'Click to see justification'
+/** The lime score pill with the one-line reason beside it. */
+function renderScore(post: DisplayPost, full = false): HTMLElement {
+  const row = el('div', full ? 'note-score note-score-full' : 'note-score')
+  const pill = el('span', 'score-pill')
+  pill.textContent = `Score ${post.score.toFixed(1)}`
+  pill.setAttribute('aria-label', `Score ${post.score.toFixed(1)} out of 10`)
+  row.appendChild(pill)
+  const reason = el('span', 'score-reason')
+  reason.textContent = post.justification || 'No reason recorded'
+  row.appendChild(reason)
+  return row
+}
 
-  const scoreBar = el('div', 'post-score-bar')
-  const scoreFill = el('div', `post-score-fill ${getScoreClass(post.score)}`)
-  scoreFill.style.width = `${(post.score / 10) * 100}%`
-  scoreBar.appendChild(scoreFill)
+/**
+ * Render a single note.
+ *
+ *   [avatar]  name  handle  · time
+ *             Boosted by a, b
+ *             body, media, link cards, quoted note
+ *             [Score 9.1] one-line reason
+ *             open  copy                          •••
+ *
+ * Tapping the note (anywhere that is not a link or button) opens the detail sheet.
+ */
+function renderPostCard(post: DisplayPost, options: RenderOptions, top = false): HTMLElement {
+  const card = el('article', top ? 'note note-top' : 'note')
+  card.tabIndex = 0
+  const name = authorLabel(post.author, options.profiles?.get(post.author)).text
+  card.setAttribute('aria-label', `Note by ${name}, score ${post.score.toFixed(1)}. Open details`)
 
-  const scoreLabel = el('span', `post-score-label ${getScoreClass(post.score)}`)
-  scoreLabel.textContent = post.score.toFixed(1)
+  card.appendChild(renderAvatar(post.author, options, 'post-avatar'))
 
-  scoreRow.appendChild(scoreBar)
-  scoreRow.appendChild(scoreLabel)
+  const main = el('div', 'note-main')
+  main.appendChild(renderNoteHead(post, options))
+  if (post.boostedBy && post.boostedBy.length > 0) {
+    main.appendChild(renderBoostedBy(post.boostedBy, options))
+  }
+  renderNoteContent(post, options, main)
+  main.appendChild(renderScore(post))
 
-  const justification = el('div', 'post-justification hidden')
-  justification.textContent = post.justification || 'No justification available'
-  scoreRow.addEventListener('click', () => justification.classList.toggle('hidden'))
+  const links = linksFor(post, options)
+  main.appendChild(renderActionRow(noteActions(links), renderMenu(post, options, links)))
+  card.appendChild(main)
 
-  card.appendChild(scoreRow)
-  card.appendChild(justification)
-
-  // ── Footer: menu ──
-  const footer = el('div', 'post-footer')
-  footer.appendChild(renderMenu(post, options))
-  card.appendChild(footer)
-
+  if (options.detail !== false) {
+    const open = (): void => openNoteSheet(post, options)
+    card.addEventListener('click', (e) => {
+      const target = e.target as Element | null
+      if (target?.closest('a, button, input, textarea, select, video, [role="menu"], .video-placeholder')) return
+      if (window.getSelection()?.toString()) return
+      open()
+    })
+    card.addEventListener('keydown', (e) => {
+      if (e.target !== card || (e.key !== 'Enter' && e.key !== ' ')) return
+      e.preventDefault()
+      open()
+    })
+  }
   return card
+}
+
+// ─── Detail sheet ────────────────────────────────────────────────────────────
+
+/** The full note, why it ranked, and every way to open or copy it. Shallow: no thread is fetched. */
+export function openNoteSheet(post: DisplayPost, options: RenderOptions): void {
+  const links = linksFor(post, options)
+  const sheet = openSheet({ title: 'Note' })
+  const body = sheet.body
+
+  const note = el('article', 'note note-detail')
+  note.appendChild(renderAvatar(post.author, options, 'post-avatar'))
+  const main = el('div', 'note-main')
+  main.appendChild(renderNoteHead(post, options))
+  if (post.boostedBy && post.boostedBy.length > 0) {
+    main.appendChild(renderBoostedBy(post.boostedBy, options))
+  }
+  renderNoteContent(post, options, main)
+  note.appendChild(main)
+  body.appendChild(note)
+
+  const why = el('section', 'sheet-section')
+  const whyTitle = el('h3', 'sheet-section-title')
+  whyTitle.textContent = 'Why it ranked'
+  why.appendChild(whyTitle)
+  why.appendChild(renderScore(post, true))
+  body.appendChild(why)
+
+  const list = el('div', 'sheet-actions')
+  const item = (labelText: string, iconName: IconName, run: () => Promise<boolean>, doneText: string): void => {
+    const b = el('button', 'sheet-action') as HTMLButtonElement
+    b.type = 'button'
+    const label = el('span', 'sheet-action-label')
+    label.textContent = labelText
+    b.innerHTML = icon(iconName, 20)
+    b.appendChild(label)
+    b.addEventListener('click', async () => {
+      const ok = await run()
+      label.textContent = ok ? doneText : 'Copy failed'
+      setTimeout(() => (label.textContent = labelText), 1400)
+    })
+    list.appendChild(b)
+  }
+  const link = (labelText: string, iconName: IconName, href: string): void => {
+    const safe = safeLink(href)
+    if (!safe) return
+    const a = el('a', 'sheet-action') as HTMLAnchorElement
+    a.href = safe
+    a.target = '_blank'
+    a.rel = 'noopener'
+    a.innerHTML = icon(iconName, 20)
+    const label = el('span', 'sheet-action-label')
+    label.textContent = labelText
+    a.appendChild(label)
+    list.appendChild(a)
+  }
+  if (links.nevent) item('Copy note link (nevent)', 'copy', () => copyText(links.nevent), 'Copied')
+  if (links.eventHref) link(`Open note in ${links.clientLabel}`, 'external', links.eventHref)
+  if ((options.clientPreset ?? 'njump') !== 'app' && links.nevent) {
+    link('Open note in my Nostr app', 'external', nostrUri(links.nevent))
+  }
+  if (links.npub) item('Copy npub', 'copy', () => copyText(links.npub), 'Copied')
+  link(`Open profile in ${links.clientLabel}`, 'user', profileHref(post.author, options))
+  body.appendChild(list)
 }
 
 // ─── Menu ────────────────────────────────────────────────────────────────────
 
-/** Copy text: async Clipboard API, with a textarea fallback for older or insecure contexts. */
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    // fall through to the legacy path
-  }
-  const area = document.createElement('textarea')
-  area.value = text
-  area.setAttribute('readonly', '')
-  area.style.position = 'fixed'
-  area.style.opacity = '0'
-  document.body.appendChild(area)
-  area.select()
-  try {
-    return document.execCommand('copy')
-  } catch {
-    return false
-  } finally {
-    area.remove()
-  }
-}
+export { copyText }
 
 let menuListenersInstalled = false
 
@@ -333,26 +440,18 @@ function installMenuListeners(): void {
   })
 }
 
-function renderMenu(post: DisplayPost, options: RenderOptions): HTMLElement {
+function renderMenu(post: DisplayPost, options: RenderOptions, links: NoteLinks): HTMLElement {
   installMenuListeners()
   const preset = options.clientPreset ?? 'njump'
-  const label = clientLabel(preset)
-
-  const npub = npubOf(post.author)
-  const nprofile = nprofileOf(post.author, options.relayHints)
-  let nevent = ''
-  try {
-    nevent = nip19.neventEncode({ id: post.id, author: post.author, kind: post.rawEvent?.kind ?? 1, relays: (options.relayHints ?? []).slice(0, 3) })
-  } catch {
-    // invalid id: the note actions are left out
-  }
+  const label = links.clientLabel
+  const { npub, nprofile, nevent } = links
 
   const container = el('div', 'post-context-menu')
   const btn = el('button', 'post-menu-btn') as HTMLButtonElement
   btn.type = 'button'
-  btn.textContent = '•••'
-  btn.title = 'Actions'
-  btn.setAttribute('aria-label', 'Actions')
+  btn.innerHTML = icon('more', 20)
+  btn.title = 'More'
+  btn.setAttribute('aria-label', 'More actions')
   btn.setAttribute('aria-haspopup', 'menu')
   btn.setAttribute('aria-expanded', 'false')
 
@@ -417,7 +516,9 @@ function renderMenu(post: DisplayPost, options: RenderOptions): HTMLElement {
     const wasHidden = dropdown.classList.contains('hidden')
     closeAllMenus()
     if (!wasHidden) return
-    dropdown.classList.remove('hidden')
+    dropdown.classList.remove('hidden', 'opens-up')
+    // Open upward when there is no room below (above the tab bar).
+    if (dropdown.getBoundingClientRect().bottom > window.innerHeight - 88) dropdown.classList.add('opens-up')
     btn.setAttribute('aria-expanded', 'true')
     items()[0]?.focus()
   })
@@ -611,7 +712,7 @@ function renderMedia(item: MediaItem): HTMLElement {
     holder.title = item.url
 
     const play = el('div', 'video-play-icon')
-    play.textContent = '▶'
+    play.innerHTML = icon('play', 28)
     const label = el('div', 'video-placeholder-label')
     label.textContent = 'Load video'
     holder.appendChild(play)
@@ -661,34 +762,6 @@ function isImageUrl(url: string): boolean {
 
 function isVideoUrl(url: string): boolean {
   return /\.(mp4|webm|mov|ogg)(\?.*)?$/i.test(url)
-}
-
-function getScoreClass(score: number): string {
-  if (score >= 7) return 'score-high'
-  if (score >= 4) return 'score-mid'
-  return 'score-low'
-}
-
-function formatTime(unixSeconds: number): string {
-  const date = new Date(unixSeconds * 1000)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-
-  if (diffHours < 1) {
-    const diffMin = Math.floor(diffMs / (1000 * 60))
-    return `${diffMin}m ago`
-  }
-  if (diffHours < 24) {
-    return `${diffHours}h ago`
-  }
-
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 function el(tag: string, className?: string): HTMLElement {

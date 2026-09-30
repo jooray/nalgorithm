@@ -30,6 +30,9 @@ import {
 
 import { renderFeed, aggregateBoosts, clientRenderOptions } from './render.js'
 
+import '@fontsource-variable/inter/wght.css'
+import './style.css'
+
 import {
   initUI,
   setStatus,
@@ -39,10 +42,13 @@ import {
   showEmptyState,
   getFeedContainer,
   readFieldsToSettings,
-  setDigestEnabled,
 } from './ui.js'
 
-import { showDigest, stopDigestSpeech } from './digest-ui.js'
+import { initShell } from './shell.js'
+import { initDigestView, setDigests, setMakeStatus } from './digest-view.js'
+import { byokBackend, loadLocalDigests } from './byok-digest.js'
+import { rememberProfiles } from './profiles.js'
+import { APP_VERSION } from './version-check.js'
 
 import { initVersionCheck, setUpdateBlocked } from './version-check.js'
 
@@ -155,8 +161,9 @@ async function runFeed(): Promise<void> {
 
   isRunning = true
   setRefreshEnabled(false)
-  // The digest on screen describes the previous feed; stop reading it out.
-  stopDigestSpeech()
+  if (currentPosts.length === 0) {
+    showEmptyState(true, true, 'Loading and ranking your feed. The line above shows progress.')
+  }
   // Hold off any pending auto-update until this run finishes — reloading
   // mid-scoring would discard work already paid for.
   setUpdateBlocked(true)
@@ -219,7 +226,7 @@ async function runFeed(): Promise<void> {
 
     if (posts.length === 0) {
       setStatus('No posts found in the time window')
-      showEmptyState(true)
+      showEmptyState(true, true, `No posts from the people you follow in the last ${settings.hoursBack} hours. Try a longer window in Tune.`)
       fetcher.destroy()
       isRunning = false
       setRefreshEnabled(true)
@@ -231,6 +238,7 @@ async function runFeed(): Promise<void> {
     const allPubkeys = collectPostPubkeys(posts)
     try {
       currentProfiles = await fetcher.getProfiles(allPubkeys)
+      rememberProfiles(currentProfiles)
     } catch (err) {
       console.warn('Failed to fetch profiles:', err)
       // Continue without profiles
@@ -292,7 +300,6 @@ async function runFeed(): Promise<void> {
             newlyScored.push(...batch)
             currentPosts = [...cachedPosts, ...newlyScored].sort((a, b) => b.score - a.score)
             renderCurrent(settings)
-            setDigestEnabled(currentPosts.length > 0)
           }
         )
       } catch (err) {
@@ -318,8 +325,6 @@ async function runFeed(): Promise<void> {
     const boostLabel = collapsed > 0 ? `, ${collapsed} duplicate boosts merged` : ''
     setStatus(`Showing ${shown} posts, ranked by relevance${cachedLabel}${boostLabel}`)
     setRefreshEnabled(true)
-
-    setDigestEnabled(currentPosts.length > 0)
 
     // ── Phase 2: background likes → re-rate ────────────────────────────
 
@@ -467,18 +472,28 @@ async function regenerateLearnedPrompt(): Promise<void> {
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
 /**
- * Summarize the posts currently on screen. Uses whatever has already been
- * fetched and scored, so it costs exactly one LLM call.
+ * The posts a digest is written from: what is on screen, or (when nothing is
+ * yet) a fresh feed run first, so "Write a digest" works from a cold start.
  */
-async function runDigest(): Promise<void> {
+async function ensureFeed(): Promise<{ posts: ScoredPost[]; profiles: Map<string, ProfileData> }> {
   const settings = readFieldsToSettings()
   saveSettings(settings)
-  setStatusLoading('Writing digest…')
-  await showDigest(currentPosts, currentProfiles, settings, setStatus)
+  const problem = validateSettings(settings)
+  if (problem) throw new Error(`${problem}. Open Tune to finish setting up.`)
+  if (currentPosts.length === 0) {
+    setMakeStatus('Loading your feed first…')
+    await runFeed()
+  }
+  if (currentPosts.length === 0) {
+    throw new Error(document.getElementById('status')?.textContent || 'No posts to write from yet.')
+  }
+  return { posts: currentPosts, profiles: currentProfiles }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   initVersionCheck()
+  initShell()
+  document.getElementById('app-version')!.textContent = `Version ${APP_VERSION.split('+')[0]}`
 
   // Exactly one mode's UI is wired up per page load; switching reloads.
   const mode = resolveMode()
@@ -493,12 +508,25 @@ document.addEventListener('DOMContentLoaded', () => {
     return
   }
 
+  document.getElementById('mode-line')!.textContent = 'You are using your own model key. Everything runs in this browser.'
   document.getElementById('btn-switch-hosted')!.addEventListener('click', () => switchMode('hosted'))
-  const settings = initUI(runFeed, regenerateLearnedPrompt, runDigest)
+  const settings = initUI(runFeed, regenerateLearnedPrompt)
+
+  initDigestView(
+    byokBackend({
+      ensureFeed,
+      readSettings: readFieldsToSettings,
+      setStatus: setMakeStatus,
+    })
+  )
+  setDigests(loadLocalDigests())
 
   // Start loading straight away when everything needed is configured. Clicking
   // Refresh to see the feed you already set up is a step with no decision in it.
   if (settings.autoRefresh && !validateSettings(settings)) {
     void runFeed().catch((err) => setStatus(`Error: ${(err as Error).message}`))
+  } else if (!validateSettings(settings)) {
+    showEmptyState(true, true)
   }
 })
+

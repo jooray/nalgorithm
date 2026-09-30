@@ -1,0 +1,87 @@
+/**
+ * Nalgorithm Web — app shell: bottom tab bar, toast, offline banner
+ *
+ * The tab bar is the only navigation. Each tab keeps its scroll position.
+ * The browser chrome colour follows the tab: violet over the Digest hero,
+ * the page ground elsewhere.
+ */
+
+import { icon, type IconName } from './icons.js'
+
+export type TabName = 'digest' | 'feed' | 'tune'
+
+const TABS: Array<{ name: TabName; label: string; icon: IconName }> = [
+  { name: 'digest', label: 'Digest', icon: 'digest' },
+  { name: 'feed', label: 'Feed', icon: 'feed' },
+  { name: 'tune', label: 'Tune', icon: 'tune' },
+]
+
+const HERO_VIOLET = '#6B3DF5'
+
+let active: TabName = 'digest'
+const scrollAt: Record<TabName, number> = { digest: 0, feed: 0, tune: 0 }
+let toastTimer: number | undefined
+
+export function currentTab(): TabName {
+  return active
+}
+
+export function showTab(name: TabName): void {
+  scrollAt[active] = window.scrollY
+  active = name
+  for (const view of document.querySelectorAll<HTMLElement>('.view')) {
+    view.classList.toggle('hidden', view.dataset.view !== name)
+  }
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('#tabbar .tab')) {
+    if (btn.dataset.tab === name) btn.setAttribute('aria-current', 'page')
+    else btn.removeAttribute('aria-current')
+  }
+  window.scrollTo({ top: scrollAt[name] })
+  setChromeColor()
+}
+
+function setChromeColor(): void {
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+  if (!meta) return
+  meta.content = active === 'digest' ? HERO_VIOLET : getComputedStyle(document.body).backgroundColor
+}
+
+/** A short message that does not depend on which tab is showing. */
+export function toast(text: string): void {
+  const el = document.getElementById('toast')
+  if (!el) return
+  el.textContent = text
+  el.classList.toggle('is-visible', Boolean(text))
+  clearTimeout(toastTimer)
+  if (text) {
+    toastTimer = window.setTimeout(() => {
+      el.classList.remove('is-visible')
+    }, 3200)
+  }
+}
+
+export function initShell(): void {
+  const bar = document.getElementById('tabbar')!
+  for (const btn of bar.querySelectorAll<HTMLButtonElement>('.tab')) {
+    const tab = TABS.find((t) => t.name === btn.dataset.tab)!
+    btn.innerHTML = `${icon(tab.icon, 26)}<span>${tab.label}</span>`
+    btn.addEventListener('click', () => {
+      if (tab.name === active) window.scrollTo({ top: 0, behavior: 'smooth' })
+      else showTab(tab.name)
+    })
+  }
+  showTab('digest')
+
+  // Offline notice.
+  const banner = document.getElementById('offline-banner')!
+  document.getElementById('offline-icon')!.innerHTML = icon('offline', 20)
+  const sync = (): void => {
+    banner.classList.toggle('hidden', navigator.onLine)
+  }
+  window.addEventListener('online', sync)
+  window.addEventListener('offline', sync)
+  sync()
+
+  // The theme can change while the app is open.
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setChromeColor())
+}

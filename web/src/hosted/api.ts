@@ -9,9 +9,9 @@
 import { verifyEvent } from 'nostr-tools/pure'
 import type { SignFn } from '../nostr-login.js'
 import type { ScoredPost } from 'nalgorithm'
+import { readDigest, type DigestRecord } from '../digest-model.js'
 import {
   buildLoginTemplate,
-  type Digest,
   type Entitlement,
   type HostedSettings,
   type PlanId,
@@ -182,9 +182,19 @@ export function putSchedule(
   return request<Schedule>('PUT', 'schedule', patch)
 }
 
-export async function getDigests(limit: number): Promise<Digest[]> {
-  const res = await request<{ digests: Digest[] }>('GET', `digests?limit=${limit}`)
-  return Array.isArray(res.digests) ? res.digests : []
+/** The newest digests with the notes each was written from (when the server sends them). */
+export async function getDigests(limit: number): Promise<DigestRecord[]> {
+  const res = await request<{ digests: unknown[] }>('GET', `digests?limit=${limit}`)
+  if (!Array.isArray(res.digests)) return []
+  return res.digests.map(readDigest).filter((d): d is DigestRecord => d !== null)
+}
+
+/** One digest with its show notes. Null when the server has no such digest. */
+export async function getDigest(id: string): Promise<DigestRecord | null> {
+  const res = await request<unknown>('GET', `digests/${encodeURIComponent(id)}`)
+  // The contract is the single object; tolerate it wrapped as { digest }.
+  const body = res && typeof res === 'object' && 'digest' in res ? (res as { digest: unknown }).digest : res
+  return readDigest(body)
 }
 
 /** The digest is made in the background and arrives by DM. */
