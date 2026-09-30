@@ -142,6 +142,7 @@ function renderCurrent(settings: ReturnType<typeof loadSettings>): void {
   renderFeed(aggregateBoosts(currentPosts), getFeedContainer(), {
     profiles: currentProfiles,
     ...clientRenderOptions(settings, settings.relays),
+    lazyProfileRelays: settings.relays,
   })
 }
 

@@ -342,6 +342,7 @@ function renderResult(feed: FeedResponse): void {
   renderFeed(display, $('#hosted-feed'), {
     profiles,
     ...clientRenderOptions(settings),
+    lazyProfileRelays: loadSettings().relays,
     linkPreviews: linkPreviewsOn ? attachLinkPreviews : undefined,
   })
   setStatus(`Showing ${display.length} posts, ranked by relevance`)

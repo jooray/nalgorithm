@@ -40,6 +40,7 @@ import type { NoteTarget } from './note-ui.js'
 import { directReplies, parentOf } from './note-logic.js'
 import { fetchEvent, queryEvents, readRelaysFor } from './relays.js'
 import { knownProfiles, loadProfiles } from './profiles.js'
+import { postsToRedraw, unresolvedPeople } from './lazy-profiles.js'
 import type { Event as NostrEvent } from 'nostr-tools/pure'
 import { openSheet } from './sheet.js'
 import { relativeTime } from './time.js'
@@ -58,6 +59,11 @@ export interface RenderOptions {
   linkPreviews?: (content: string, card: HTMLElement) => void
   /** Tapping a note opens the detail sheet (default true). */
   detail?: boolean
+  /**
+   * Relays for one lazy browser lookup of authors and boosters that have no
+   * profile after the first render. Their cards update in place. Off when unset.
+   */
+  lazyProfileRelays?: string[]
 }
 
 /** Link options derived from the reader's settings; shared by both modes. */
@@ -98,10 +104,61 @@ export function renderFeed(
     return
   }
 
+  const cards: HTMLElement[] = []
   posts.forEach((post, i) => {
     // The feed is ranked best first, so the first note is the top-ranked one.
-    container.appendChild(renderPostCard(post, options, i === 0))
+    const card = renderPostCard(post, options, i === 0)
+    cards.push(card)
+    container.appendChild(card)
   })
+  feedState.set(container, { posts, cards, options })
+  void lazyResolveProfiles(container)
+}
+
+interface FeedState {
+  posts: DisplayPost[]
+  cards: HTMLElement[]
+  options: RenderOptions
+}
+
+/** The latest render of each feed container, so a late profile redraws the current cards. */
+const feedState = new WeakMap<HTMLElement, FeedState>()
+
+/**
+ * One browser lookup for people the feed shows without a profile (the library
+ * and server passes can miss some). Matching cards are replaced in place; the
+ * npub stays as the fallback when nothing is found.
+ */
+async function lazyResolveProfiles(container: HTMLElement): Promise<void> {
+  const first = feedState.get(container)
+  const relays = first?.options.lazyProfileRelays
+  if (!first || !relays || relays.length === 0) return
+  const people = unresolvedPeople(first.posts, first.options.profiles)
+  if (people.length === 0) return
+
+  const found = await loadProfiles(people, relays)
+  const state = feedState.get(container)
+  if (!state || found.size === 0) return
+
+  // The shared map is filled in place, so later renders start with these names.
+  const profiles = state.options.profiles ?? new Map<string, ProfileData>()
+  const arrived = new Set<string>()
+  for (const [pk, p] of found) {
+    if (!profiles.has(pk)) {
+      profiles.set(pk, p)
+      arrived.add(pk)
+    }
+  }
+  if (arrived.size === 0) return
+  state.options.profiles = profiles
+
+  for (const i of postsToRedraw(state.posts, arrived)) {
+    const old = state.cards[i]
+    if (!old?.isConnected) continue
+    const fresh = renderPostCard(state.posts[i], state.options, old.classList.contains('note-top'))
+    old.replaceWith(fresh)
+    state.cards[i] = fresh
+  }
 }
 
 // ─── People ──────────────────────────────────────────────────────────────────
