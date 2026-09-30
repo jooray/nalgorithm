@@ -5,6 +5,8 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { openDb, createStore, pruneScores, SCORE_TTL_SECONDS } from '../dist/db.js'
 import { createApp } from '../dist/app.js'
 import { loadFeedProfiles } from '../dist/feed.js'
+import { createDigestNow } from '../dist/digest-jobs.js'
+import { createJobTracker } from '../dist/drain.js'
 import { trimSnapshot, flagNew, SNAPSHOT_FRESH_SECONDS } from '../dist/snapshot.js'
 import * as nip19 from 'nostr-tools/nip19'
 import { createBillingClient, BillingUnavailable } from '../dist/billing-client.js'
@@ -27,7 +29,7 @@ async function freshDb() {
   const url = process.env.TEST_DATABASE_URL
   if (!url) return openDb(':memory:')
   shared ??= await openDb(url)
-  for (const t of ['link_previews', 'peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'feed_snapshots', 'scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
+  for (const t of ['link_previews', 'peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'feed_snapshots', 'digest_jobs', 'scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
   return shared
 }
 
@@ -209,7 +211,7 @@ function fakeBilling(initial = { state: 'active', until: T0 + 86400 }) {
   return b
 }
 
-async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, clock = { t: T0 } } = {}) {
+async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, makeDigestNow, jobs, clock = { t: T0 } } = {}) {
   const db = await freshDb()
   const feedCalls = []
   const runner = feed ?? (async (npub, settings) => {
@@ -223,7 +225,7 @@ async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, clock 
       ],
     }
   })
-  const server = createServer(createApp({ db, billing, feed: runner, publicUrl: PUBLIC, secureCookie: false, log: silent, now: () => clock.t, runDigestNow }))
+  const server = createServer(createApp({ db, billing, feed: runner, publicUrl: PUBLIC, secureCookie: false, log: silent, now: () => clock.t, runDigestNow: makeDigestNow ? makeDigestNow(db) : runDigestNow, jobs }))
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${server.address().port}`
   const sk = generateSecretKey()
@@ -553,6 +555,120 @@ test('snapshot: flagNew with no previous snapshot marks nothing', () => {
   assert.deepEqual(flagNew([{ id: 'a' }], null), [{ id: 'a', isNew: false }])
 })
 
+// ─── digest slot ─────────────────────────────────────────────────────────────
+
+test('HTTP: two simultaneous digest requests make exactly one digest; the second gets 409 with the start time', async () => {
+  const clock = { t: T0 }
+  let release
+  const gate = new Promise((r) => { release = r })
+  const runs = []
+  await withApp(async ({ json, login, clock: c, db }) => {
+    const { body } = await login()
+    const status0 = await (await json('/digest/status', { token: body.token })).json()
+    assert.deepEqual(status0, { running: false, startedAt: null, lastDurationSeconds: null, lastStatus: null, finishedAt: null })
+
+    const [a, b] = await Promise.all([
+      json('/digest/now', { method: 'POST', body: {}, token: body.token }),
+      json('/digest/now', { method: 'POST', body: {}, token: body.token }),
+    ])
+    const statuses = [a.status, b.status].sort()
+    assert.deepEqual(statuses, [202, 409])
+    const loser = await (a.status === 409 ? a : b).json()
+    assert.equal(loser.code, 'digest_running')
+    assert.equal(loser.startedAt, T0)
+    await new Promise((r) => setTimeout(r, 20))
+    assert.equal(runs.length, 1)
+
+    const running = await (await json('/digest/status', { token: body.token })).json()
+    assert.equal(running.running, true)
+    assert.equal(running.startedAt, T0)
+    assert.equal((await json('/digest/now', { method: 'POST', body: {}, token: body.token })).status, 409, 'still blocked while running')
+
+    c.t = T0 + 95
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    const done = await (await json('/digest/status', { token: body.token })).json()
+    assert.equal(done.running, false)
+    assert.equal(done.lastStatus, 'sent')
+    assert.equal(done.lastDurationSeconds, 95)
+    assert.equal((await json('/digest/now', { method: 'POST', body: {}, token: body.token })).status, 202, 'free again after it finishes')
+    release()
+  }, {
+    clock,
+    makeDigestNow: (db) => createDigestNow({
+      db,
+      log: silent,
+      now: () => clock.t,
+      run: async (n) => { runs.push(n); await gate; return { status: 'sent' } },
+    }),
+  })
+})
+
+test('digest slot: a stale claim can be taken over, a failed run keeps the old duration, restart marks running rows interrupted', async () => {
+  const { claimDigestJob, finishDigestJob, digestJobStatus, interruptRunningJobs, DIGEST_JOB_STALE_SECONDS } = await import('../dist/digest-jobs.js')
+  const db = await freshDb()
+  const n = 'a'.repeat(64)
+  const first = await claimDigestJob(db, n, T0)
+  assert.deepEqual(first, { claimed: true, startedAt: T0 })
+  assert.deepEqual(await claimDigestJob(db, n, T0 + 5), { claimed: false, startedAt: T0 })
+  await finishDigestJob(db, n, T0, 'sent', T0 + 60)
+  let st = await digestJobStatus(db, n, T0 + 61)
+  assert.equal(st.lastDurationSeconds, 60)
+  assert.equal((await claimDigestJob(db, n, T0 + 100)).claimed, true)
+  await finishDigestJob(db, n, T0 + 100, 'failed', T0 + 110)
+  st = await digestJobStatus(db, n, T0 + 111)
+  assert.deepEqual([st.running, st.lastStatus, st.lastDurationSeconds], [false, 'failed', 60])
+  // A crashed claim goes stale and is reported as not running.
+  await claimDigestJob(db, n, T0 + 200)
+  assert.equal((await digestJobStatus(db, n, T0 + 201)).running, true)
+  assert.equal((await digestJobStatus(db, n, T0 + 200 + DIGEST_JOB_STALE_SECONDS)).running, false)
+  assert.equal((await claimDigestJob(db, n, T0 + 200 + DIGEST_JOB_STALE_SECONDS)).claimed, true)
+  // A late finish from the dead run must not free the new claim.
+  await finishDigestJob(db, n, T0 + 200, 'sent', T0 + 900)
+  assert.equal((await digestJobStatus(db, n, T0 + 901)).running, true)
+  assert.equal(await interruptRunningJobs(db, T0 + 1000), 1)
+  st = await digestJobStatus(db, n, T0 + 1001)
+  assert.deepEqual([st.running, st.lastStatus], [false, 'interrupted'])
+})
+
+test('drain: waits for running jobs, refuses new ones after stop, and gives up at the timeout', async () => {
+  const jobs = createJobTracker()
+  const endA = jobs.begin()
+  const endB = jobs.begin()
+  assert.equal(jobs.active, 2)
+  jobs.stop()
+  assert.equal(jobs.stopping, true)
+  assert.throws(() => jobs.begin(), /restarting/)
+  let drained
+  const waiting = jobs.drain(2000).then((v) => { drained = v })
+  endA()
+  await new Promise((r) => setTimeout(r, 10))
+  assert.equal(drained, undefined, 'one job is still running')
+  endB()
+  endB()
+  await waiting
+  assert.equal(drained, true)
+  assert.equal(jobs.active, 0)
+
+  const stuck = createJobTracker()
+  stuck.begin()
+  assert.equal(await stuck.drain(30), false)
+  assert.equal(await createJobTracker().drain(30), true, 'nothing running drains at once')
+})
+
+test('drain: the digest request and /feed refuse new work while shutting down', async () => {
+  const jobs = createJobTracker()
+  await withApp(async ({ json, login }) => {
+    const { body } = await login()
+    await setPrompt(json, body.token)
+    jobs.stop()
+    const feed = await json('/feed', { token: body.token })
+    assert.equal(feed.status, 503)
+    assert.equal((await feed.json()).code, 'shutting_down')
+    assert.equal((await json('/feed/latest', { token: body.token })).status, 200, 'reading a snapshot still works')
+  }, { jobs })
+})
+
 test('HTTP: checkout uses the session npub, allowlists plans, and never takes an npub from the body', async () => {
   await withApp(async ({ json, login, npub, billing }) => {
     const { body } = await login()
@@ -594,7 +710,7 @@ test('HTTP: digests list is per user and newest first; digest/now needs a runner
     const { body } = await login()
     const res = await json('/digest/now', { method: 'POST', body: {}, token: body.token })
     assert.equal(res.status, 202)
-    assert.deepEqual(await res.json(), { message: 'queued' })
+    assert.equal((await res.json()).message, 'queued')
     assert.deepEqual(asked, [npub], 'runs for the session npub, never one from the request')
   }, { runDigestNow: async (npub) => { asked.push(npub); return 'queued' } })
 })

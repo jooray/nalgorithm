@@ -7,6 +7,8 @@ import { uploadAudio } from './blossom.js'
 import { loadConfig } from './config.js'
 import { openDb, pruneScores } from './db.js'
 import { explain, createScheduler } from './scheduler.js'
+import { createDigestNow, interruptRunningJobs, runInSlot } from './digest-jobs.js'
+import { createJobTracker } from './drain.js'
 import { effectiveFormat, runDigest } from './digest-job.js'
 import type { DmSender, DmSendOutcome } from './digest-job.js'
 import { createDmInbox, createDmPool, createDmSender, createRelayResolver } from './dm/index.js'
@@ -26,7 +28,13 @@ const billing = createBillingClient({ url: config.billing.url, token: config.bil
 const feed = createFeedRunner(config, log, db)
 
 let runDigestNow: ((npub: string) => Promise<string>) | undefined
-let stopBot = async (): Promise<void> => {}
+const jobs = createJobTracker()
+const nowSec = (): number => Math.floor(Date.now() / 1000)
+// A row still marked running belongs to a process that died.
+await interruptRunningJobs(db, nowSec())
+
+let stopIntake = async (): Promise<void> => {}
+let closeBot = (): void => {}
 
 if (config.bot) {
   const secretKey = Uint8Array.from(Buffer.from(config.bot.secretKeyHex, 'hex'))
@@ -65,19 +73,28 @@ if (config.bot) {
     upload: (audio: Uint8Array) => uploadAudio({ servers: config.bot!.blossomServers, secretKey, log }, audio),
   }
 
-  const scheduler = createScheduler({ db, dm: sender, log, run: (npub, opts) => runDigest(digestDeps, npub, opts) })
+  const scheduler = createScheduler({
+    db,
+    dm: sender,
+    log,
+    run: async (npub, opts) => {
+      const outcome = await runInSlot(db, npub, nowSec, () => runDigest(digestDeps, npub, opts), jobs)
+      // Busy or restarting: a transient failure, so the schedule retries soon.
+      return outcome.status === 'busy' ? { status: 'failed' as const, detail: outcome.detail } : outcome
+    },
+  })
 
-  // "digest now": answer immediately, do the work in the background, and DM the reason if it cannot be made.
-  runDigestNow = async (npub) => {
-    if (scheduler.isRunning(npub)) return 'A digest is already being made for you. It will arrive here shortly.'
-    void (async () => {
-      const outcome = await runDigest(digestDeps, npub, { manual: true }).catch((err: Error) => ({ status: 'failed' as const, detail: err.message }))
-      log.info(`manual digest for ${npub.slice(0, 8)}: ${outcome.status}${outcome.detail ? ` (${outcome.detail})` : ''}`)
-      const message = explain(outcome.status, true)
-      if (message) await sender.send(npub, message, { format: await effectiveFormat(db, npub) }).catch(() => {})
-    })()
-    return 'On its way. Making a digest takes a few minutes; it will arrive in this chat.'
-  }
+  // "digest now": claim the one slot, answer immediately, do the work in the background, and DM the reason if it cannot be made.
+  runDigestNow = createDigestNow({
+    db,
+    jobs,
+    log,
+    run: (npub, opts) => runDigest(digestDeps, npub, opts),
+    onOutcome: async (npub, outcome) => {
+      const message = explain(outcome.status as Parameters<typeof explain>[0], true)
+      if (message) await sender.send(npub, message, { format: await effectiveFormat(db, npub) })
+    },
+  })
 
   const bot = createBot({
     db,
@@ -92,11 +109,12 @@ if (config.bot) {
   setInterval(() => void seen.prune().catch(() => {}), 86_400_000).unref()
   log.info(`bot is on: listening for DMs on ${config.bot.relays.length} relays, digests via ${config.bot.blossomServers.join(', ')}`)
 
-  stopBot = async () => {
+  // Stop taking new work first; the pool stays open until running digests have sent their DMs.
+  stopIntake = async () => {
     scheduler.stop()
     await inbox.stop()
-    pool.close(config.bot!.relays)
   }
+  closeBot = () => pool.close(config.bot!.relays)
 } else {
   log.info('BOT_NSEC is not set: DM commands and digest delivery are off')
 }
@@ -115,6 +133,7 @@ const app = createApp({
   log,
   runDigestNow,
   previews,
+  jobs,
 })
 
 // Old cached scores are useless after 30 days; prune once a day.
@@ -128,14 +147,26 @@ server.listen(config.port, config.host, () => {
   log.info(`listening on http://${config.host}:${config.port}, db ${config.databaseUrl.replace(/:\/\/[^@/]*@/, '://***@')}`)
 })
 
-// systemd stops the unit with SIGTERM: stop taking work, close sockets, then exit.
+/** How long a restart waits for running digests and feed runs. The unit's TimeoutStopSec must be longer. */
+const DRAIN_MS = 4 * 60_000
+
+// systemd stops the unit with SIGTERM: stop taking work, let running jobs finish, then exit.
 let stopping = false
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return
   stopping = true
   log.info(`${signal}: shutting down`)
+  jobs.stop()
   server.close()
-  await stopBot().catch((e) => log.warn(`bot stop failed: ${(e as Error).message}`))
+  await stopIntake().catch((e) => log.warn(`bot stop failed: ${(e as Error).message}`))
+  if (jobs.active > 0) log.info(`waiting up to ${DRAIN_MS / 1000}s for ${jobs.active} running job(s)`)
+  if (!(await jobs.drain(DRAIN_MS))) {
+    log.warn(`${jobs.active} job(s) still running after ${DRAIN_MS / 1000}s: stopping anyway`)
+    await interruptRunningJobs(db, nowSec()).catch(() => {})
+  }
+  // Let the last responses leave the socket.
+  await new Promise((r) => setTimeout(r, 250))
+  closeBot()
   await db.close().catch(() => {})
   process.exit(0)
 }

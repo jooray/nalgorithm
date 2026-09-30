@@ -107,6 +107,15 @@ function schema(d: Dialect): string[] {
       missing INTEGER NOT NULL DEFAULT 0,
       fetched_at BIGINT NOT NULL
     )${opts}`,
+    // One digest at a time per npub: the row is the claim, and it carries what the UI needs.
+    `CREATE TABLE IF NOT EXISTS digest_jobs (
+      npub ${t(64)} PRIMARY KEY,
+      started_at BIGINT NOT NULL,
+      running INTEGER NOT NULL DEFAULT 0,
+      finished_at BIGINT NULL,
+      last_duration BIGINT NULL,
+      last_status ${t(24)} NULL
+    )${opts}`,
     // The last ranked feed per npub, so a reload can show it without re-ranking.
     // MariaDB TEXT holds 64 KB, which a feed does not fit in.
     `CREATE TABLE IF NOT EXISTS feed_snapshots (

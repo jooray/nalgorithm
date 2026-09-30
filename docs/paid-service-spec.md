@@ -222,6 +222,12 @@ The account has a kind 0 profile (`bot: true`, NIP-05, icon on a Blossom server)
 
 One Node process behind a reverse proxy, with the API on the same origin as the web app (no CORS). The static web deploy is unchanged. Secrets come from the environment: the Venice key (a dedicated service key), the bot key, the billing API token. Two storage back ends are supported, SQLite and MariaDB, chosen by `DATABASE_URL`. Host names, unit files, user accounts, ports and backup arrangements are documented in the operator's private infrastructure notes.
 
+Restarts are graceful. On SIGTERM or SIGINT the server refuses new feed runs and digests (503 `shutting_down`), stops the scheduler and the DM inbox, and waits up to 4 minutes for running digests and feed runs to finish before it closes the database and exits. If the wait runs out, every digest still marked running is recorded as `interrupted`, and at startup any row still marked running is treated the same way, so a dead job is never reported as in progress. The service manager's stop timeout must be longer than the wait (at least 300 seconds).
+
+Feed snapshots: each successful feed run stores the ranked result per npub (at most about 1.5 MB, lowest-ranked posts dropped first). `GET /feed/latest` returns it without ranking and without using the daily cap; `GET /feed` returns a snapshot younger than 2 minutes instead of running again unless `?force=1`. Only real runs use the cap.
+
+Digests: one generation at a time per npub, claimed with a row in `digest_jobs`. A second request while one runs gets 409 `digest_running`; `GET /digest/status` reports `running`, `startedAt`, `lastDurationSeconds` (from the last successful run) and `lastStatus`. A claim older than 10 minutes counts as dead.
+
 ## 10. Phases
 
 0. Core refactor (mostly done, uncommitted): `lib/src/pipeline.ts` with `PipelineStore`/`PipelineLogger`, `refreshLearnedPrompt`, `scorePostsCached`, `writeDigest`; CLI switched to it with a JSON-file store; 10 tests in `lib/test`. Not yet verified against live relays and Venice. Still to do: fix stale `lib/docs/API.md`, decide on a `RateLimiter` seam (dropped for now).

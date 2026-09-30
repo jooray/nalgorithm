@@ -6,7 +6,10 @@ import type { BillingClient } from './billing-client.js'
 import { BillingUnavailable } from './billing-client.js'
 import { createStore } from './db.js'
 import type { Db } from './db.js'
+import { DigestRunning, digestJobStatus } from './digest-jobs.js'
 import { parseNotes } from './digest-notes.js'
+import { ShuttingDown } from './drain.js'
+import type { JobTracker } from './drain.js'
 import type { FeedRunner } from './feed.js'
 import { PreviewError } from './preview/service.js'
 import type { PreviewService } from './preview/service.js'
@@ -29,6 +32,8 @@ export interface AppDeps {
   runDigestNow?: (npub: string) => Promise<string>
   /** Link previews. Absent means `/preview` answers `{unavailable: true}`. */
   previews?: PreviewService
+  /** In-flight work, so a shutdown can wait for it. Absent means nothing is tracked. */
+  jobs?: JobTracker
 }
 
 const COOKIE = 'nalgorithm_session'
@@ -262,9 +267,12 @@ export function createApp(deps: AppDeps) {
       return send(res, 200, publicDigest(row))
     }
 
+    if (method === 'GET' && path === '/digest/status') return send(res, 200, await digestJobStatus(db, npub, nowSec()))
+
     if (method === 'POST' && path === '/digest/now') {
       if (!deps.runDigestNow) throw new HttpError(503, 'digests are not available on this server', { code: 'digests_unavailable' })
-      return send(res, 202, { message: await deps.runDigestNow(npub) })
+      const message = await deps.runDigestNow(npub)
+      return send(res, 202, { message, ...(await digestJobStatus(db, npub, nowSec())) })
     }
 
     if (method === 'POST' && path === '/billing/checkout') {
@@ -335,27 +343,32 @@ export function createApp(deps: AppDeps) {
       }
 
       if (running.has(npub)) throw new HttpError(429, 'a feed run is already in progress', { code: 'in_progress' })
-      // One unit per real run, as before. Served-from-snapshot answers above
-      // never reach this line, so they are free.
-      const cap = await billing.consume(npub, 'feed', 1, `feed:${npub}:${nowSec()}`)
-      if (!cap.allowed) {
-        if (cap.reason === 'billing_unavailable') throw new HttpError(503, 'billing is unavailable, try again shortly', { code: 'billing_unavailable' })
-        throw new HttpError(429, 'daily limit reached, try again tomorrow', { code: 'daily_cap' })
-      }
-
-      running.add(npub)
+      const endJob = deps.jobs?.begin() ?? (() => {})
       try {
-        const result = await deps.feed(npub, settings, createStore(db, npub, nowSec))
-        const posts = result.posts.slice(0, limit).map(publicPost)
-        // Authors plus anyone mentioned in the text, so mentions render as names.
-        const authors = new Set(collectPostPubkeys(result.posts.slice(0, limit), Infinity))
-        const profiles = Object.fromEntries(Object.entries(result.profiles).filter(([k]) => authors.has(k)))
-        const snap = { posts, profiles, fetched: result.fetched, hoursBack: settings.hoursBack, learnedPrompt: result.learnedPrompt, sig }
-        // A failed save must not turn a good ranking into an error.
-        await saveSnapshot(db, npub, snap, nowSec()).catch((err) => log.warn(`snapshot save failed: ${(err as Error).message}`))
-        return send(res, 200, answer({ ...snap, createdAt: nowSec() }, flagNew(posts, previous), false))
+        // One unit per real run, as before. Served-from-snapshot answers above
+        // never reach this line, so they are free.
+        const cap = await billing.consume(npub, 'feed', 1, `feed:${npub}:${nowSec()}`)
+        if (!cap.allowed) {
+          if (cap.reason === 'billing_unavailable') throw new HttpError(503, 'billing is unavailable, try again shortly', { code: 'billing_unavailable' })
+          throw new HttpError(429, 'daily limit reached, try again tomorrow', { code: 'daily_cap' })
+        }
+
+        running.add(npub)
+        try {
+          const result = await deps.feed(npub, settings, createStore(db, npub, nowSec))
+          const posts = result.posts.slice(0, limit).map(publicPost)
+          // Authors plus anyone mentioned in the text, so mentions render as names.
+          const authors = new Set(collectPostPubkeys(result.posts.slice(0, limit), Infinity))
+          const profiles = Object.fromEntries(Object.entries(result.profiles).filter(([k]) => authors.has(k)))
+          const snap = { posts, profiles, fetched: result.fetched, hoursBack: settings.hoursBack, learnedPrompt: result.learnedPrompt, sig }
+          // A failed save must not turn a good ranking into an error.
+          await saveSnapshot(db, npub, snap, nowSec()).catch((err) => log.warn(`snapshot save failed: ${(err as Error).message}`))
+          return send(res, 200, answer({ ...snap, createdAt: nowSec() }, flagNew(posts, previous), false))
+        } finally {
+          running.delete(npub)
+        }
       } finally {
-        running.delete(npub)
+        endJob()
       }
     }
 
@@ -367,6 +380,8 @@ export function createApp(deps: AppDeps) {
       await route(req, res)
     } catch (err) {
       if (err instanceof HttpError) return send(res, err.status, { error: err.message, ...err.extra })
+      if (err instanceof DigestRunning) return send(res, 409, { error: 'a digest is already being made for you', code: 'digest_running', startedAt: err.startedAt })
+      if (err instanceof ShuttingDown) return send(res, 503, { error: err.message, code: 'shutting_down' })
       if (err instanceof PreviewError) return send(res, err.status, { error: err.message })
       if (err instanceof BillingUnavailable) return send(res, 503, { error: 'billing is unavailable, try again shortly', code: 'billing_unavailable' })
       log.warn(`${req.method} ${req.url} failed: ${(err as Error).message}`)
