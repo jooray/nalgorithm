@@ -1,15 +1,21 @@
 /**
- * Nalgorithm Web — UI management (settings panel, status, bindings)
+ * Nalgorithm Web — UI management (Tune form, status line, bindings), bring-your-own-key mode
  */
 
 import {
   loadSettings,
   saveSettings,
+  validateSettings,
   clearScoreCache,
   PROVIDER_URLS,
   type AppSettings,
 } from './settings.js'
 import { openLoginDialog } from './login-ui.js'
+import { icon } from './icons.js'
+import { currentTab, showTab, toast } from './shell.js'
+import { listVoices } from './speech.js'
+import { loadVoiceName, saveVoiceName } from './audio-logic.js'
+import { safeStorage } from './player.js'
 import { toNpub } from './nostr-login.js'
 import {
   fetchModels,
@@ -23,37 +29,27 @@ import {
 type RefreshCallback = () => Promise<void>
 type RegenerateCallback = () => Promise<void>
 
+/** The refresh button, in both modes: icon and label. */
+export function refreshButtonHtml(): string {
+  return `${icon('refresh', 18)}<span>Refresh</span>`
+}
+
 /**
  * Initialize all UI bindings. Returns the current settings.
  */
 export function initUI(
   onRefresh: RefreshCallback,
-  onRegenerate: RegenerateCallback,
-  onDigest: RefreshCallback
+  onRegenerate: RegenerateCallback
 ): AppSettings {
   const settings = loadSettings()
 
   // Populate fields
   populateFields(settings)
 
-  // Settings panel toggle
-  const btnSettings = $<HTMLButtonElement>('#btn-settings')
-  const btnClose = $<HTMLButtonElement>('#btn-close-settings')
-  const overlay = $('#settings-overlay')
-  const panel = $('#settings-panel')
-
-  btnSettings.addEventListener('click', () => {
-    panel.classList.remove('hidden')
-    overlay.classList.remove('hidden')
-  })
-
-  const closeSettings = () => {
-    panel.classList.add('hidden')
-    overlay.classList.add('hidden')
-  }
-
-  btnClose.addEventListener('click', closeSettings)
-  overlay.addEventListener('click', closeSettings)
+  $<HTMLButtonElement>('#btn-refresh').innerHTML = refreshButtonHtml()
+  $('#btn-go-tune').addEventListener('click', () => showTab('tune'))
+  initPromptCount('#input-user-prompt', '#input-user-prompt-count')
+  void populateSpeechVoices()
 
   // Provider change updates API base URL
   const selectProvider = $<HTMLSelectElement>('#select-provider')
@@ -75,8 +71,10 @@ export function initUI(
   btnSave.addEventListener('click', () => {
     const updated = readFieldsToSettings()
     saveSettings(updated)
+    saveVoiceName(safeStorage(), $<HTMLSelectElement>('#select-speech-voice').value)
     setStatus('Settings saved')
-    closeSettings()
+    // A feed that was waiting on setup now only waits for Refresh.
+    if (!validateSettings(updated) && $('#feed-list').childElementCount === 0) showEmptyState(true, true)
 
     // Enable refresh button if settings look valid
     const btnRefresh = $<HTMLButtonElement>('#btn-refresh')
@@ -172,12 +170,6 @@ export function initUI(
     })
   })
 
-  // Digest
-  const btnDigest = $<HTMLButtonElement>('#btn-digest')
-  btnDigest.addEventListener('click', () => {
-    onDigest().catch((err) => setStatus(`Digest error: ${(err as Error).message}`))
-  })
-
   // Regenerate learned prompt
   const btnRegenerate = $<HTMLButtonElement>('#btn-regenerate-learned')
   btnRegenerate.addEventListener('click', () => {
@@ -191,29 +183,35 @@ export function initUI(
     btnRefresh.disabled = false
   }
 
-  // Auto-open settings if npub is not configured yet
-  if (!settings.npub.trim()) {
-    panel.classList.remove('hidden')
-    overlay.classList.remove('hidden')
-  }
+  // First run: nothing is set up, so start where the setup is.
+  if (!settings.npub.trim()) showTab('tune')
 
   return settings
 }
 
 /**
- * Set the status bar text.
+ * Set the status line (Feed tab). A message that would otherwise go unseen
+ * because another tab is showing also appears as a short toast.
  */
 export function setStatus(text: string): void {
   const el = $('#status')
   el.textContent = text
+  if (text && currentTab() !== 'feed') toast(text)
 }
 
 /**
- * Set the status bar with a spinner.
+ * Set the status line with a spinner.
  */
 export function setStatusLoading(text: string): void {
   const el = $('#status')
   el.innerHTML = `<span class="spinner"></span>${escapeHtml(text)}`
+}
+
+/** The line beside the Save button on the Tune tab. */
+export function setTuneStatus(text: string, isError = false): void {
+  const el = $('#tune-status')
+  el.textContent = text
+  el.classList.toggle('is-error', isError)
 }
 
 /**
@@ -230,21 +228,26 @@ export function setLearnedPrompt(prompt: string): void {
 export function setRefreshEnabled(enabled: boolean): void {
   const btn = $<HTMLButtonElement>('#btn-refresh')
   btn.disabled = !enabled
-}
-
-/** The digest button only makes sense once there are scored posts to summarize. */
-export function setDigestEnabled(enabled: boolean): void {
-  $<HTMLButtonElement>('#btn-digest').disabled = !enabled
+  btn.classList.toggle('is-busy', !enabled)
 }
 
 /**
- * Show/hide the empty state.
+ * Show/hide the empty state. `configured` picks the copy: a feed that simply
+ * has no posts, or one that is not set up yet.
  */
-export function showEmptyState(show: boolean): void {
+export function showEmptyState(show: boolean, configured = false, message?: string): void {
   const empty = $('#feed-empty')
   const list = $('#feed-list')
   empty.style.display = show ? 'block' : 'none'
   list.style.display = show ? 'none' : 'flex'
+  if (!show) return
+  $('#feed-empty-title').textContent = configured ? 'Nothing to rank yet' : 'Set up your feed'
+  $('#feed-empty-text').textContent =
+    message ??
+    (configured
+      ? 'Press Refresh to load the people you follow and rank their posts.'
+      : 'Connect your Nostr identity and add a model key in Tune. Everything runs in your browser; your key and settings stay on this device.')
+  $('#btn-go-tune').style.display = configured ? 'none' : ''
 }
 
 /**
@@ -316,6 +319,26 @@ export function updateIdentityState(): void {
     btn.classList.add('btn-primary')
     btn.classList.remove('btn-secondary')
   }
+}
+
+/** Live "N characters" under a prompt box. */
+export function initPromptCount(field: string, counter: string): void {
+  const input = $<HTMLTextAreaElement>(field)
+  const out = $(counter)
+  const update = (): void => {
+    out.textContent = `${input.value.length} characters`
+  }
+  input.addEventListener('input', update)
+  update()
+}
+
+/** Fill the browser-voice picker in Tune. Stays "Browser default" when the engine lists none. */
+async function populateSpeechVoices(): Promise<void> {
+  const select = $<HTMLSelectElement>('#select-speech-voice')
+  const voices = await listVoices()
+  for (const v of voices) select.append(new Option(`${v.name} (${v.lang})`, v.name))
+  select.value = loadVoiceName(safeStorage())
+  if (select.value !== loadVoiceName(safeStorage())) select.value = ''
 }
 
 function toggleDecisionFields(scorer: string): void {

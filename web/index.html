@@ -3,354 +3,434 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Nalgorithm — Nostr Relevance Feed</title>
-  <meta name="description" content="Rank your Nostr timeline by what you actually care about, using an LLM instead of reverse chronological order.">
-  <meta name="theme-color" content="#161b22">
+  <title>nalgorithm</title>
+  <meta name="description" content="A daily voice digest of your Nostr feed, and the feed ranked by what you say you care about.">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#6B3DF5">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
   <div id="app">
-    <!-- Header -->
-    <header id="header">
-      <div class="header-left">
-        <img class="logo" src="icon-192.png" alt="" width="28" height="28">
-        <h1>Nalgorithm</h1>
-        <span class="subtitle">Relevance-ranked Nostr feed</span>
-      </div>
-      <div class="header-right">
-        <span id="status" class="status"></span>
-        <button id="btn-refresh" class="btn btn-primary byok-only" disabled>Refresh</button>
-        <button id="btn-digest" class="btn btn-secondary byok-only" disabled title="Summarize the top posts into a narrative">Digest</button>
-        <button id="btn-settings" class="btn btn-secondary byok-only">Settings</button>
-        <button id="btn-hosted-refresh" class="btn btn-primary hosted-only needs-auth" type="button">Refresh</button>
-        <button id="btn-hosted-digest" class="btn btn-secondary hosted-only needs-auth" type="button" title="Daily voice digest by Nostr DM">Digest</button>
-        <button id="btn-hosted-settings" class="btn btn-secondary hosted-only needs-auth" type="button">Settings</button>
-        <a href="https://github.com/jooray/nalgorithm" target="_blank" rel="noopener" class="btn-icon github-link" title="Source on GitHub">
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        </a>
-      </div>
-    </header>
+    <div id="offline-banner" class="offline-banner hidden" role="status">
+      <span class="offline-icon" id="offline-icon"></span>
+      <span>You are offline. Saved digests still play; the feed needs a connection.</span>
+    </div>
 
-    <!-- Settings Panel (slide-out) -->
-    <div id="settings-overlay" class="overlay hidden"></div>
-    <aside id="settings-panel" class="settings-panel byok-only hidden">
-      <div class="settings-header">
-        <h2>Settings</h2>
-        <button id="btn-close-settings" class="btn-icon">&times;</button>
-      </div>
-      <div class="settings-body">
-        <!-- Mode -->
-        <section class="settings-section">
-          <h3>Mode</h3>
-          <p class="field-hint">You are using your own API key. Hosted mode needs no key: 3-day free trial, then 10,000 sats per month.</p>
-          <button id="btn-switch-hosted" class="btn btn-small btn-full" type="button">Switch to hosted mode</button>
-        </section>
+    <!-- Hosted: trial and plan status, on every tab -->
+    <div id="hosted-banner" class="hosted-banner hidden" role="status">
+      <span id="hosted-banner-text"></span>
+      <button id="btn-banner-action" class="btn btn-small hidden" type="button"></button>
+    </div>
 
-        <!-- Identity -->
-        <section class="settings-section">
-          <h3>Identity</h3>
-          <div id="identity-connected" class="identity-connected hidden">
-            <span class="identity-dot"></span>
-            <span class="identity-label">Connected</span>
-            <code id="identity-npub" class="identity-npub"></code>
-          </div>
-          <button id="btn-connect" class="btn btn-primary btn-full">Connect Nostr identity</button>
-          <p class="field-hint">Reads your public key only — Nalgorithm never signs or posts.</p>
-          <label for="input-npub">npub or hex pubkey</label>
-          <input type="text" id="input-npub" placeholder="npub1... or hex pubkey" spellcheck="false">
-
-          <label for="input-signer-relays">Remote signer relays (one per line)</label>
-          <textarea id="input-signer-relays" rows="3" spellcheck="false" class="compact-field"></textarea>
-          <p class="field-hint">Used only for the Amber / bunker handshake. Must relay ephemeral kind 24133.</p>
-        </section>
-
-        <!-- Relays -->
-        <section class="settings-section">
-          <h3>Relays</h3>
-          <label for="input-relays">WebSocket relay URLs (one per line)</label>
-          <textarea id="input-relays" rows="4" spellcheck="false" placeholder="wss://relay.damus.io&#10;wss://relay.primal.net&#10;wss://nos.lol"></textarea>
-        </section>
-
-        <!-- API Configuration -->
-        <section class="settings-section">
-          <h3>LLM API</h3>
-          <label for="select-provider">Provider</label>
-          <select id="select-provider">
-            <option value="venice">Venice AI</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="ollama">Ollama (local)</option>
-            <option value="custom">Custom</option>
-          </select>
-
-          <label for="input-api-base">API Base URL</label>
-          <input type="text" id="input-api-base" placeholder="https://api.venice.ai/api/v1" spellcheck="false">
-
-          <label for="input-api-key">API Key</label>
-          <input type="password" id="input-api-key" placeholder="sk-..." spellcheck="false">
-
-          <div class="model-catalog">
-            <button id="btn-load-models" class="btn btn-small" type="button">Load model list</button>
-            <button id="btn-recommend-models" class="btn btn-small hidden" type="button">Use recommended</button>
-            <span id="model-catalog-status" class="catalog-status"></span>
-          </div>
-          <datalist id="model-list"></datalist>
-
-          <label for="input-model">Model (scoring)</label>
-          <input type="text" id="input-model" list="model-list" placeholder="deepseek-v4-flash-0731" spellcheck="false">
-          <p class="field-hint">Does the bulk of the work. Keep it cheap and fast.</p>
-
-          <label for="select-scorer">Scoring method</label>
-          <select id="select-scorer">
-            <option value="chat">Chat model (scoring model above)</option>
-            <option value="decision">Decision model (Venice, beta)</option>
-          </select>
-          <div id="decision-fields" class="hidden">
-            <label for="input-decision-model">Decision model</label>
-            <input type="text" id="input-decision-model" placeholder="jev-latest" spellcheck="false">
-          </div>
-          <p class="field-hint" id="scorer-hint">A decision model (Venice's <code>jev-latest</code>) rates each post against a fixed rubric instead of writing a reply: much faster and cheaper, and a post scores the same on every run. It writes no justification, and its scores run lower than a chat model's. Venice runs it on the <em>anonymized</em> tier, not the private one. The scoring model above still writes digests and learns from likes. Switching re-scores the feed.</p>
-
-          <label for="input-digest-model">Model (digest)</label>
-          <input type="text" id="input-digest-model" list="model-list" placeholder="same as scoring model" spellcheck="false">
-          <p class="field-hint">Runs once over your top posts, so a stronger model costs little. Blank reuses the scoring model.</p>
-
-          <label for="input-learner-model">Model (learning from likes)</label>
-          <input type="text" id="input-learner-model" list="model-list" placeholder="same as scoring model" spellcheck="false">
-          <p class="field-hint">Needs a large context window. Blank reuses the scoring model.</p>
-        </section>
-
-        <!-- Digest -->
-        <section class="settings-section">
-          <h3>Digest</h3>
-          <label for="input-digest-topn">Posts to include</label>
-          <input type="number" id="input-digest-topn" min="3" max="50" value="15">
-
-          <label class="checkbox-label">
-            <input type="checkbox" id="input-digest-speech" checked>
-            Phrase it for speech
-          </label>
-          <p class="field-hint">Drops markdown and spells out version numbers and abbreviations, so it reads well aloud.</p>
-
-          <label for="input-tts-model">TTS model (for downloadable audio)</label>
-          <input type="text" id="input-tts-model" placeholder="tts-kokoro" spellcheck="false">
-
-          <label for="input-tts-voice">TTS voice</label>
-          <input type="text" id="input-tts-voice" placeholder="af_sky" spellcheck="false">
-          <p class="field-hint">Only needed for <strong>Download MP3</strong>. Reading aloud in the browser is free and needs nothing here — but browsers give no access to that audio, so a file has to be synthesized by the provider.</p>
-        </section>
-
-        <!-- Prompts -->
-        <section class="settings-section">
-          <h3>Prompts</h3>
-          <label for="input-user-prompt">User prompt (describe your interests)</label>
-          <textarea id="input-user-prompt" rows="5" placeholder="I like cypherpunk culture, decentralized technology, Bitcoin, and thoughtful longform posts. I don't care about price speculation or GM posts."></textarea>
-
-          <label for="input-learned-prompt">Learned prompt (auto-generated from likes)</label>
-          <textarea id="input-learned-prompt" rows="4" readonly class="readonly-field" placeholder="Will be generated after first run..."></textarea>
-          <button id="btn-regenerate-learned" class="btn btn-small">Regenerate from likes</button>
-        </section>
-
-        <!-- Feed options -->
-        <section class="settings-section">
-          <h3>Feed</h3>
-          <label for="input-hours-back">Time window (hours)</label>
-          <input type="number" id="input-hours-back" min="1" max="168" value="24">
-
-          <label for="input-batch-size">Batch size (posts per LLM call)</label>
-          <input type="number" id="input-batch-size" min="5" max="50" value="20">
-
-          <label for="input-concurrency">Parallel scoring batches</label>
-          <input type="number" id="input-concurrency" min="1" value="1">
-          <p class="field-hint">How many scoring calls run at once. 1 is sequential; 5 is roughly five times faster on a cold cache. Keep it within what your provider's rate limits allow.</p>
-
-          <label for="select-client">Open posts and profiles in</label>
-          <select id="select-client">
-            <option value="njump">njump</option>
-            <option value="primal">Primal</option>
-            <option value="yakihonne">Yakihonne</option>
-            <option value="app">My Nostr app (nostr: link)</option>
-            <option value="custom">Custom</option>
-          </select>
-          <input type="text" id="input-client-custom" class="hidden" placeholder="https://example.com/e/{e}" spellcheck="false" aria-label="Custom post link template">
-          <input type="text" id="input-client-custom-profile" class="hidden" placeholder="https://example.com/p/{npub}" spellcheck="false" aria-label="Custom profile link template">
-          <p class="field-hint" id="client-hint">Post links use <code>{e}</code> for the nevent; profile links use <code>{npub}</code>, <code>{nprofile}</code> or <code>{pubkey}</code>. Or give just a prefix. Only http, https and nostr: links are accepted.</p>
-
-          <label class="checkbox-label">
-            <input type="checkbox" id="input-auto-refresh" checked>
-            Load the feed automatically on open
-          </label>
-        </section>
-
-        <!-- Actions -->
-        <section class="settings-section">
-          <button id="btn-save-settings" class="btn btn-primary btn-full">Save Settings</button>
-          <button id="btn-clear-scores" class="btn btn-small btn-full">Clear Cached Scores</button>
-        </section>
-      </div>
-    </aside>
-
-    <!-- Hosted settings panel (slide-out) -->
-    <aside id="hosted-settings-panel" class="settings-panel hosted-only hidden" aria-label="Hosted settings">
-      <div class="settings-header">
-        <h2>Settings</h2>
-        <button id="btn-close-hosted-settings" class="btn-icon" type="button" aria-label="Close settings">&times;</button>
-      </div>
-      <div class="settings-body">
-        <section class="settings-section">
-          <h3>Account</h3>
-          <div class="identity-connected">
-            <span class="identity-dot"></span>
-            <span class="identity-label">Signed in</span>
-            <code id="hosted-npub" class="identity-npub"></code>
-          </div>
-          <p id="hosted-subscription" class="field-hint"></p>
-          <button id="btn-hosted-subscribe" class="btn btn-small btn-full" type="button">Subscribe or add time</button>
-          <button id="btn-hosted-logout" class="btn btn-small btn-full" type="button">Log out</button>
-          <button id="btn-hosted-switch-byok" class="btn btn-small btn-full" type="button">Use my own API key instead</button>
-        </section>
-
-        <section class="settings-section">
-          <h3>Prompt</h3>
-          <label for="hosted-prompt">Describe your interests</label>
-          <textarea id="hosted-prompt" rows="6" maxlength="2000" placeholder="I like cypherpunk culture, decentralized technology, Bitcoin, and thoughtful longform posts. I don't care about price speculation or GM posts."></textarea>
-          <p id="hosted-prompt-count" class="field-hint" aria-live="polite"></p>
-        </section>
-
-        <section class="settings-section">
-          <h3>Feed</h3>
-          <label for="hosted-hours">Time window (hours, 1 to 72)</label>
-          <input type="number" id="hosted-hours" min="1" max="72" step="1" value="24">
-          <label for="hosted-topn">Posts to show (1 to 30)</label>
-          <input type="number" id="hosted-topn" min="1" max="30" step="1" value="15">
-          <label class="checkbox-label">
-            <input type="checkbox" id="hosted-learn" checked>
-            Learn from my likes
-          </label>
-          <label class="checkbox-label">
-            <input type="checkbox" id="hosted-previews" checked>
-            Show link previews
-          </label>
-          <p class="field-hint">Previews are fetched by the server, not by your browser: the sites do not see you, but the server does see which links you look at. Off shows plain links only.</p>
-        </section>
-
-        <section class="settings-section" id="hosted-digest-section" aria-labelledby="digest-title">
-          <h3 id="digest-title">Daily voice digest</h3>
-          <p class="field-hint" id="digest-dm-note"></p>
-          <p class="field-hint">
-            Sent by <a id="digest-bot-link" href="#">the digest account</a>. Follow it so your client shows the messages:
-            <code id="digest-bot-npub" class="identity-npub"></code>
-            <button id="btn-digest-copy" class="btn btn-small" type="button">Copy npub</button>
-          </p>
-          <label class="checkbox-label">
-            <input type="checkbox" id="digest-enabled">
-            Send me a digest every day
-          </label>
-          <label for="digest-time">Time of day</label>
-          <input type="time" id="digest-time" value="07:30">
-          <label for="digest-tz">Time zone</label>
-          <input type="text" id="digest-tz" list="digest-tz-list" spellcheck="false" autocomplete="off" placeholder="Europe/Bratislava">
-          <datalist id="digest-tz-list"></datalist>
-          <label for="digest-voice">Voice</label>
-          <select id="digest-voice"></select>
-          <label for="digest-format">Delivery format</label>
-          <select id="digest-format"></select>
-          <p class="field-hint">Choose legacy for clients such as Primal or Damus that cannot read modern DMs.</p>
-          <button id="btn-digest-save" class="btn btn-primary btn-full" type="button">Save digest schedule</button>
-          <p id="digest-schedule-status" class="hosted-status" role="status"></p>
-          <p id="digest-last-status" class="field-hint" role="status"></p>
-          <button id="btn-digest-now" class="btn btn-small btn-full" type="button">Send a digest now</button>
-          <p id="digest-now-status" class="hosted-status" role="status"></p>
-          <h4 class="digest-subtitle">Recent digests</h4>
-          <p id="digest-list-empty" class="field-hint">No digests yet.</p>
-          <ul id="digest-list" class="digest-list" aria-label="Recent digests"></ul>
-        </section>
-
-        <section class="settings-section">
-          <button id="btn-hosted-save" class="btn btn-primary btn-full" type="button">Save Settings</button>
-          <p id="hosted-settings-status" class="hosted-status" role="status"></p>
-        </section>
-      </div>
-    </aside>
-
-    <!-- Main Feed -->
-    <main id="feed">
-      <div id="feed-empty" class="feed-empty byok-only">
-        <p>Connect your Nostr identity and add an LLM API key in Settings, then click Refresh to load your feed.</p>
-        <p class="feed-empty-sub">Everything runs in your browser. Your key and settings stay in this device's local storage.</p>
-      </div>
-      <div id="feed-list" class="feed-list byok-only"></div>
-
-      <!-- First run: pick a mode -->
-      <section id="mode-choice" class="choose-only mode-choice" aria-labelledby="mode-choice-title">
-        <h2 id="mode-choice-title">How do you want to run Nalgorithm?</h2>
-        <div class="mode-cards">
-          <div class="hosted-panel">
-            <h3>Hosted</h3>
+    <main id="views">
+      <!-- ─── First run: pick a mode ───────────────────────────────────────── -->
+      <section id="mode-choice" class="gate choose-only" aria-labelledby="mode-choice-title">
+        <img class="gate-logo" src="icon-192.png" alt="" width="56" height="56">
+        <h1 id="mode-choice-title" class="gate-title">Hear what mattered on Nostr.</h1>
+        <p class="gate-lead">A spoken digest each morning, and your feed ranked by what you say you care about. Every score shows its reason.</p>
+        <div class="choice-list">
+          <div class="choice">
+            <h2>Hosted</h2>
             <p>No API key. 3-day free trial, then 10,000 sats per month. Sign in with a Nostr signer.</p>
             <button id="btn-choose-hosted" class="btn btn-primary btn-full" type="button">Use hosted mode</button>
           </div>
-          <div class="hosted-panel">
-            <h3>Bring your own API key</h3>
-            <p>Free. Everything runs in your browser with your own LLM key, which stays on this device.</p>
+          <div class="choice">
+            <h2>Bring your own API key</h2>
+            <p>Free. Everything runs in your browser with your own model key, which stays on this device.</p>
             <button id="btn-choose-byok" class="btn btn-secondary btn-full" type="button">Use my own key</button>
           </div>
         </div>
       </section>
 
-      <!-- Hosted mode -->
-      <section id="hosted-view" class="hosted-only hosted-view">
-        <div id="hosted-login" class="hosted-panel hidden">
-          <h2>Sign in</h2>
-          <p>Hosted mode needs no API key: 3-day free trial, then 10,000 sats per month. Sign in with a Nostr extension or a remote signer such as Amber. You sign one login event; nothing is posted.</p>
-          <button id="btn-hosted-login" class="btn btn-primary btn-full" type="button">Sign in with Nostr</button>
-          <p id="hosted-login-status" class="hosted-status" role="status"></p>
-          <button id="btn-hosted-to-byok" class="btn btn-small btn-full" type="button">Use my own API key instead (free)</button>
+      <!-- ─── Hosted: sign in ──────────────────────────────────────────────── -->
+      <section id="hosted-login" class="gate hosted-only hidden" aria-labelledby="login-title">
+        <img class="gate-logo" src="icon-192.png" alt="" width="56" height="56">
+        <h1 id="login-title" class="gate-title">Sign in with your Nostr key.</h1>
+        <p class="gate-lead">Hosted mode needs no API key: 3-day free trial, then 10,000 sats per month. Use a Nostr extension or a remote signer such as Amber. You sign one login event; nothing is posted.</p>
+        <button id="btn-hosted-login" class="btn btn-primary btn-full" type="button">Sign in with Nostr</button>
+        <p id="hosted-login-status" class="form-status" role="status"></p>
+        <button id="btn-hosted-to-byok" class="btn btn-ghost btn-full" type="button">Use my own API key instead (free)</button>
+      </section>
+
+      <!-- ─── Digest tab ───────────────────────────────────────────────────── -->
+      <section id="view-digest" class="view" data-view="digest" aria-label="Digest">
+        <div id="hero" class="hero">
+          <div class="hero-head">
+            <h1 class="hero-title" id="hero-title"><span id="hero-line1">Your morning,</span> <span id="hero-line2" class="hero-len"></span></h1>
+            <p id="hero-sub" class="hero-sub"></p>
+          </div>
+
+          <div id="hero-empty" class="hero-empty hidden">
+            <p id="hero-empty-text"></p>
+            <button id="btn-make" class="btn btn-hero" type="button"></button>
+            <p id="hero-empty-status" class="form-status on-hero" role="status"></p>
+          </div>
+
+          <div id="player" class="player hidden">
+            <button id="btn-play" class="play-btn" type="button" aria-label="Play digest"></button>
+            <div id="wave" class="wave" role="slider" tabindex="0" aria-label="Playback position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><canvas></canvas></div>
+            <div class="times"><span id="t-elapsed">0:00</span><span id="t-remaining">-0:00</span></div>
+            <div class="player-row">
+              <button id="btn-back" class="pill-btn skip" type="button" aria-label="Back 15 seconds"></button>
+              <div class="speed-wrap">
+                <button id="btn-speed" class="pill-btn speed" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Playback speed">1×</button>
+                <div id="speed-menu" class="speed-menu hidden" role="menu" aria-label="Playback speed"></div>
+              </div>
+              <button id="btn-fwd" class="pill-btn skip" type="button" aria-label="Forward 30 seconds"></button>
+              <button id="btn-shownotes" class="pill-btn notes-btn" type="button" aria-controls="shownotes" aria-expanded="false"></button>
+            </div>
+            <div class="player-foot">
+              <p id="player-hint" class="player-hint" role="status"></p>
+              <button id="btn-audio" class="pill-btn small hidden" type="button">Make audio</button>
+            </div>
+          </div>
         </div>
 
-        <div id="hosted-banner" class="hosted-banner hidden" role="status">
-          <span id="hosted-banner-text"></span>
-          <button id="btn-banner-action" class="btn btn-small hidden" type="button"></button>
-        </div>
+        <section id="gen" class="gen hidden" aria-live="polite" aria-label="Writing your digest">
+          <p id="gen-status" class="gen-status"></p>
+          <div id="gen-body" class="gen-body"></div>
+        </section>
 
-        <div id="hosted-notice" class="hosted-panel hidden" role="alert">
+        <section id="shownotes" class="shownotes hidden" aria-labelledby="shownotes-title">
+          <div class="shownotes-head">
+            <h2 id="shownotes-title">Show notes</h2>
+            <p id="shownotes-sub" class="muted"></p>
+          </div>
+          <div class="seg" role="tablist" aria-label="Show notes view">
+            <button class="seg-btn" role="tab" type="button" data-tab="notes" aria-selected="true">Notes</button>
+            <button class="seg-btn" role="tab" type="button" data-tab="text" aria-selected="false">Digest text</button>
+          </div>
+          <div id="shownotes-notes" class="feed-list" role="tabpanel"></div>
+          <div id="shownotes-text" class="digest-text hidden" role="tabpanel"></div>
+        </section>
+
+        <section class="digest-feed" aria-labelledby="digest-feed-title">
+          <div class="section-head">
+            <h2 id="digest-feed-title">Digest feed</h2>
+            <button id="btn-make-list" class="btn btn-small" type="button"></button>
+          </div>
+          <p id="list-status" class="form-status" role="status"></p>
+          <div id="list-loading" class="state-row hidden" role="status"><span class="spinner"></span><span>Loading your digests…</span></div>
+          <div id="list-error" class="state-card is-error hidden" role="alert">
+            <p id="list-error-text"></p>
+            <button id="btn-list-retry" class="btn btn-small hidden" type="button">Try again</button>
+          </div>
+          <ol id="digest-list" class="digest-list" aria-label="Past digests, newest first"></ol>
+          <p id="digest-list-empty" class="state-note hidden">Your digests will collect here, newest first. Each one keeps the notes it was written from.</p>
+        </section>
+      </section>
+
+      <!-- ─── Feed tab ─────────────────────────────────────────────────────── -->
+      <section id="view-feed" class="view hidden" data-view="feed" aria-label="Feed">
+        <header class="view-head">
+          <h1>Feed</h1>
+          <button id="btn-refresh" class="btn btn-primary byok-only" type="button" disabled></button>
+          <button id="btn-hosted-refresh" class="btn btn-primary hosted-only" type="button"></button>
+        </header>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+
+        <!-- Bring your own key -->
+        <div id="feed-empty" class="state-card byok-only">
+          <h2 id="feed-empty-title">Set up your feed</h2>
+          <p id="feed-empty-text">Connect your Nostr identity and add a model key in Tune. Everything runs in your browser; your key and settings stay on this device.</p>
+          <button id="btn-go-tune" class="btn btn-primary" type="button">Open Tune</button>
+        </div>
+        <div id="feed-list" class="feed-list byok-only"></div>
+
+        <!-- Hosted -->
+        <div id="hosted-notice" class="state-card is-error hosted-only hidden" role="alert">
           <p id="hosted-notice-text"></p>
           <button id="btn-notice-action" class="btn btn-small hidden" type="button"></button>
         </div>
 
-        <div id="hosted-paywall" class="hosted-panel hidden" aria-labelledby="paywall-title">
-          <h2 id="paywall-title">Subscribe</h2>
+        <div id="hosted-paywall" class="paywall hosted-only hidden" aria-labelledby="paywall-title">
+          <h2 id="paywall-title">Keep your morning going</h2>
+          <p class="muted">Pay any amount over Lightning. It is credited by the day, and unused trial days are kept.</p>
           <fieldset class="plan-options">
             <legend>Plan</legend>
             <label class="plan-card"><input type="radio" name="hosted-plan" value="nalgorithm" checked>
-              <span><strong>Nalgorithm</strong><br>10,000 sats for 30 days</span></label>
+              <span><strong>Nalgorithm</strong><span class="plan-blurb">10,000 sats for 30 days</span></span></label>
             <label class="plan-card"><input type="radio" name="hosted-plan" value="all-access">
-              <span><strong>All-access</strong><br>25,000 sats for 30 days, also unlocks two sibling apps</span></label>
+              <span><strong>All-access</strong><span class="plan-blurb">25,000 sats for 30 days, also unlocks two sibling apps</span></span></label>
           </fieldset>
           <label for="pay-sats">Amount in sats (minimum 1,000)</label>
           <input type="number" id="pay-sats" min="1000" step="1" value="10000" inputmode="numeric">
           <p id="pay-days" class="field-hint" aria-live="polite"></p>
-          <button id="btn-pay" class="btn btn-primary btn-full" type="button">Pay</button>
-          <p id="pay-status" class="hosted-status" role="status"></p>
+          <button id="btn-pay" class="btn btn-primary btn-full" type="button">Pay with Lightning</button>
+          <p id="pay-status" class="form-status" role="status"></p>
           <a id="pay-link" class="hidden" href="#" target="_blank" rel="noopener noreferrer">Payment page not open? Open it here</a>
-          <button id="btn-pay-cancel" class="btn btn-small btn-full hidden" type="button">Stop waiting</button>
+          <button id="btn-pay-cancel" class="btn btn-ghost btn-full hidden" type="button">Stop waiting</button>
         </div>
 
-        <div id="hosted-loading" class="hosted-panel hidden" role="status">
+        <div id="hosted-loading" class="state-row hosted-only hidden" role="status">
           <span class="spinner"></span>
           <span id="hosted-loading-text">Ranking your feed. This can take up to a minute.</span>
         </div>
 
-        <div id="hosted-empty" class="feed-empty hidden">
-          <p id="hosted-empty-text">Click Refresh to rank your feed.</p>
+        <div id="hosted-empty" class="state-card hosted-only hidden">
+          <p id="hosted-empty-text">Press Refresh to rank your feed.</p>
         </div>
-        <div id="hosted-feed" class="feed-list"></div>
+        <div id="hosted-feed" class="feed-list hosted-only"></div>
+      </section>
+
+      <!-- ─── Tune tab ─────────────────────────────────────────────────────── -->
+      <section id="view-tune" class="view hidden" data-view="tune" aria-label="Tune">
+        <header class="view-head"><h1>Tune</h1></header>
+
+        <!-- Bring your own key -->
+        <div id="tune-byok" class="tune byok-only">
+          <section class="tune-section">
+            <h2>You</h2>
+            <div id="identity-connected" class="identity-connected hidden">
+              <span class="identity-dot"></span>
+              <span class="identity-label">Connected</span>
+              <code id="identity-npub" class="identity-npub"></code>
+            </div>
+            <button id="btn-connect" class="btn btn-primary btn-full">Connect Nostr identity</button>
+            <p class="field-hint">Reads your public key only. nalgorithm never signs or posts.</p>
+            <label for="input-npub">npub or hex pubkey</label>
+            <input type="text" id="input-npub" placeholder="npub1... or hex pubkey" spellcheck="false" autocomplete="off">
+          </section>
+
+          <section class="tune-section">
+            <h2>What you care about</h2>
+            <label for="input-user-prompt">Your words (the ranking rule)</label>
+            <textarea id="input-user-prompt" rows="6" placeholder="I like cypherpunk culture, decentralized technology, Bitcoin, and thoughtful longform posts. I don't care about price speculation or GM posts."></textarea>
+            <p id="input-user-prompt-count" class="field-hint count" aria-live="polite"></p>
+            <label for="input-learned-prompt">Learned from your likes</label>
+            <textarea id="input-learned-prompt" rows="4" readonly class="readonly-field" placeholder="Will be generated after the first run..."></textarea>
+            <button id="btn-regenerate-learned" class="btn btn-small">Regenerate from likes</button>
+          </section>
+
+          <section class="tune-section">
+            <h2>Feed</h2>
+            <div class="field-row">
+              <div>
+                <label for="input-hours-back">Hours back</label>
+                <input type="number" id="input-hours-back" min="1" max="168" value="24" inputmode="numeric">
+              </div>
+              <div>
+                <label for="input-digest-topn">Posts in digest</label>
+                <input type="number" id="input-digest-topn" min="3" max="50" value="15" inputmode="numeric">
+              </div>
+            </div>
+            <label class="check">
+              <input type="checkbox" id="input-auto-refresh" checked>
+              <span>Load the feed automatically on open</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="input-digest-speech" checked>
+              <span>Phrase the digest for speech<small>Drops markdown and spells out version numbers and abbreviations, so it reads well aloud.</small></span>
+            </label>
+          </section>
+
+          <section class="tune-section">
+            <h2>Model</h2>
+            <label for="select-provider">Provider</label>
+            <select id="select-provider">
+              <option value="venice">Venice AI</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="ollama">Ollama (local)</option>
+              <option value="custom">Custom</option>
+            </select>
+            <label for="input-api-base">API base URL</label>
+            <input type="text" id="input-api-base" placeholder="https://api.venice.ai/api/v1" spellcheck="false" autocomplete="off">
+            <label for="input-api-key">API key</label>
+            <input type="password" id="input-api-key" placeholder="sk-..." spellcheck="false" autocomplete="off">
+            <div class="model-catalog">
+              <button id="btn-load-models" class="btn btn-small" type="button">Load model list</button>
+              <button id="btn-recommend-models" class="btn btn-small hidden" type="button">Use recommended</button>
+              <span id="model-catalog-status" class="catalog-status"></span>
+            </div>
+            <datalist id="model-list"></datalist>
+            <label for="input-model">Model (scoring)</label>
+            <input type="text" id="input-model" list="model-list" placeholder="deepseek-v4-flash-0731" spellcheck="false" autocomplete="off">
+            <p class="field-hint">Does the bulk of the work. Keep it cheap and fast.</p>
+          </section>
+
+          <details class="tune-section tune-more">
+            <summary>More model options</summary>
+            <label for="select-scorer">Scoring method</label>
+            <select id="select-scorer">
+              <option value="chat">Chat model (scoring model above)</option>
+              <option value="decision">Decision model (Venice, beta)</option>
+            </select>
+            <div id="decision-fields" class="hidden">
+              <label for="input-decision-model">Decision model</label>
+              <input type="text" id="input-decision-model" placeholder="jev-latest" spellcheck="false" autocomplete="off">
+            </div>
+            <p class="field-hint" id="scorer-hint">A decision model (Venice's <code>jev-latest</code>) rates each post against a fixed rubric instead of writing a reply: much faster and cheaper, and a post scores the same on every run. It writes no justification, and its scores run lower than a chat model's. Venice runs it on the <em>anonymized</em> tier, not the private one. The scoring model above still writes digests and learns from likes. Switching re-scores the feed.</p>
+            <label for="input-digest-model">Model (digest)</label>
+            <input type="text" id="input-digest-model" list="model-list" placeholder="same as scoring model" spellcheck="false" autocomplete="off">
+            <p class="field-hint">Runs once over your top posts, so a stronger model costs little. Blank reuses the scoring model.</p>
+            <label for="input-learner-model">Model (learning from likes)</label>
+            <input type="text" id="input-learner-model" list="model-list" placeholder="same as scoring model" spellcheck="false" autocomplete="off">
+            <p class="field-hint">Needs a large context window. Blank reuses the scoring model.</p>
+            <div class="field-row">
+              <div>
+                <label for="input-batch-size">Posts per call</label>
+                <input type="number" id="input-batch-size" min="5" max="50" value="20" inputmode="numeric">
+              </div>
+              <div>
+                <label for="input-concurrency">Parallel calls</label>
+                <input type="number" id="input-concurrency" min="1" value="1" inputmode="numeric">
+              </div>
+            </div>
+            <p class="field-hint">How many scoring calls run at once. 1 is sequential; 5 is roughly five times faster on a cold cache. Keep it within what your provider's rate limits allow.</p>
+          </details>
+
+          <section class="tune-section">
+            <h2>Digest audio</h2>
+            <label for="select-speech-voice">Reading voice (your browser's speech)</label>
+            <select id="select-speech-voice"><option value="">Browser default</option></select>
+            <label for="input-tts-model">TTS model (for a downloadable MP3)</label>
+            <input type="text" id="input-tts-model" placeholder="tts-kokoro" spellcheck="false" autocomplete="off">
+            <label for="input-tts-voice">TTS voice</label>
+            <input type="text" id="input-tts-voice" placeholder="af_sky" spellcheck="false" autocomplete="off">
+            <p class="field-hint">Reading aloud in the browser is free and needs nothing here. Browsers give no access to that audio, so an MP3 has to be made by your provider: set a TTS model, then press Make audio on a digest.</p>
+          </section>
+
+          <details class="tune-section tune-more">
+            <summary>Relays and signer</summary>
+            <label for="input-relays">Relays (one wss:// address per line)</label>
+            <textarea id="input-relays" rows="4" spellcheck="false" placeholder="wss://relay.damus.io&#10;wss://relay.primal.net&#10;wss://nos.lol"></textarea>
+            <label for="input-signer-relays">Remote signer relays (one per line)</label>
+            <textarea id="input-signer-relays" rows="3" spellcheck="false" class="compact-field"></textarea>
+            <p class="field-hint">Used only for the Amber / bunker handshake. Must relay ephemeral kind 24133.</p>
+          </details>
+        </div>
+
+        <!-- Hosted -->
+        <div id="tune-hosted" class="tune hosted-only">
+          <section class="tune-section">
+            <h2>Account</h2>
+            <div class="identity-connected">
+              <span class="identity-dot"></span>
+              <span class="identity-label">Signed in</span>
+              <code id="hosted-npub" class="identity-npub"></code>
+            </div>
+            <p id="hosted-subscription" class="plan-line"></p>
+            <button id="btn-hosted-subscribe" class="btn btn-primary btn-full" type="button">Subscribe or add time</button>
+          </section>
+
+          <section class="tune-section">
+            <h2>What you care about</h2>
+            <label for="hosted-prompt">Your words (the ranking rule)</label>
+            <textarea id="hosted-prompt" rows="7" maxlength="2000" placeholder="I like cypherpunk culture, decentralized technology, Bitcoin, and thoughtful longform posts. I don't care about price speculation or GM posts."></textarea>
+            <p id="hosted-prompt-count" class="field-hint count" aria-live="polite"></p>
+          </section>
+
+          <section class="tune-section">
+            <h2>Feed</h2>
+            <div class="field-row">
+              <div>
+                <label for="hosted-hours">Hours back (1 to 72)</label>
+                <input type="number" id="hosted-hours" min="1" max="72" step="1" value="24" inputmode="numeric">
+              </div>
+              <div>
+                <label for="hosted-topn">Posts in digest (1 to 30)</label>
+                <input type="number" id="hosted-topn" min="1" max="30" step="1" value="15" inputmode="numeric">
+              </div>
+            </div>
+            <label class="check">
+              <input type="checkbox" id="hosted-learn" checked>
+              <span>Learn from my likes</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="hosted-previews" checked>
+              <span>Show link previews<small>Previews are fetched by the server, not by your browser: the sites do not see you, but the server does see which links you look at. Off shows plain links only.</small></span>
+            </label>
+          </section>
+
+          <section class="tune-section" id="hosted-digest-section" aria-labelledby="digest-title">
+            <h2 id="digest-title">Daily voice digest</h2>
+            <p class="field-hint" id="digest-dm-note"></p>
+            <p class="field-hint">
+              Sent by <a id="digest-bot-link" href="#">the digest account</a>. Follow it so your client shows the messages:
+              <code id="digest-bot-npub" class="identity-npub"></code>
+              <button id="btn-digest-copy" class="btn btn-small" type="button">Copy npub</button>
+            </p>
+            <label class="check">
+              <input type="checkbox" id="digest-enabled">
+              <span>Send me a digest every day</span>
+            </label>
+            <div class="field-row">
+              <div>
+                <label for="digest-time">Time of day</label>
+                <input type="time" id="digest-time" value="07:30">
+              </div>
+              <div>
+                <label for="digest-tz">Time zone</label>
+                <input type="text" id="digest-tz" list="digest-tz-list" spellcheck="false" autocomplete="off" placeholder="Europe/Bratislava">
+                <datalist id="digest-tz-list"></datalist>
+              </div>
+            </div>
+            <label for="digest-voice">Voice</label>
+            <select id="digest-voice"></select>
+            <label for="digest-format">Delivery format</label>
+            <select id="digest-format"></select>
+            <p class="field-hint">Choose legacy for clients such as Primal or Damus that cannot read modern DMs.</p>
+            <button id="btn-digest-save" class="btn btn-secondary btn-full" type="button">Save digest schedule</button>
+            <p id="digest-schedule-status" class="form-status" role="status"></p>
+            <p id="digest-last-status" class="field-hint" role="status"></p>
+            <button id="btn-digest-now" class="btn btn-small btn-full" type="button">Send a digest now</button>
+            <p id="digest-now-status" class="form-status" role="status"></p>
+          </section>
+        </div>
+
+        <!-- Both modes -->
+        <div class="tune">
+          <section class="tune-section">
+            <h2>Open notes in</h2>
+            <label for="select-client">Nostr client</label>
+            <select id="select-client">
+              <option value="njump">njump</option>
+              <option value="primal">Primal</option>
+              <option value="yakihonne">Yakihonne</option>
+              <option value="app">My Nostr app (nostr: link)</option>
+              <option value="custom">Custom</option>
+            </select>
+            <input type="text" id="input-client-custom" class="hidden" placeholder="https://example.com/e/{e}" spellcheck="false" aria-label="Custom post link template">
+            <input type="text" id="input-client-custom-profile" class="hidden" placeholder="https://example.com/p/{npub}" spellcheck="false" aria-label="Custom profile link template">
+            <p class="field-hint hidden" id="client-hint">Post links use <code>{e}</code> for the nevent; profile links use <code>{npub}</code>, <code>{nprofile}</code> or <code>{pubkey}</code>. Or give just a prefix. Only http, https and nostr: links are accepted.</p>
+          </section>
+        </div>
+
+        <div class="tune-actions">
+          <p id="tune-status" class="form-status" role="status"></p>
+          <button id="btn-save-settings" class="btn btn-primary byok-only" type="button">Save</button>
+          <button id="btn-hosted-save" class="btn btn-primary hosted-only" type="button">Save</button>
+        </div>
+
+        <div class="tune">
+          <section class="tune-section tune-about">
+            <h2>This device</h2>
+            <p id="mode-line" class="field-hint"></p>
+            <button id="btn-switch-hosted" class="btn btn-small btn-full byok-only" type="button">Switch to hosted mode (no key needed)</button>
+            <button id="btn-clear-scores" class="btn btn-small btn-full byok-only" type="button">Clear cached scores</button>
+            <button id="btn-hosted-switch-byok" class="btn btn-small btn-full hosted-only" type="button">Use my own API key instead</button>
+            <button id="btn-hosted-logout" class="btn btn-small btn-full hosted-only" type="button">Log out</button>
+            <p class="about">
+              <span id="app-version"></span>
+              <a href="https://github.com/jooray/nalgorithm" target="_blank" rel="noopener">Source on GitHub</a>
+            </p>
+          </section>
+        </div>
       </section>
     </main>
+
+    <nav id="tabbar" class="tabbar" aria-label="Sections">
+      <button class="tab" type="button" data-tab="digest" aria-current="page"></button>
+      <button class="tab" type="button" data-tab="feed"></button>
+      <button class="tab" type="button" data-tab="tune"></button>
+    </nav>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </div>
 
   <script type="module" src="/src/app.ts"></script>

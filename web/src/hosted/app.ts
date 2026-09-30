@@ -14,14 +14,31 @@ import type { ProfileData, ScoredPost } from 'nalgorithm'
 import { renderFeed, aggregateBoosts, clientRenderOptions } from '../render.js'
 import { attachLinkPreviews } from './previews.js'
 import { previewsEnabled } from './previews-logic.js'
-import { loadSettings } from '../settings.js'
+import { loadSettings, saveSettings } from '../settings.js'
 import { openHostedLoginDialog } from '../login-ui.js'
-import { setStatus, setStatusLoading } from '../ui.js'
+import { refreshButtonHtml, setStatus, setStatusLoading } from '../ui.js'
 import { setUpdateBlocked } from '../version-check.js'
+import { showTab } from '../shell.js'
+import { validateTemplate } from '../client-url.js'
+import {
+  initDigestView,
+  setDigests,
+  setListError,
+  setListLoading,
+  setMakeStatus,
+  stopPlayback,
+  digestCount,
+  type DigestBackend,
+} from '../digest-view.js'
+import { readDigest, type DigestRecord } from '../digest-model.js'
+import { HOSTED_CACHE_KEY, loadHistory, saveHistory } from '../digest-history.js'
+import { safeStorage } from '../player.js'
+import { rememberProfiles } from '../profiles.js'
 import {
   ApiError,
   createCheckout,
   digestNow,
+  getDigest,
   getDigests,
   getFeed,
   getMe,
@@ -36,7 +53,6 @@ import {
 import {
   DIGEST_BOT_NPUB,
   DIGEST_DM_NOTE,
-  DIGEST_LIST_LIMIT,
   DIGEST_ON_ITS_WAY,
   DIGEST_VOICES,
   DM_FORMATS,
@@ -48,18 +64,15 @@ import {
   describeError,
   entitlementView,
   formatDays,
-  formatDigestDate,
   formatSats,
   isHttpUrl,
   lastStatusText,
   nextRunText,
   parseWholeNumber,
   paymentConfirmed,
-  safeAudioUrl,
   validateHostedSettings,
   validateSats,
   validateScheduleForm,
-  type Digest,
   type DmFormat,
   type Entitlement,
   type PlanId,
@@ -90,41 +103,31 @@ const nowSec = (): number => Math.floor(Date.now() / 1000)
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
+/** The digest list asked for, per request. */
+const DIGEST_FEED_LIMIT = 30
+
 export function initHosted(): void {
-  // Settings panel
-  const openSettings = (): void => {
-    $('#hosted-settings-panel').classList.remove('hidden')
-    $('#settings-overlay').classList.remove('hidden')
-  }
-  const closeSettings = (): void => {
-    $('#hosted-settings-panel').classList.add('hidden')
-    $('#settings-overlay').classList.add('hidden')
-  }
-  openSettingsPanel = openSettings
-  $('#btn-hosted-settings').addEventListener('click', openSettings)
-  $('#btn-close-hosted-settings').addEventListener('click', closeSettings)
-  $('#settings-overlay').addEventListener('click', closeSettings)
+  // Settings are the Tune tab now, so there is no panel to close.
+  const closeSettings = (): void => {}
+  openSettingsPanel = () => showTab('tune')
   $('#btn-hosted-save').addEventListener('click', () => void saveSettingsForm(closeSettings))
   $<HTMLTextAreaElement>('#hosted-prompt').addEventListener('input', updatePromptCount)
+  initClientPicker()
 
   // Account
   $('#btn-hosted-login').addEventListener('click', () => void signIn())
   $('#btn-hosted-logout').addEventListener('click', () => void signOut(closeSettings))
   $('#btn-hosted-to-byok').addEventListener('click', () => switchMode('byok'))
   $('#btn-hosted-switch-byok').addEventListener('click', () => switchMode('byok'))
-  $('#btn-hosted-subscribe').addEventListener('click', () => {
-    closeSettings()
-    showPaywall()
-  })
+  $('#btn-hosted-subscribe').addEventListener('click', () => showPaywall())
+  $('#mode-line').textContent = 'You are using the hosted service. The server ranks your feed and writes your digest.'
 
-  // Header
+  // Feed
+  $('#btn-hosted-refresh').innerHTML = refreshButtonHtml()
   $('#btn-hosted-refresh').addEventListener('click', () => void runFeed())
-  $('#btn-hosted-digest').addEventListener('click', () => {
-    openSettings()
-    const section = $('#hosted-digest-section')
-    section.scrollIntoView({ block: 'start' })
-    $('#digest-enabled').focus({ preventScroll: true })
-  })
+
+  initDigestView(hostedBackend)
+  setDigests(loadHistory(safeStorage(), readDigest, HOSTED_CACHE_KEY))
 
   initDigestForm(closeSettings)
 
@@ -214,6 +217,15 @@ async function signOut(closeSettings: () => void): Promise<void> {
     // The cookie may already be gone; either way this device is done.
   }
   closeSettings()
+  // The next person on this device must not see this account's digests.
+  stopDigestPoll()
+  stopPlayback()
+  try {
+    safeStorage()?.removeItem(HOSTED_CACHE_KEY)
+  } catch {
+    // nothing cached to clear
+  }
+  setDigests([])
   showLogin()
 }
 
@@ -236,12 +248,14 @@ async function onSignedIn(npub: string, ent: Entitlement): Promise<void> {
   $<HTMLInputElement>('#hosted-previews').checked = linkPreviewsOn = previewsEnabled(s)
   updatePromptCount()
   void loadDigestSection()
+  void loadDigests()
 
   if (!s.userPrompt) {
-    showEmpty('Describe what you want to see in Settings, then click Refresh.')
+    showEmpty('Describe what you want to see in Tune, then press Refresh.')
+    // First run: the setup is on the Tune tab.
     openSettingsPanel()
   } else if (!$('#hosted-feed').childElementCount) {
-    showEmpty('Click Refresh to rank your feed.')
+    showEmpty('Press Refresh to rank your feed.')
   }
 }
 
@@ -270,6 +284,7 @@ async function runFeed(): Promise<void> {
   running = true
   const refresh = $<HTMLButtonElement>('#btn-hosted-refresh')
   refresh.disabled = true
+  refresh.classList.add('is-busy')
   show('#hosted-notice', false)
   show('#hosted-paywall', false)
   show('#hosted-empty', false)
@@ -297,6 +312,7 @@ async function runFeed(): Promise<void> {
     clearInterval(timer)
     show('#hosted-loading', false)
     refresh.disabled = false
+    refresh.classList.remove('is-busy')
     running = false
     setUpdateBlocked(false)
   }
@@ -308,12 +324,13 @@ function renderResult(feed: FeedResponse): void {
     profiles.set(pubkey, { ...p, pubkey })
   }
   // The renderer never touches the raw event, which stays on the server.
+  rememberProfiles(profiles)
   const posts = feed.posts as unknown as ScoredPost[]
   const settings = loadSettings()
 
   if (posts.length === 0) {
     $('#hosted-feed').innerHTML = ''
-    showEmpty(`No posts found from the people you follow in the last ${feed.hoursBack} hours.`)
+    showEmpty(`No posts from the people you follow in the last ${feed.hoursBack} hours. Try a longer window in Tune.`)
     setStatus('No posts found')
     return
   }
@@ -365,7 +382,7 @@ function updatePromptCount(): void {
 }
 
 async function saveSettingsForm(closeSettings: () => void): Promise<void> {
-  const status = $('#hosted-settings-status')
+  const status = $('#tune-status')
   const setMsg = (text: string, isError = false): void => {
     status.textContent = text
     status.classList.toggle('is-error', isError)
@@ -379,6 +396,8 @@ async function saveSettingsForm(closeSettings: () => void): Promise<void> {
   }
   const problem = validateHostedSettings(draft)
   if (problem) return setMsg(problem, true)
+  const clientProblem = saveClientPreference()
+  if (clientProblem) return setMsg(clientProblem, true)
 
   const button = $<HTMLButtonElement>('#btn-hosted-save')
   button.disabled = true
@@ -391,7 +410,7 @@ async function saveSettingsForm(closeSettings: () => void): Promise<void> {
     setMsg('')
     setStatus('Settings saved')
     show('#hosted-notice', false)
-    if (!$('#hosted-feed').childElementCount) showEmpty('Click Refresh to rank your feed.')
+    if (!$('#hosted-feed').childElementCount) showEmpty('Press Refresh to rank your feed.')
     closeSettings()
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -424,6 +443,7 @@ function setPayStatus(text: string, isError = false): void {
 }
 
 function showPaywall(message = ''): void {
+  showTab('feed')
   show('#hosted-notice', false)
   show('#hosted-empty', false)
   show('#hosted-paywall')
@@ -596,50 +616,149 @@ async function loadDigestSection(): Promise<void> {
     if (err instanceof ApiError && err.status === 401) return showLogin(describeError(err).message)
     setText('#digest-schedule-status', 'The digest schedule could not be loaded.', true)
   }
-  await loadDigests()
 }
 
+/** Newest digests from the server, cached so the tab opens offline. */
 async function loadDigests(): Promise<void> {
+  const store = safeStorage()
+  const cached = loadHistory(store, readDigest, HOSTED_CACHE_KEY)
+  setListLoading(true)
   try {
-    renderDigests(await getDigests(DIGEST_LIST_LIMIT))
-  } catch {
-    // The list is a convenience; the schedule form works without it.
+    const fresh = await getDigests(DIGEST_FEED_LIMIT)
+    // A list that omits the notes must not wipe notes already fetched.
+    const known = new Map(cached.map((d) => [d.id, d]))
+    const list = fresh.map((d) => (d.notes === undefined && known.get(d.id)?.notes ? { ...d, notes: known.get(d.id)!.notes } : d))
+    saveHistory(store, list, HOSTED_CACHE_KEY)
+    setDigests(list)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return showLogin(describeError(err).message)
+    if (cached.length > 0 && digestCount() === 0) setDigests(cached)
+    setListError(
+      cached.length > 0
+        ? 'Could not reach the server. Showing the digests saved on this device.'
+        : 'Your digests could not be loaded. Check your connection and try again.',
+      () => void loadDigests()
+    )
+  } finally {
+    setListLoading(false)
   }
 }
 
-function renderDigests(digests: Digest[]): void {
-  const list = $('#digest-list')
-  list.replaceChildren()
-  show('#digest-list-empty', digests.length === 0)
-  for (const d of digests) {
-    const item = document.createElement('li')
-    item.className = 'digest-item'
+// ─── Digest on demand ────────────────────────────────────────────────────────
 
-    const date = document.createElement('div')
-    date.className = 'digest-date'
-    date.textContent = formatDigestDate(d.createdAt)
-    item.append(date)
+let digestPoll: number | undefined
+const POLL_DIGEST_EVERY_MS = 15_000
+const POLL_DIGEST_FOR_MS = 6 * 60_000
 
-    const url = safeAudioUrl(d.audioUrl)
-    if (url) {
-      const audio = document.createElement('audio')
-      audio.controls = true
-      audio.preload = 'none'
-      audio.src = url
-      audio.setAttribute('aria-label', `Voice digest from ${date.textContent}`)
-      item.append(audio)
+function stopDigestPoll(): void {
+  if (digestPoll !== undefined) clearInterval(digestPoll)
+  digestPoll = undefined
+}
+
+/** After "send now" the digest is made in the background: watch for it to land. */
+function watchForNewDigest(): void {
+  stopDigestPoll()
+  const knownIds = new Set<string>()
+  void getDigests(DIGEST_FEED_LIMIT).then(
+    (l) => l.forEach((d) => knownIds.add(d.id)),
+    () => {}
+  )
+  const until = Date.now() + POLL_DIGEST_FOR_MS
+  digestPoll = window.setInterval(async () => {
+    if (Date.now() > until) return stopDigestPoll()
+    if (document.visibilityState !== 'visible') return
+    try {
+      const list = await getDigests(DIGEST_FEED_LIMIT)
+      const fresh = list.find((d) => !knownIds.has(d.id))
+      if (fresh && knownIds.size > 0) {
+        stopDigestPoll()
+        saveHistory(safeStorage(), list, HOSTED_CACHE_KEY)
+        setDigests(list, { select: fresh.id })
+        setMakeStatus('Your digest has arrived.')
+      }
+    } catch {
+      // A blip while waiting is not a failure; keep watching.
     }
+  }, POLL_DIGEST_EVERY_MS)
+}
 
-    const details = document.createElement('details')
-    const summary = document.createElement('summary')
-    summary.textContent = 'Text'
-    const text = document.createElement('div')
-    text.className = 'digest-text'
-    text.textContent = String(d.text ?? '')
-    details.append(summary, text)
-    item.append(details)
-    list.append(item)
+/** Ask the server for a digest now. Returns the text to show, or throws one. */
+async function requestDigest(): Promise<string> {
+  try {
+    await digestNow()
+  } catch (err) {
+    const api = err instanceof ApiError ? err : new ApiError(0, (err as Error).message, 'network')
+    const d = describeDigestNowError(api)
+    if (d.action === 'login') {
+      closeSettingsPanel()
+      showLogin(d.message)
+      return ''
+    }
+    if (d.action === 'pay') {
+      setEntitlement({ state: 'expired' })
+      closeSettingsPanel()
+      showPaywall(d.message)
+      return ''
+    }
+    throw new Error(d.message)
   }
+  watchForNewDigest()
+  return DIGEST_ON_ITS_WAY
+}
+
+const hostedBackend: DigestBackend = {
+  mode: 'hosted',
+  makeLabel: 'Send me a digest now',
+  emptyText:
+    'Every morning I write a digest of what the people you follow posted, voice it, and send it by Nostr DM. It lands here too. Nothing plays until you press play.',
+  async make() {
+    setMakeStatus('Asking for a digest…')
+    const message = await requestDigest()
+    setMakeStatus(message)
+  },
+  async loadFull(d) {
+    return getDigest(d.id)
+  },
+  renderOptions(profiles) {
+    return {
+      profiles,
+      ...clientRenderOptions(loadSettings()),
+      linkPreviews: linkPreviewsOn ? attachLinkPreviews : undefined,
+    }
+  },
+  // Names come from public profile events; the reader's own relay list is the place to ask.
+  relays: () => loadSettings().relays,
+}
+
+// ─── Open notes in (client preference, kept on this device) ─────────────────
+
+function initClientPicker(): void {
+  const s = loadSettings()
+  const select = $<HTMLSelectElement>('#select-client')
+  select.value = s.clientPreset
+  $<HTMLInputElement>('#input-client-custom').value = s.clientCustomUrl
+  $<HTMLInputElement>('#input-client-custom-profile').value = s.clientCustomProfileUrl
+  const sync = (): void => {
+    const custom = select.value === 'custom'
+    $('#input-client-custom').classList.toggle('hidden', !custom)
+    $('#input-client-custom-profile').classList.toggle('hidden', !custom)
+    $('#client-hint').classList.toggle('hidden', !custom)
+  }
+  select.addEventListener('change', sync)
+  sync()
+}
+
+/** Save the client preference. Returns a problem to show, or null. */
+function saveClientPreference(): string | null {
+  const preset = $<HTMLSelectElement>('#select-client').value as ReturnType<typeof loadSettings>['clientPreset']
+  const custom = $<HTMLInputElement>('#input-client-custom').value.trim()
+  const customProfile = $<HTMLInputElement>('#input-client-custom-profile').value.trim()
+  if (preset === 'custom') {
+    const problem = validateTemplate(custom)
+    if (problem) return problem
+  }
+  saveSettings({ ...loadSettings(), clientPreset: preset, clientCustomUrl: custom, clientCustomProfileUrl: customProfile })
+  return null
 }
 
 async function saveDigestSchedule(): Promise<void> {
@@ -680,21 +799,9 @@ async function sendDigestNow(): Promise<void> {
   button.disabled = true
   setText('#digest-now-status', 'Asking for a digest…')
   try {
-    await digestNow()
-    setText('#digest-now-status', DIGEST_ON_ITS_WAY)
+    setText('#digest-now-status', await requestDigest())
   } catch (err) {
-    const api = err instanceof ApiError ? err : new ApiError(0, (err as Error).message, 'network')
-    const d = describeDigestNowError(api)
-    if (d.action === 'login') {
-      closeSettingsPanel()
-      return showLogin(d.message)
-    }
-    if (d.action === 'pay') {
-      setEntitlement({ state: 'expired' })
-      closeSettingsPanel()
-      return showPaywall(d.message)
-    }
-    setText('#digest-now-status', d.message, true)
+    setText('#digest-now-status', (err as Error).message, true)
   } finally {
     button.disabled = false
   }
