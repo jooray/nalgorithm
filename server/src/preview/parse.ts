@@ -98,8 +98,13 @@ function tagEnd(html: string, from: number): number {
   return -1
 }
 
-/** The <meta> tags of the head, and the raw text of <title>. Stops at </head> or <body>. */
-function scanHead(html: string): { metas: Tag[]; title: string } {
+/**
+ * The <meta> tags and the raw text of <title>. By default it stops at </head> or
+ * <body>; with `wholeDocument` it reads on, because some sites (single-page apps
+ * that render their tags late, such as fountain.fm) put them in the body, where
+ * crawlers still find them.
+ */
+function scanHead(html: string, wholeDocument = false): { metas: Tag[]; title: string } {
   // ASCII-only lower-casing keeps every index aligned with `html`.
   const lower = html.replace(/[A-Z]+/g, (x) => x.toLowerCase())
   const metas: Tag[] = []
@@ -121,8 +126,8 @@ function scanHead(html: string): { metas: Tag[]; title: string } {
     }
     const name = m[1]
     const closing = html[lt + 1] === '/'
-    if (closing && name === 'head') break
-    if (!closing && name === 'body') break
+    if (!wholeDocument && closing && name === 'head') break
+    if (!wholeDocument && !closing && name === 'body') break
     if (!closing && (name === 'script' || name === 'style' || name === 'noscript')) {
       // Anything inside is not metadata, even if it looks like a tag.
       const end = lower.indexOf(`</${name}`, lt + 1)
@@ -156,7 +161,13 @@ function absoluteHttp(value: string, base: string): string {
 
 /** Read the preview metadata from `html`, resolving a relative image against `baseUrl`. */
 export function parsePreview(html: string, baseUrl: string): ParsedPreview {
-  const { metas, title } = scanHead(html.length > SCAN_LIMIT ? html.slice(0, SCAN_LIMIT) : html)
+  const bounded = html.length > SCAN_LIMIT ? html.slice(0, SCAN_LIMIT) : html
+  let { metas, title } = scanHead(bounded)
+  // Only when the head carries no preview data at all is the body consulted. The
+  // head always wins, so page content cannot override a site's own metadata.
+  const hasSocial = (list: Tag[]): boolean =>
+    list.some(({ attrs }) => /^(og:(title|description|image)|twitter:(title|description|image))/i.test((attrs.property ?? attrs.name ?? '').trim()) && attrs.content?.trim())
+  if (!hasSocial(metas)) ({ metas, title } = scanHead(bounded, true))
   // First occurrence of each key wins; both `property` and `name` are used in the wild.
   const meta = new Map<string, string>()
   for (const { attrs } of metas) {

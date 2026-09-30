@@ -112,3 +112,29 @@ test('unquoted and single-quoted attributes work; duplicates keep the first', ()
   const p = parsePreview(page(`<meta property=og:title content=Unquoted><meta property='og:description' content='It''s'><meta property="og:title" content="second">`), BASE)
   assert.equal(p.title, 'Unquoted')
 })
+
+// Regression: fountain.fm renders its og: tags inside <body>, 40 KB after </head>.
+test('tags that a site renders inside the body are used when the head has none', () => {
+  const html = `<!doctype html><html><head><title>Fountain</title></head><body><div id="root">${'<p>x</p>'.repeat(50)}</div>` +
+    `<meta property="og:title" content="Letter #7 &amp; more"/><meta property="og:description" content="Read aloud"/>` +
+    `<meta property="og:image" content="/img/a.jpg"/><meta property="og:site_name" content="Fountain"/></body></html>`
+  const p = parsePreview(html, 'https://fountain.fm/episode/x')
+  assert.equal(p.title, 'Letter #7 & more')
+  assert.equal(p.description, 'Read aloud')
+  assert.equal(p.siteName, 'Fountain')
+  assert.equal(p.image, 'https://fountain.fm/img/a.jpg')
+})
+
+test('the head always wins: body content cannot override or add to a site\'s own preview data', () => {
+  const html = `<html><head><meta property="og:title" content="Real title"/></head>` +
+    `<body><article>user comment: <meta property="og:title" content="Injected title"/><meta property="og:image" content="https://evil.example/x.png"/></article></body></html>`
+  const p = parsePreview(html, 'https://site.example/')
+  assert.equal(p.title, 'Real title')
+  assert.equal(p.image, '', 'the body is not consulted when the head already has preview data')
+})
+
+test('scripts and styles in the body are still skipped when scanning the whole document', () => {
+  const html = `<html><head></head><body><script>var s = '<meta property="og:title" content="from script">'</script>` +
+    `<meta property="og:title" content="Real"/></body></html>`
+  assert.equal(parsePreview(html, 'https://site.example/').title, 'Real')
+})
