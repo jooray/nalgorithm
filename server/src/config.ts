@@ -55,7 +55,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       humanizerModel: env.HUMANIZER_MODEL ?? 'deepseek-v4-1-flash',
       learnerModel: env.LEARNER_MODEL ?? 'deepseek-v4-1-flash',
       ttsModel: env.TTS_MODEL ?? 'tts-kokoro',
-      ttsVoice: env.TTS_VOICE ?? 'af_sky',
+      ttsVoice: env.TTS_VOICE ?? 'af_bella',
     },
   }
 }
