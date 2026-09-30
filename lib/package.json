@@ -20,7 +20,7 @@
     "build": "tsc",
     "predev": "node ../scripts/sync-humanizer.mjs",
     "dev": "tsc --watch",
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "nostr-tools": "^2.10.4"

@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -14,11 +14,18 @@ const T0 = 1_800_000_000
 const silent = { info() {}, warn() {} }
 
 // Set TEST_DATABASE_URL to run the whole suite against MariaDB instead of SQLite.
+// One shared connection pool for the whole file, closed at the end: a pool per
+// test would keep the process alive after the tests finish.
+let shared
+after(async () => {
+  await shared?.close()
+})
 async function freshDb() {
   const url = process.env.TEST_DATABASE_URL
-  const db = await openDb(url ?? ':memory:')
-  if (url) for (const t of ['scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await db.exec(`DELETE FROM ${t}`)
-  return db
+  if (!url) return openDb(':memory:')
+  shared ??= await openDb(url)
+  for (const t of ['scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
+  return shared
 }
 
 function loginEvent(sk, { nonce, url = LOGIN_URL, method = 'POST', at = T0, kind = 27235 }) {

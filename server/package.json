@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/main.js",
-    "test": "npm run build && node --test test/"
+    "test": "npm run build && node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "mariadb": "^3.5.4",
