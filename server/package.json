@@ -14,10 +14,12 @@
   "dependencies": {
     "mariadb": "^3.5.4",
     "nalgorithm": "*",
-    "nostr-tools": "^2.10.4"
+    "nostr-tools": "^2.10.4",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
+    "@types/ws": "^8.18.2",
     "typescript": "^5.7.0"
   }
 }

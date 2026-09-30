@@ -5,12 +5,14 @@ import { createBillingClient } from './billing-client.js'
 import { loadConfig } from './config.js'
 import { openDb, pruneScores } from './db.js'
 import { createFeedRunner } from './feed.js'
+import { configureWebSocket } from './websocket.js'
 
 const log: PipelineLogger = {
   info: (m) => process.stderr.write(`[server] ${m}\n`),
   warn: (m) => process.stderr.write(`[server] warning: ${m}\n`),
 }
 
+configureWebSocket()
 const config = loadConfig()
 const db = await openDb(config.databaseUrl)
 const billing = createBillingClient({ url: config.billing.url, token: config.billing.token, product: 'nalgorithm' })
