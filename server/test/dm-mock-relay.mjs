@@ -7,7 +7,7 @@ import { verifyEvent } from 'nostr-tools/pure'
  * ackMode: 'ok' answers true, 'reject' answers false with a reason,
  * 'hang' never answers, 'close' drops the connection on EVENT.
  */
-export async function startMockRelay({ ackMode = 'ok', rejectReason = 'blocked: test' } = {}) {
+export async function startMockRelay({ ackMode = 'ok', rejectReason = 'blocked: test', requireAuth = false } = {}) {
   const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 })
   await new Promise((resolve) => wss.once('listening', resolve))
   const relay = {
@@ -17,6 +17,10 @@ export async function startMockRelay({ ackMode = 'ok', rejectReason = 'blocked: 
     /** every EVENT message received, including ones answered false */
     attempts: [],
     reqs: [],
+    /** pubkeys that completed NIP-42 login (requireAuth mode) */
+    authed: [],
+    /** REQs refused with auth-required */
+    refused: 0,
     async close() {
       for (const ws of wss.clients) ws.terminate()
       await new Promise((resolve) => wss.close(resolve))
@@ -31,6 +35,8 @@ export async function startMockRelay({ ackMode = 'ok', rejectReason = 'blocked: 
     },
   }
   const subs = new Map() // ws -> Map(subId -> filters)
+  const challenges = new Map() // ws -> challenge string
+  const loggedIn = new Set()
 
   function deliver(ws, event) {
     for (const [id, filters] of subs.get(ws) ?? []) {
@@ -41,7 +47,12 @@ export async function startMockRelay({ ackMode = 'ok', rejectReason = 'blocked: 
   wss.on('connection', (ws) => {
     ws.on('error', () => {})
     subs.set(ws, new Map())
-    ws.on('close', () => subs.delete(ws))
+    if (requireAuth) {
+      const challenge = Math.random().toString(36).slice(2)
+      challenges.set(ws, challenge)
+      ws.send(JSON.stringify(['AUTH', challenge]))
+    }
+    ws.on('close', () => { subs.delete(ws); challenges.delete(ws); loggedIn.delete(ws) })
     ws.on('message', (raw) => {
       let msg
       try {
@@ -49,8 +60,18 @@ export async function startMockRelay({ ackMode = 'ok', rejectReason = 'blocked: 
       } catch {
         return
       }
+      if (msg[0] === 'AUTH') {
+        const ev = msg[1]
+        const ok = ev?.kind === 22242 && verifyEvent(ev) && ev.tags.some((t) => t[0] === 'challenge' && t[1] === challenges.get(ws)) && ev.tags.some((t) => t[0] === 'relay')
+        if (ok) { loggedIn.add(ws); relay.authed.push(ev.pubkey) }
+        return ws.send(JSON.stringify(['OK', ev?.id ?? '', ok, ok ? '' : 'auth: invalid']))
+      }
       if (msg[0] === 'REQ') {
         const [, id, ...filters] = msg
+        if (requireAuth && !loggedIn.has(ws)) {
+          relay.refused++
+          return ws.send(JSON.stringify(['CLOSED', id, 'auth-required: requested filter requires authentication']))
+        }
         relay.reqs.push(filters)
         subs.get(ws)?.set(id, filters)
         for (const f of filters) {

@@ -28,6 +28,8 @@ export interface ServerConfig {
     /** Relays the bot listens on for incoming DMs and publishes its self-copies to. */
     relays: string[]
     blossomServers: string[]
+    /** Where to send when a recipient has published no relay list: the relays most clients read from. */
+    fallbackRelays: string[]
   }
   /** Public URL of the web app, for links in DM replies. */
   webUrl: string
@@ -44,7 +46,8 @@ export interface ServerConfig {
   }
 }
 
-const DEFAULT_BOT_RELAYS = ['wss://nostr.cypherpunk.today', 'wss://nos.lol', 'wss://relay.damus.io']
+const DEFAULT_BOT_RELAYS = ['wss://nostr.cypherpunk.today', 'wss://auth.nostr1.com']
+const DEFAULT_FALLBACK_RELAYS = ['wss://relay.damus.io', 'wss://relay.primal.net', 'wss://nos.lol', 'wss://nostr.cypherpunk.today']
 const DEFAULT_BLOSSOM = ['https://blossom.primal.net']
 
 const list = (v: string | undefined, fallback: string[]): string[] => {
@@ -68,6 +71,7 @@ function loadBot(env: Record<string, string | undefined>): ServerConfig['bot'] {
   return {
     secretKeyHex: parseSecretKey(env.BOT_NSEC),
     relays: list(env.DM_RELAYS, DEFAULT_BOT_RELAYS),
+    fallbackRelays: list(env.DM_FALLBACK_RELAYS, DEFAULT_FALLBACK_RELAYS),
     blossomServers: list(env.BLOSSOM_SERVERS, DEFAULT_BLOSSOM),
   }
 }

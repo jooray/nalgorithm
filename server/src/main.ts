@@ -30,7 +30,7 @@ let stopBot = async (): Promise<void> => {}
 if (config.bot) {
   const secretKey = Uint8Array.from(Buffer.from(config.bot.secretKeyHex, 'hex'))
   const pool = createDmPool()
-  const resolver = createRelayResolver({ pool, fallback: config.bot.relays })
+  const resolver = createRelayResolver({ pool, fallback: config.bot.fallbackRelays })
   const rawSender = createDmSender({ pool, resolver, secretKey, selfRelays: config.bot.relays, log })
 
   // The DM layer reports per-relay outcomes; the digest job wants one readable reason per failed part.

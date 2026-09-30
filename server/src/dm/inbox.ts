@@ -1,7 +1,7 @@
 import { SimplePool } from 'nostr-tools/pool'
 import type { AbstractSimplePool, SubCloser } from 'nostr-tools/pool'
 import type { Event, Filter } from 'nostr-tools'
-import { getPublicKey } from 'nostr-tools/pure'
+import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import * as nip04 from 'nostr-tools/nip04'
 import { DmRejectedError, KIND_GIFT_WRAP, MAX_CIPHERTEXT_LENGTH, unwrapGiftWrap } from './wrap.js'
 import { silentLogger, type DmLogger, type IncomingDm } from './types.js'
@@ -152,6 +152,10 @@ export function createDmInbox(opts: DmInboxOptions): DmInbox {
     const closer = pool.subscribeMap(
       filters.map((filter) => ({ url, filter })),
       {
+        // Some relays (damus, for one) refuse to serve gift wraps until the reader
+        // proves which key it is. Answering as the bot reveals nothing new: the
+        // wraps are addressed to it anyway.
+        onauth: async (template) => finalizeEvent(template, secretKey),
         onevent: (event) => {
           void handleEvent(event, url).catch((err: Error) => log.warn(`dm processing failed: ${err.message}`))
         },
@@ -164,7 +168,7 @@ export function createDmInbox(opts: DmInboxOptions): DmInbox {
           const n = attempts.get(url) ?? 0
           attempts.set(url, n + 1)
           const delay = Math.min(RECONNECT_BASE_MS * 2 ** n, RECONNECT_MAX_MS)
-          log.warn(`dm inbox relay ${url} closed (${reasons.join(', ')}); retrying in ${delay / 1000}s`)
+          log.warn(`dm inbox relay ${url} closed (${reasons.map((r) => String((r as { message?: unknown } | null)?.message ?? r)).join(', ')}); retrying in ${delay / 1000}s`)
           const timer = setTimeout(() => {
             timers.delete(timer)
             open(url)

@@ -10,7 +10,7 @@ Runs on Node 22.13 or newer; 24 is recommended. Environment (all required unless
 
 Storage: SQLite (`DATABASE_URL=sqlite:./nalgorithm-server.db`, the default, or a bare path) or MariaDB (`DATABASE_URL=mariadb://user:password@host:3306/database`). The tables are created on first start. `TEST_DATABASE_URL=mariadb://... npm test -w server` runs the suite against a MariaDB test database, which the tests empty first, so never point it at real data.
 
-Optional DM delivery (all off when `BOT_NSEC` is unset): `BOT_NSEC` (the service account's nsec or 64-hex secret key), `DM_RELAYS` (relays the bot listens on and publishes self-copies to), `BLOSSOM_SERVERS` (comma separated, tried in order; default `https://blossom.primal.net`), `WEB_URL` (public web app URL used in DM replies).
+Optional DM delivery (all off when `BOT_NSEC` is unset): `BOT_NSEC` (the service account's nsec or 64-hex secret key), `DM_RELAYS` (relays the bot listens on and publishes self-copies to; the ones in its DM inbox list; relays that ask for a NIP-42 login are answered as the bot), `DM_FALLBACK_RELAYS` (where to send when a recipient has published no relay list), `BLOSSOM_SERVERS` (comma separated, tried in order; default `https://blossom.primal.net`), `WEB_URL` (public web app URL used in DM replies).
 
 Endpoints: `POST /auth/challenge`, `POST /auth/login` (`{event}`, a signed kind 27235 with tags `u`, `method=POST`, `nonce`), `POST /auth/logout`, `GET /me`, `GET|PUT /settings`, `GET|PUT /schedule` (`enabled`, `time` as `HH:MM`, `tz`, `voice`, `dmFormat`), `GET /digests`, `POST /digest/now`, `GET /feed`, `POST /billing/checkout`. Writes require `Content-Type: application/json`. Sessions are an HttpOnly SameSite=Strict cookie or a Bearer token.
 
