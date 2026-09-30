@@ -244,7 +244,8 @@ function renderAll(): void {
 
 function entryLength(d: DigestRecord): string {
   const known = resume.durationOf(keyOf(d))
-  return known > 0 ? formatLength(known) : formatLength(estimateSeconds(d.text), true)
+  // A streamed MP3's length is only a bitrate guess until it has played to the end once.
+  return known > 0 ? formatLength(known, !resume.isPlayed(keyOf(d))) : formatLength(estimateSeconds(d.text), true)
 }
 
 function renderList(): void {
@@ -327,7 +328,7 @@ function paint(s: PlayerState): void {
   const shell = `${d.id}|${Math.round(s.dur)}|${s.durApprox}|${s.mode}|${madeAudio.has(d.id)}|${notesOpen}|${d.notes?.length ?? -1}`
   if (shell !== lastShell) {
     lastShell = shell
-    $('hero-line2').textContent = formatLength(s.dur, s.durApprox)
+    $('hero-line2').textContent = formatLength(s.dur, s.durApprox || (s.mode === 'audio' && !s.played))
     $('hero-sub').textContent = `${dayLabel(d.createdAt)}, ${clockLabel(d.createdAt)}${s.mode === 'speech' ? ' · read aloud by your browser' : ''}`
     const count = d.notes?.length
     const btn = $('btn-shownotes')

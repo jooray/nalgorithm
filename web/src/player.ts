@@ -99,8 +99,20 @@ export class DigestPlayer {
       this.set({ dur, durApprox: false, loading: false, pos: this.audio.currentTime })
       this.updatePositionState()
     })
+    // A streamed MP3 without a length header reports a first guess from its bitrate and
+    // corrects it while it plays (a 3 min 25 s guess for a 3 min 47 s digest). Follow it.
+    this.audio.addEventListener('durationchange', () => {
+      const dur = this.audio.duration
+      if (!Number.isFinite(dur) || dur <= 0 || this.state.mode !== 'audio') return
+      if (this.state.source) this.resume.saveDuration(this.state.source.key, dur)
+      this.set({ dur, durApprox: false })
+      this.updatePositionState()
+    })
     this.audio.addEventListener('timeupdate', () => {
-      this.set({ pos: this.audio.currentTime })
+      // Never let the position run past the length we are showing.
+      const pos = this.audio.currentTime
+      if (this.state.mode === 'audio' && this.state.dur > 0 && pos > this.state.dur) this.set({ dur: pos })
+      this.set({ pos })
     })
     this.audio.addEventListener('playing', () => this.set({ playing: true, loading: false, error: '' }))
     this.audio.addEventListener('pause', () => {
@@ -290,6 +302,8 @@ export class DigestPlayer {
 
   private finish(): void {
     const key = this.state.source?.key
+    // The true length is known once the audio has played to its end.
+    if (this.state.mode === 'audio' && Number.isFinite(this.audio.duration) && this.audio.duration > 0) this.set({ dur: this.audio.duration })
     if (key) this.resume.markPlayed(key, this.state.dur)
     this.stopSaving()
     this.set({ playing: false, pos: 0, resumeAt: 0, played: true })
