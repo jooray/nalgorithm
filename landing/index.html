@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nalgorithm: hear what mattered on Nostr</title>
+<meta name="description" content="Your Nostr feed ranked by what you say you care about, and read to you as a spoken digest each morning. Every score shows its reason. Open source.">
+<meta name="theme-color" content="#6B3DF5">
+<link rel="icon" href="assets/icon-192.png">
+<style>
+:root {
+  --ground: #0B0B10; --surface: #16161F; --line: #2A2A38;
+  --text: #F5F5F8; --muted: #A4A4B5;
+  --violet: #6B3DF5; --on-violet: #FFFFFF; --accent: #C6F135; --on-accent: #10130A;
+  --accent-text: #C6F135;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --ground: #FAF7F2; --surface: #FFFFFF; --line: #E4DED3;
+    --text: #14120F; --muted: #5E5A52; --accent-text: #3F6B00;
+  }
+}
+:root[data-theme="light"] {
+  --ground: #FAF7F2; --surface: #FFFFFF; --line: #E4DED3;
+  --text: #14120F; --muted: #5E5A52; --accent-text: #3F6B00;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--ground); color: var(--text);
+  font: 400 1.0625rem/1.55 "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+a { color: inherit; }
+.wrap { max-width: 68rem; margin: 0 auto; padding: 0 1rem; }
+:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; border-radius: 6px; }
+
+header.top { display: flex; align-items: center; justify-content: space-between; padding: 1rem 0; }
+.brand { display: flex; align-items: center; gap: .6rem; font-weight: 800; letter-spacing: -.01em; text-decoration: none; }
+.brand img { width: 32px; height: 32px; border-radius: 8px; }
+.top nav { display: flex; gap: 1.25rem; align-items: center; font-size: .95rem; }
+.top nav a { text-decoration: none; color: var(--muted); min-height: 44px; display: inline-flex; align-items: center; }
+.top nav a:hover { color: var(--text); }
+.top nav a.btn { color: var(--on-accent); }
+@media (max-width: 34rem) { .top nav a:not(.btn) { display: none; } }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 1.4rem; border-radius: 999px; font: 700 1rem/1 inherit; text-decoration: none; border: 0; cursor: pointer; }
+.btn-accent { background: var(--accent); color: var(--on-accent); }
+.btn-ghost { background: transparent; color: var(--text); border: 2px solid var(--line); }
+.btn:hover { filter: brightness(1.06); }
+
+/* Hero: the violet block is the product's own hero, here as the page's first screen */
+.hero { background: var(--violet); color: var(--on-violet); border-radius: 28px; padding: clamp(1.5rem, 5vw, 4rem); margin-top: .5rem; display: grid; gap: 2rem; }
+.hero h1 { margin: 0; font-weight: 800; letter-spacing: -.035em; line-height: .98; font-size: clamp(2.6rem, 9vw, 6rem); max-width: 12ch; }
+.hero p.lead { margin: 0; font-size: clamp(1.1rem, 2.4vw, 1.4rem); max-width: 34rem; color: rgba(255,255,255,.88); }
+.hero .ctas { display: flex; flex-wrap: wrap; gap: .75rem; }
+.hero .btn-ghost { color: #fff; border-color: rgba(255,255,255,.5); }
+
+.player { display: grid; gap: .9rem; background: rgba(0,0,0,.22); border-radius: 20px; padding: 1.1rem; }
+.player-row { display: flex; align-items: center; gap: 1rem; }
+.play { flex: none; width: 64px; height: 64px; border-radius: 50%; border: 0; background: #fff; color: var(--violet); display: grid; place-items: center; cursor: pointer; }
+.play svg { width: 26px; height: 26px; fill: currentColor; }
+.player-meta { display: grid; gap: .1rem; }
+.player-meta strong { font-size: 1.05rem; }
+.player-meta span { font-size: .9rem; color: rgba(255,255,255,.8); font-variant-numeric: tabular-nums; }
+.wave { display: flex; align-items: center; gap: 2px; height: 48px; cursor: pointer; touch-action: none; }
+.wave i { flex: 1; min-width: 2px; border-radius: 2px; background: rgba(255,255,255,.3); }
+.wave i.on { background: #fff; }
+.speed { margin-left: auto; min-width: 56px; min-height: 44px; border-radius: 999px; border: 2px solid rgba(255,255,255,.5); background: transparent; color: #fff; font: 700 .95rem/1 inherit; cursor: pointer; }
+.caption { margin: 0; font-size: .85rem; color: rgba(255,255,255,.75); }
+
+section { padding: clamp(2.5rem, 7vw, 5rem) 0 0; }
+h2 { margin: 0 0 .5rem; font-size: clamp(1.8rem, 4.5vw, 3rem); line-height: 1.05; letter-spacing: -.025em; font-weight: 800; }
+.sub { margin: 0 0 1.75rem; color: var(--muted); max-width: 40rem; }
+
+/* Ranking demo */
+.demo { display: grid; gap: 1.5rem; }
+@media (min-width: 52rem) { .demo { grid-template-columns: 22rem 1fr; align-items: start; } }
+.prompt-box { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 1.1rem; }
+.prompt-box label { display: block; font-weight: 700; margin-bottom: .5rem; }
+.prompt-box textarea { width: 100%; min-height: 7rem; resize: vertical; background: var(--ground); color: var(--text); border: 2px solid var(--line); border-radius: 12px; padding: .7rem; font: inherit; }
+.chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
+.chip { min-height: 44px; padding: 0 1rem; border-radius: 999px; border: 2px solid var(--line); background: transparent; color: var(--text); font: 600 .9rem/1 inherit; cursor: pointer; }
+.chip[aria-pressed="true"] { border-color: var(--accent-text); color: var(--accent-text); }
+.hint { font-size: .85rem; color: var(--muted); margin: .75rem 0 0; }
+
+.notes { display: grid; gap: .75rem; }
+.note { display: grid; grid-template-columns: 3rem 1fr; gap: .75rem; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: .9rem; position: relative; transition: transform .35s ease, opacity .35s ease; }
+@media (prefers-reduced-motion: reduce) { .note { transition: none; } }
+.note.top::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 4px; border-radius: 4px; background: var(--accent); }
+.av { width: 3rem; height: 3rem; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: #fff; }
+.who { display: flex; gap: .4rem; align-items: baseline; flex-wrap: wrap; }
+.who b { font-weight: 700; } .who span { color: var(--muted); font-size: .9rem; }
+.note p { margin: .15rem 0 .5rem; }
+.score { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: wrap; font-size: .92rem; }
+.pill { background: var(--accent); color: var(--on-accent); font-weight: 800; border-radius: 999px; padding: .15rem .65rem; font-variant-numeric: tabular-nums; }
+.reason { color: var(--accent-text); font-weight: 600; }
+.reason.none { color: var(--muted); font-weight: 400; }
+
+/* Pillars */
+.cols { display: grid; gap: 1rem; }
+@media (min-width: 52rem) { .cols { grid-template-columns: repeat(3, 1fr); } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 1.25rem; }
+.card h3 { margin: 0 0 .4rem; font-size: 1.2rem; letter-spacing: -.01em; }
+.card p { margin: 0; color: var(--muted); }
+
+/* Pricing */
+.prices { display: grid; gap: 1rem; }
+@media (min-width: 52rem) { .prices { grid-template-columns: 1fr 1fr; } }
+.price { border-radius: 24px; padding: 1.5rem; border: 2px solid var(--line); background: var(--surface); }
+.price.paid { border-color: var(--accent-text); }
+.price h3 { margin: 0; font-size: 1.3rem; }
+.big { font-size: clamp(2rem, 6vw, 3.2rem); font-weight: 800; letter-spacing: -.03em; line-height: 1.05; margin: .5rem 0; }
+.price ul { padding-left: 1.1rem; margin: .75rem 0 0; color: var(--muted); }
+.price li { margin: .3rem 0; }
+.fine { color: var(--muted); font-size: .92rem; margin-top: 1rem; }
+
+.final { margin-top: clamp(2.5rem, 7vw, 5rem); text-align: center; padding: clamp(2rem, 6vw, 4rem) 1rem; border-radius: 28px; background: var(--violet); color: #fff; }
+.final h2 { margin-bottom: 1rem; }
+.final .btn-accent { min-height: 56px; font-size: 1.1rem; }
+
+footer { padding: 2.5rem 0 3rem; color: var(--muted); font-size: .92rem; display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; justify-content: space-between; }
+footer a { text-decoration-color: var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="./"><img src="assets/icon-192.png" alt="" width="32" height="32"> nalgorithm</a>
+    <nav aria-label="Main">
+      <a href="#how">How it ranks</a>
+      <a href="#price">Pricing</a>
+      <a class="btn btn-accent" href="app/">Open the app</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <h1>Hear what mattered on Nostr.</h1>
+      <p class="lead">GM! I read the people you follow, score every post against what you told me you care about, and read you the best of it in a short voice digest each morning. I show you why each post made the cut.</p>
+      <div class="ctas">
+        <a class="btn btn-accent" href="app/">Open the app and try it</a>
+        <a class="btn btn-ghost" href="#price">See what it costs</a>
+      </div>
+
+      <div class="player" role="group" aria-label="Sample digest player">
+        <div class="player-row">
+          <button class="play" id="play" aria-label="Play the sample digest" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true" id="play-icon"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <div class="player-meta"><strong>A sample morning digest</strong><span><span id="time">0:00</span> / <span id="dur">0:23</span></span></div>
+          <button class="speed" id="speed" type="button" aria-label="Playback speed">1×</button>
+        </div>
+        <div class="wave" id="wave" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0"></div>
+        <p class="caption">Voice: Kokoro “Bella”. Sample text, real voice. It plays only when you press play.</p>
+      </div>
+    </div>
+
+    <section id="how" aria-labelledby="how-h">
+      <h2 id="how-h">Your words are the ranking rule.</h2>
+      <p class="sub">Write what you care about in plain language. Try it: change the prompt and watch these sample notes reorder. This demo matches words so you can see the idea; the app uses a language model that reads each post.</p>
+      <div class="demo">
+        <div class="prompt-box">
+          <label for="prompt">Your prompt</label>
+          <textarea id="prompt">Bitcoin infrastructure, privacy tech, new releases. Not price talk, ads or GM.</textarea>
+          <div class="chips" role="group" aria-label="Quick topics">
+            <button class="chip" type="button" data-add="relays">+ relays</button>
+            <button class="chip" type="button" data-add="cooking">+ cooking</button>
+            <button class="chip" type="button" data-add="price talk">+ price talk</button>
+          </div>
+          <p class="hint">Each score comes with a one-line reason. Nothing is optimised for engagement.</p>
+        </div>
+        <div class="notes" id="notes" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="why-h">
+      <h2 id="why-h">Two ways in, one product.</h2>
+      <p class="sub">Listen first, then skim. Everything in the digest links back to the original notes, like show notes for a podcast.</p>
+      <div class="cols">
+        <div class="card"><h3>A digest you can read back</h3><p>Every morning a short spoken summary arrives in any Nostr client as a direct message, with the audio and the text. Open the app to see each note it was built from.</p></div>
+        <div class="card"><h3>Reasons, not vibes</h3><p>Each post gets a score and a sentence saying why. If a score feels wrong, fix your prompt and the feed changes.</p></div>
+        <div class="card"><h3>Yours to run</h3><p>Open source under the MIT licence. Bring your own model key and everything runs in your browser, free. The hosted service never replaces that.</p></div>
+      </div>
+    </section>
+
+    <section id="price" aria-labelledby="price-h">
+      <h2 id="price-h">Try it free. Pay in sats if you stay.</h2>
+      <p class="sub">Your Nostr key is your account. No email, no password.</p>
+      <div class="prices">
+        <div class="price paid">
+          <h3>Hosted</h3>
+          <div class="big">3 days free</div>
+          <p>then 10,000 sats per 30 days</p>
+          <ul>
+            <li>No API key: the server does the ranking and voices your digest.</li>
+            <li>Pay any amount over Lightning, credited pro rata: 5,000 sats is 15 days, minimum 1,000.</li>
+            <li>Pay during your trial and the unused days are kept.</li>
+            <li>A bundle covering all of the author's Nostr apps is 25,000 sats.</li>
+          </ul>
+          <p style="margin-top:1.25rem"><a class="btn btn-accent" href="app/">Start the free trial</a></p>
+        </div>
+        <div class="price">
+          <h3>Bring your own key</h3>
+          <div class="big">Free</div>
+          <p>forever, unchanged</p>
+          <ul>
+            <li>Works with Venice, OpenRouter, Ollama or any OpenAI-compatible endpoint.</li>
+            <li>Your key stays in your browser. No server of ours is in the path.</li>
+            <li>Same screens, same digest and show notes.</li>
+          </ul>
+          <p style="margin-top:1.25rem"><a class="btn btn-ghost" href="app/">Use my own key</a></p>
+        </div>
+      </div>
+      <p class="fine">If billing is ever unreachable, the free features keep working.</p>
+    </section>
+
+    <div class="final">
+      <h2>Press play tomorrow morning.</h2>
+      <a class="btn btn-accent" href="app/">Open the app</a>
+    </div>
+  </main>
+
+  <footer>
+    <span>nalgorithm, open source (MIT)</span>
+    <span><a href="https://github.com/jooray/nalgorithm">Source code</a></span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  // ---- sample player: no sound until the visitor presses play ----
+  var audio = new Audio(); audio.preload = 'none'; audio.src = 'assets/sample-digest.mp3'
+  var play = document.getElementById('play'), icon = document.getElementById('play-icon')
+  var wave = document.getElementById('wave'), timeEl = document.getElementById('time'), durEl = document.getElementById('dur')
+  var speedBtn = document.getElementById('speed')
+  var speeds = [0.75, 1, 1.25, 1.5, 1.75, 2], si = 1
+  var N = 64, bars = []
+  for (var i = 0; i < N; i++) { var b = document.createElement('i'); b.style.height = (22 + ((i * 37 + (i * i) % 29) % 78)) + '%'; wave.appendChild(b); bars.push(b) }
+  function fmt(s) { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') }
+  function paint() {
+    var d = audio.duration || 23, p = (audio.currentTime || 0) / d
+    bars.forEach(function (b, i) { b.className = i / N < p ? 'on' : '' })
+    timeEl.textContent = fmt(audio.currentTime || 0)
+    wave.setAttribute('aria-valuenow', String(Math.round(p * 100)))
+  }
+  audio.addEventListener('loadedmetadata', function () { durEl.textContent = fmt(audio.duration) })
+  audio.addEventListener('timeupdate', paint)
+  audio.addEventListener('ended', function () { icon.innerHTML = '<path d="M8 5v14l11-7z"/>'; play.setAttribute('aria-label', 'Play the sample digest') })
+  play.addEventListener('click', function () {
+    if (audio.paused) { audio.playbackRate = speeds[si]; audio.play(); icon.innerHTML = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'; play.setAttribute('aria-label', 'Pause') }
+    else { audio.pause(); icon.innerHTML = '<path d="M8 5v14l11-7z"/>'; play.setAttribute('aria-label', 'Play the sample digest') }
+  })
+  speedBtn.addEventListener('click', function () { si = (si + 1) % speeds.length; audio.playbackRate = speeds[si]; speedBtn.textContent = speeds[si] + '×' })
+  function seek(e) { var r = wave.getBoundingClientRect(), p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); if (audio.duration) audio.currentTime = p * audio.duration; paint() }
+  var drag = false
+  wave.addEventListener('pointerdown', function (e) { drag = true; wave.setPointerCapture(e.pointerId); seek(e) })
+  wave.addEventListener('pointermove', function (e) { if (drag) seek(e) })
+  wave.addEventListener('pointerup', function () { drag = false })
+  wave.addEventListener('keydown', function (e) {
+    if (!audio.duration) return
+    if (e.key === 'ArrowRight') audio.currentTime = Math.min(audio.duration, audio.currentTime + 5)
+    if (e.key === 'ArrowLeft') audio.currentTime = Math.max(0, audio.currentTime - 5)
+  })
+  paint()
+
+  // ---- ranking demo: illustrative word matching, stated as such on the page ----
+  var NOTES = [
+    { n: 'karel', c: '#6B3DF5', t: 'The wallet now recovers stuck payments on restart. No more manual channel pokes.', k: ['bitcoin', 'infrastructure', 'wallet', 'payments', 'lightning', 'channel'] },
+    { n: 'mira', c: '#B5470A', t: 'Wrote up how we cut relay sync from 40 s to 6 s.', k: ['relays', 'relay', 'infrastructure', 'sync', 'sovereign'] },
+    { n: 'jan', c: '#0F7B6C', t: 'Reproducible builds for the signer landed in 0.9.', k: ['privacy', 'release', 'releases', 'signer', 'builds'] },
+    { n: 'eva', c: '#8A2BB0', t: 'Sourdough again. The trick is a hotter oven and patience.', k: ['cooking', 'sourdough', 'bread', 'food'] },
+    { n: 'tom', c: '#3F5FBF', t: 'Price is pumping again, here is my chart for this week.', k: ['price', 'chart', 'pumping', 'trading'] },
+    { n: 'zoe', c: '#B0245E', t: 'GM everyone! Coffee first, then sats.', k: ['gm', 'coffee'] }
+  ]
+  var box = document.getElementById('notes'), ta = document.getElementById('prompt')
+  function words(s) { return s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean) }
+  function scoreAll() {
+    var text = ta.value.toLowerCase(), parts = text.split(/\bnot\b|\bno\b|\bskip\b|\bwithout\b/)
+    var want = words(parts[0]), avoid = words(parts.slice(1).join(' '))
+    return NOTES.map(function (x) {
+      var hit = x.k.filter(function (k) { return want.some(function (w) { return w === k || (w.length > 3 && k.indexOf(w) === 0) }) })
+      var bad = x.k.filter(function (k) { return avoid.some(function (w) { return w === k || (w.length > 3 && k.indexOf(w) === 0) }) })
+      var s = 3 + hit.length * 2.6 - bad.length * 3
+      s = Math.max(0.5, Math.min(9.8, s + (x.n.charCodeAt(0) % 5) / 10))
+      return { x: x, s: s, reason: bad.length ? 'Skipped: you said not “' + bad[0] + '”' : hit.length ? 'Matches: ' + hit[0] : '' }
+    }).sort(function (a, b) { return b.s - a.s })
+  }
+  function render() {
+    var list = scoreAll(); box.innerHTML = ''
+    list.forEach(function (r, i) {
+      var d = document.createElement('article'); d.className = 'note' + (i === 0 ? ' top' : '')
+      var av = document.createElement('div'); av.className = 'av'; av.style.background = r.x.c; av.textContent = r.x.n[0].toUpperCase(); av.setAttribute('aria-hidden', 'true')
+      var body = document.createElement('div')
+      var who = document.createElement('div'); who.className = 'who'; who.innerHTML = '<b></b><span></span>'; who.firstChild.textContent = r.x.n; who.lastChild.textContent = '@' + r.x.n
+      var p = document.createElement('p'); p.textContent = r.x.t
+      var sc = document.createElement('div'); sc.className = 'score'
+      var pill = document.createElement('span'); pill.className = 'pill'; pill.textContent = r.s.toFixed(1)
+      var why = document.createElement('span'); why.className = 'reason' + (r.reason ? '' : ' none'); why.textContent = r.reason || 'No match for your prompt'
+      sc.appendChild(pill); sc.appendChild(why)
+      body.appendChild(who); body.appendChild(p); body.appendChild(sc)
+      d.appendChild(av); d.appendChild(body); box.appendChild(d)
+    })
+  }
+  ta.addEventListener('input', render)
+  document.querySelectorAll('.chip').forEach(function (c) {
+    c.addEventListener('click', function () {
+      var add = c.getAttribute('data-add'), neg = add === 'price talk'
+      var v = ta.value.replace(/\s+$/, ''), i = v.search(/\bnot\b/i)
+      if (neg) ta.value = v + (i < 0 ? ' Not ' + add + '.' : ' ' + add + '.')
+      else ta.value = i < 0 ? v + ' ' + add + '.' : v.slice(0, i).replace(/\s+$/, '') + ', ' + add + '. ' + v.slice(i)
+      render()
+    })
+  })
+  render()
+})()
+</script>
+</body>
+</html>
