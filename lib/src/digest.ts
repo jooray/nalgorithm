@@ -51,6 +51,17 @@ SPOKEN OUTPUT (this will be read aloud by a text-to-speech engine):
 - Use short paragraphs separated by blank lines as natural pause points.`
 
 /**
+ * Faithfulness rules appended to every digest request. Cheaper models drift without
+ * them: they drop posts, turn an author's claim into the narrator's own, and add
+ * opinions on contested matters. Measured on a real feed, they made the cheap models
+ * (and Sonnet) attribute claims and cover every author.
+ */
+export const FAITHFULNESS_RULES = `Additional rules: give every post in the list at least one sentence, most important first, and group related ones. Report what people said and attribute it to them; do not add opinions of your own on contested political or legal matters, and do not state anything the posts do not say.`
+
+/** Closing line for a spoken digest, so the listener knows it is over. */
+export const SPOKEN_SIGN_OFF = `End with the sentence: That's your digest.`
+
+/**
  * Compose the final system prompt.
  *
  * The humanizer rules are always appended, whether the caller supplied a custom
@@ -122,6 +133,8 @@ export interface DigestOptions {
   topN?: number
   /** Append the text-to-speech instructions (default: false). */
   forSpeech?: boolean
+  /** Append the faithfulness rules (default: true). */
+  faithfulness?: boolean
   /** Sampling temperature (default: 0.5). */
   temperature?: number
   /**
@@ -178,7 +191,7 @@ ${options.learnedPrompt ? `\n=== Learned Preferences ===\n${options.learnedPromp
 
 === Top ${topPosts.length} Posts (ranked by relevance) ===
 
-${postsBlock}`
+${postsBlock}${options.faithfulness === false ? '' : `\n\n${FAITHFULNESS_RULES}${options.forSpeech ? ` ${SPOKEN_SIGN_OFF}` : ''}`}`
 
   return [
     { role: 'system', content: buildDigestSystemPrompt(options.systemPrompt, options.forSpeech) },

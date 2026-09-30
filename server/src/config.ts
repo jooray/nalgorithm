@@ -39,6 +39,8 @@ export interface ServerConfig {
     apiKey: string
     scoringModel: string
     digestModel: string
+    /** Tried once if the digest model fails. */
+    digestFallbackModel: string
     humanizerModel: string
     learnerModel: string
     ttsModel: string
@@ -99,7 +101,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       apiBaseUrl: env.VENICE_API_BASE_URL ?? 'https://api.venice.ai/api/v1',
       apiKey: need('VENICE_API_KEY'),
       scoringModel: env.SCORING_MODEL ?? 'jev-latest',
-      digestModel: env.DIGEST_MODEL ?? 'claude-sonnet-5-5',
+      digestModel: env.DIGEST_MODEL ?? 'deepseek-v4-1-flash',
+      digestFallbackModel: env.DIGEST_FALLBACK_MODEL ?? 'claude-sonnet-5-5',
       humanizerModel: env.HUMANIZER_MODEL ?? 'deepseek-v4-1-flash',
       learnerModel: env.LEARNER_MODEL ?? 'deepseek-v4-1-flash',
       ttsModel: env.TTS_MODEL ?? 'tts-kokoro',

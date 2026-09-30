@@ -27,7 +27,7 @@ function rig(db, over = {}) {
   const calls = { feed: 0, write: [], synth: [], upload: [], dm: [], consume: [], trials: 0 }
   const deps = {
     db, log: silent, now: () => T0,
-    models: { apiBaseUrl: 'https://llm.test', apiKey: 'k', digestModel: 'dm', humanizerModel: 'hm', ttsModel: 'tm', ttsVoice: 'af_sky' },
+    models: { apiBaseUrl: 'https://llm.test', apiKey: 'k', digestModel: 'dm', digestFallbackModel: 'fm', humanizerModel: 'hm', ttsModel: 'tm', ttsVoice: 'af_sky' },
     billing: {
       async entitlement() { return over.state ?? { state: 'active', until: T0 + 86400 * 5 } },
       async startTrial() { calls.trials++; return { state: 'trial', until: T0 + 3 * 86400 } },
@@ -55,6 +55,7 @@ test('happy path: speech-tuned digest with humanizer, audio uploaded, DM has the
   assert.equal(w.digest.forSpeech, true, 'speech prompt on')
   assert.equal(w.humanizer.llm.model, 'hm', 'humanizer on')
   assert.equal(w.primary.llm.model, 'dm')
+  assert.equal(w.fallback.llm.model, 'fm', 'a second model is tried if the first fails')
   assert.equal(w.digest.posts.length, 2, 'top N from the user setting')
   assert.equal(w.digest.userPrompt, 'bitcoin and nostr')
   assert.equal(w.digest.learnedPrompt, 'learned')

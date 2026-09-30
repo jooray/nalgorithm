@@ -32,6 +32,8 @@ export {
   generateDigest,
   buildDigestMessages,
   digestSourceNotes,
+  FAITHFULNESS_RULES,
+  SPOKEN_SIGN_OFF,
   DIGEST_NOTE_MAX_CHARS,
   buildDigestSystemPrompt,
   formatPostForDigest,

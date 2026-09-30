@@ -31,6 +31,7 @@ export interface ModelConfig {
   apiBaseUrl: string
   apiKey: string
   digestModel: string
+  digestFallbackModel?: string
   humanizerModel: string
   ttsModel: string
   ttsVoice: string
@@ -138,6 +139,7 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
     const llm = { apiBaseUrl: deps.models.apiBaseUrl, apiKey: deps.models.apiKey }
     text = await write({
       primary: { llm: { ...llm, model: deps.models.digestModel }, temperature: 0.7 },
+      fallback: deps.models.digestFallbackModel ? { llm: { ...llm, model: deps.models.digestFallbackModel }, temperature: 0.7 } : undefined,
       humanizer: { llm: { ...llm, model: deps.models.humanizerModel } },
       digest: {
         posts: top,

@@ -66,6 +66,7 @@ if (config.bot) {
       apiBaseUrl: config.venice.apiBaseUrl,
       apiKey: config.venice.apiKey,
       digestModel: config.venice.digestModel,
+      digestFallbackModel: config.venice.digestFallbackModel,
       humanizerModel: config.venice.humanizerModel,
       ttsModel: config.venice.ttsModel,
       ttsVoice: config.venice.ttsVoice,
