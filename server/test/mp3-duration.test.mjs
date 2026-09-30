@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mp3DurationSeconds } from '../dist/mp3-duration.js'
 import { concat, frame, id3v2, mp3 } from './mp3-fixture.mjs'
 
@@ -79,8 +79,10 @@ test('no MP3 in the bytes gives null: empty, random text, a WAV header, free for
   assert.equal(mp3DurationSeconds(concat(layer2, layer2)), null, 'Layer II is not read')
 })
 
-test('the real sample digest is 56.475 seconds (ffprobe)', () => {
-  const sample = readFileSync(new URL('../../landing/assets/sample-digest.mp3', import.meta.url))
+const SAMPLE = new URL('../../landing/assets/sample-digest.mp3', import.meta.url)
+// The landing page assets are not shipped to the server host, where this suite also runs.
+test('the real sample digest is 56.475 seconds (ffprobe)', { skip: !existsSync(SAMPLE) }, () => {
+  const sample = readFileSync(SAMPLE)
   const s = mp3DurationSeconds(new Uint8Array(sample))
   assert.ok(s >= 56.4 && s <= 56.6, `got ${s}`)
 })
