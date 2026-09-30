@@ -48,6 +48,8 @@ export interface RenderOptions {
   clientPreset?: ClientPreset
   /** Relays to hint in copied nprofiles: the ones this app reads from. */
   relayHints?: string[]
+  /** Hosted mode only: add link cards for the URLs in `content` to `card`. */
+  linkPreviews?: (content: string, card: HTMLElement) => void
 }
 
 /** Link options derived from the reader's settings; shared by both modes. */
@@ -233,6 +235,7 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
   const content = el('div', 'post-content')
   content.appendChild(renderContent(post.content, options))
   card.appendChild(content)
+  options.linkPreviews?.(post.content, card)
 
   const media = extractMedia(post.content, post.rawEvent?.tags ?? [])
   if (media.length > 0) {
@@ -455,6 +458,7 @@ function renderEmbeddedPost(post: EmbeddedPost, options: RenderOptions): HTMLEle
   const content = el('div', 'embedded-content')
   content.appendChild(renderContent(post.content, options))
   container.appendChild(content)
+  options.linkPreviews?.(post.content, container)
 
   const media = extractMedia(post.content, [])
   if (media.length > 0) {

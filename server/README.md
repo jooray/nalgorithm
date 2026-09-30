@@ -12,7 +12,7 @@ Storage: SQLite (`DATABASE_URL=sqlite:./nalgorithm-server.db`, the default, or a
 
 Optional DM delivery (all off when `BOT_NSEC` is unset): `BOT_NSEC` (the service account's nsec or 64-hex secret key), `DM_RELAYS` (relays the bot listens on and publishes self-copies to; the ones in its DM inbox list; relays that ask for a NIP-42 login are answered as the bot), `DM_FALLBACK_RELAYS` (where to send when a recipient has published no relay list), `BLOSSOM_SERVERS` (comma separated, tried in order; default `https://blossom.primal.net`), `WEB_URL` (public web app URL used in DM replies).
 
-Endpoints: `POST /auth/challenge`, `POST /auth/login` (`{event}`, a signed kind 27235 with tags `u`, `method=POST`, `nonce`), `POST /auth/logout`, `GET /me`, `GET|PUT /settings`, `GET|PUT /schedule` (`enabled`, `time` as `HH:MM`, `tz`, `voice`, `dmFormat`), `GET /digests`, `POST /digest/now`, `GET /feed`, `POST /billing/checkout`. Writes require `Content-Type: application/json`. Sessions are an HttpOnly SameSite=Strict cookie or a Bearer token.
+Endpoints: `POST /auth/challenge`, `POST /auth/login` (`{event}`, a signed kind 27235 with tags `u`, `method=POST`, `nonce`), `POST /auth/logout`, `GET /me`, `GET|PUT /settings`, `GET|PUT /schedule` (`enabled`, `time` as `HH:MM`, `tz`, `voice`, `dmFormat`), `GET /digests`, `POST /digest/now`, `GET /feed`, `GET /preview`, `GET /preview/image`, `POST /billing/checkout`. Writes require `Content-Type: application/json`. Sessions are an HttpOnly SameSite=Strict cookie or a Bearer token.
 
 Entitlement: a never-seen npub starts its 3-day trial on its first `/feed`, not on login. Expired gets 402, unknown billing state gets 503, the daily cap 429. Free endpoints keep working during a billing outage.
 
@@ -35,3 +35,23 @@ Users control everything by DM to the bot, or with `/schedule` and `/settings` f
 | `delete my data` (then `... confirm`) | erase everything stored about the user |
 
 Replies use the format the user last wrote in unless they chose one; a message is never sent in both. Inbound sender identity is only the verified seal signature of a NIP-17 message (or the author of a kind 4 event).
+
+## Link previews
+
+A post that contains a link can show a card with the page's title, description and image. This is a hosted-mode feature, and the reason is CORS: a browser will not let a script read another site's page, so a web app with no server of its own cannot build the card. This server can. Bring-your-own-key mode has no server of ours, so it keeps showing plain links, and it sends those URLs to no third-party service. Readers can turn previews off in the hosted settings (`linkPreviews`, on by default).
+
+`GET /preview?url=<encoded url>` (session required) answers `{url, finalUrl, title, description, siteName, image, type}`, or `{unavailable: true}` when there is nothing to show. It reads OpenGraph tags, then Twitter card tags, then `<title>` and the meta description, from the first 256 KB of the page. The parser is a small linear scan that never builds a DOM or runs anything; entities are decoded, control characters removed, title cut at 200 and description at 400 characters. The client shows all of it as text.
+
+Limits: 60 previews per minute per user (429 above that), at most 4 pages fetched at once with a queue of 50 behind them (503 beyond), the same URL fetched once however many readers ask. Image, video and audio URLs and the app's own host are skipped. Results are cached in the `link_previews` table, keyed by a SHA-256 of the normalised URL (fragment removed) and holding no user: 7 days for a page, 1 hour for a failure. The daily prune removes rows older than 7 days.
+
+Fetch rules (`src/preview/ssrf.ts`), applied to the URL and to every redirect:
+
+- http and https only, no credentials in the URL, ports 80 and 443 only. The URL parser first turns spellings such as `2130706433`, `0x7f.1` and `0177.0.0.1` into dotted form, so they are judged as the addresses they are.
+- The hostname is resolved by the server, and the request is refused if any answer is loopback, private (10/8, 172.16/12, 192.168/16), link-local (169.254/16, which includes cloud metadata), CGNAT (100.64/10), unspecified, multicast, broadcast or otherwise reserved. For IPv6 that covers `::1`, `::`, unique local, link-local, multicast, and IPv4-mapped, NAT64 and 6to4 forms of the blocked IPv4 ranges.
+- The connection is made to the vetted address itself (the socket's DNS lookup is pinned to it), so a DNS answer that changes after the check cannot swap the target. The Host header and TLS server name stay the hostname.
+- At most 3 redirects, each one vetted again, never from https to http, never to another scheme.
+- 5 seconds for everything, 1 MB of body (reading stops there), `text/html` or `application/xhtml+xml` only, fixed `User-Agent: nalgorithm-link-preview`, no cookies sent or kept, no compression.
+
+The resolver and the transport are parameters, so the tests run without a network. Allowing loopback (and other ports) exists only as an option of the fetcher that tests pass; nothing in the environment or configuration can turn it on.
+
+Images are not loaded from the third-party host by the reader's browser, which would tell that host who reads what. The card's `image` is a path, `preview/image?u=<image url>&s=<signature>`, and `GET /preview/image` fetches it for the reader under the same rules, with a 2 MB cap and only PNG, JPEG, WebP and GIF (never SVG). The type is taken from the file's first bytes, not from the response header. The signature is an HMAC of the image URL under a random secret that lives only in the server process, and only preview parsing produces one, so the endpoint cannot be used as an open proxy: a URL a caller made up has no valid signature and gets 404. After a restart the secret changes, so old paths stop working and the next preview issues new ones. Responses are `private, max-age=604800, immutable`, with `nosniff` and a locked-down CSP.

@@ -7,6 +7,8 @@ export interface UserSettings {
   hoursBack: number
   topN: number
   learnFromLikes: boolean
+  /** Show link cards under posts. The server fetches the pages, so this is the reader's choice. */
+  linkPreviews: boolean
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -14,6 +16,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   hoursBack: 24,
   topN: 15,
   learnFromLikes: true,
+  linkPreviews: true,
 }
 
 export const MAX_PROMPT_CHARS = 2000
@@ -25,7 +28,7 @@ export function applySettings(current: UserSettings, patch: unknown): UserSettin
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new SettingsError('settings must be an object')
   const p = patch as Record<string, unknown>
   const next = { ...current }
-  const allowed = new Set(['userPrompt', 'hoursBack', 'topN', 'learnFromLikes'])
+  const allowed = new Set(['userPrompt', 'hoursBack', 'topN', 'learnFromLikes', 'linkPreviews'])
   for (const key of Object.keys(p)) if (!allowed.has(key)) throw new SettingsError(`unknown setting: ${key}`)
 
   if (p.userPrompt !== undefined) {
@@ -46,6 +49,10 @@ export function applySettings(current: UserSettings, patch: unknown): UserSettin
   if (p.learnFromLikes !== undefined) {
     if (typeof p.learnFromLikes !== 'boolean') throw new SettingsError('learnFromLikes must be a boolean')
     next.learnFromLikes = p.learnFromLikes
+  }
+  if (p.linkPreviews !== undefined) {
+    if (typeof p.linkPreviews !== 'boolean') throw new SettingsError('linkPreviews must be a boolean')
+    next.linkPreviews = p.linkPreviews
   }
   return next
 }

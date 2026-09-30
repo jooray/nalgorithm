@@ -104,6 +104,8 @@ export interface HostedSettings {
   hoursBack: number
   topN: number
   learnFromLikes: boolean
+  /** Link cards under posts; the server fetches the pages. Absent from older servers, meaning on. */
+  linkPreviews?: boolean
 }
 
 /** The first problem with the settings, or null. Same limits the server enforces. */

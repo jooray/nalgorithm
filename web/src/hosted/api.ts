@@ -157,6 +157,18 @@ export function createCheckout(plan: PlanId, sats?: number): Promise<Charge> {
   return request<Charge>('POST', 'billing/checkout', sats === undefined ? { plan } : { plan, sats })
 }
 
+// ─── Link previews ───────────────────────────────────────────────────────────
+
+/** The server's answer for one URL, unchecked: read it with `readLinkCard`. */
+export function getPreview(url: string): Promise<unknown> {
+  return request<unknown>('GET', `preview?url=${encodeURIComponent(url)}`)
+}
+
+/** The address of a preview image path the server issued. */
+export function previewImageSrc(path: string): string {
+  return endpoint(path)
+}
+
 // ─── Daily digest ────────────────────────────────────────────────────────────
 
 export function getSchedule(): Promise<Schedule> {
