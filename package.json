@@ -4,14 +4,16 @@
   "workspaces": [
     "lib",
     "web",
-    "digest"
+    "digest",
+    "server"
   ],
   "scripts": {
     "build:lib": "npm run build -w lib",
     "build:web": "npm run build -w web",
     "build:digest": "npm run build -w digest",
-    "build": "npm run build:lib && npm run build:web && npm run build:digest",
+    "build": "npm run build:lib && npm run build:web && npm run build:digest && npm run build:server",
     "dev": "npm run dev -w web",
-    "digest": "npm run build:lib && npm run digest -w digest"
+    "digest": "npm run build:lib && npm run digest -w digest",
+    "build:server": "npm run build -w server"
   }
 }

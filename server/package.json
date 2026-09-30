@@ -1,0 +1,20 @@
+{
+  "name": "nalgorithm-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "test": "npm run build && node --test test/"
+  },
+  "dependencies": {
+    "nalgorithm": "*",
+    "nostr-tools": "^2.10.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "typescript": "^5.7.0"
+  }
+}
