@@ -11,8 +11,7 @@
  */
 
 import type { ProfileData, ScoredPost } from 'nalgorithm'
-import { renderFeed, aggregateBoosts } from '../render.js'
-import { resolveTemplate } from '../client-url.js'
+import { renderFeed, aggregateBoosts, clientRenderOptions } from '../render.js'
 import { loadSettings } from '../settings.js'
 import { openHostedLoginDialog } from '../login-ui.js'
 import { setStatus, setStatusLoading } from '../ui.js'
@@ -316,8 +315,7 @@ function renderResult(feed: FeedResponse): void {
   const display = aggregateBoosts(posts)
   renderFeed(display, $('#hosted-feed'), {
     profiles,
-    eventUrlTemplate: resolveTemplate(settings.clientPreset, settings.clientCustomUrl),
-    clientPreset: settings.clientPreset,
+    ...clientRenderOptions(settings),
   })
   setStatus(`Showing ${display.length} posts, ranked by relevance`)
 }

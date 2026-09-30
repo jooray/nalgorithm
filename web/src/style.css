@@ -1250,3 +1250,56 @@ body:not([data-signed-in="true"]) .needs-auth {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Identity: names, npubs and profile links */
+.author-link,
+.booster-link {
+  color: inherit;
+  text-decoration: none;
+}
+.author-link:hover,
+.booster-link:hover {
+  text-decoration: underline;
+}
+/* The full npub stays in the DOM (select and copy gets all of it); only the display is cut. */
+.npub-text {
+  display: inline-block;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  user-select: all;
+}
+.post-avatar > a,
+.embedded-avatar > a {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  text-decoration: none;
+}
+.boosted-by-more {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.boosted-by-rest.hidden {
+  display: none;
+}
+a.post-menu-item {
+  color: var(--text);
+  box-sizing: border-box;
+  text-decoration: none;
+}
+.post-menu-dropdown {
+  white-space: nowrap;
+}

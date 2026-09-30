@@ -2,75 +2,73 @@
  * Nalgorithm Web — Rich post rendering
  *
  * Layout per card:
- *   [profile pic] [display name] [type label]    [timestamp]
+ *   [profile pic] [author name or npub] [type label]    [timestamp]
+ *   [Boosted by a, b, c ...]
  *   [post content]
  *   [media]
- *   [embedded post for quotes/boosts]
+ *   [embedded post for quotes]
  *   [score bar — clickable to expand justification]
- *   [...] context menu (Copy Nevent, Copy URL)
+ *   [...] menu (copy npub / nprofile / nevent, open in client or app)
+ *
+ * Nothing here prints a hex key: a person is a profile name or their npub.
+ * All text goes in through textContent, never innerHTML.
  */
 
 import type { ScoredPost, EmbeddedPost, ProfileData } from 'nalgorithm'
 import * as nip19 from 'nostr-tools/nip19'
-import { buildEventUrl, clientLabel, type ClientPreset } from './client-url.js'
+import {
+  buildEventUrl,
+  buildProfileUrl,
+  clientLabel,
+  nostrUri,
+  resolveProfileTemplate,
+  resolveTemplate,
+  safeLink,
+  type ClientPreset,
+} from './client-url.js'
+import {
+  aggregateBoosts as foldBoosts,
+  authorLabel,
+  avatarInitial,
+  npubOf,
+  nprofileOf,
+  summarizeBoosters,
+  tokenizeContent,
+  type Folded,
+} from './identity.js'
+import type { AppSettings } from './settings.js'
 
 export interface RenderOptions {
   profiles?: Map<string, ProfileData>
   /** URL template for "open in client" — may contain {e} or be a prefix. */
   eventUrlTemplate?: string
+  /** Profile URL template — {npub}, {nprofile}, {pubkey}, or a prefix. */
+  profileUrlTemplate?: string
   /** Which preset is selected, for the menu label. */
   clientPreset?: ClientPreset
+  /** Relays to hint in copied nprofiles: the ones this app reads from. */
+  relayHints?: string[]
 }
 
-/**
- * A post as displayed. Plain boosts of the same original are collapsed into one
- * card, so `boostedBy` lists everyone who boosted it.
- */
-export interface DisplayPost extends ScoredPost {
-  boostedBy?: string[]
-}
-
-/**
- * Collapse plain boosts of the same post into a single entry.
- *
- * Kind-6 reposts carry no commentary, so five people boosting one note is five
- * identical cards. Quote posts are left alone — those have something to say.
- * The highest score wins, since the ranker sees each copy separately and we
- * want the best judgement of the underlying content.
- */
-export function aggregateBoosts(posts: ScoredPost[]): DisplayPost[] {
-  const out: DisplayPost[] = []
-  const byOriginal = new Map<string, DisplayPost>()
-
-  for (const post of posts) {
-    const originalId = post.type === 'boost' ? post.originalPost?.id : undefined
-    if (!originalId) {
-      out.push(post)
-      continue
-    }
-
-    const existing = byOriginal.get(originalId)
-    if (!existing) {
-      const entry: DisplayPost = { ...post, boostedBy: [post.author] }
-      byOriginal.set(originalId, entry)
-      out.push(entry)
-      continue
-    }
-
-    if (!existing.boostedBy!.includes(post.author)) {
-      existing.boostedBy!.push(post.author)
-    }
-    // Keep the most favourable score and its reasoning.
-    if (post.score > existing.score) {
-      existing.score = post.score
-      existing.justification = post.justification
-      existing.defaultScore = post.defaultScore
-    }
-    // Show the most recent boost time.
-    if (post.createdAt > existing.createdAt) existing.createdAt = post.createdAt
+/** Link options derived from the reader's settings; shared by both modes. */
+export function clientRenderOptions(
+  settings: Pick<AppSettings, 'clientPreset' | 'clientCustomUrl' | 'clientCustomProfileUrl'>,
+  relayHints: string[] = []
+): RenderOptions {
+  return {
+    eventUrlTemplate: resolveTemplate(settings.clientPreset, settings.clientCustomUrl),
+    profileUrlTemplate: resolveProfileTemplate(settings.clientPreset, settings.clientCustomProfileUrl),
+    clientPreset: settings.clientPreset,
+    relayHints,
   }
+}
 
-  return out
+/** A post as displayed: boosts are folded into the note, `boostedBy` lists the boosters. */
+export type DisplayPost = Folded<ScoredPost>
+
+/** See identity.ts for the folding and timestamp policy. */
+export function aggregateBoosts(posts: ScoredPost[]): DisplayPost[] {
+  return foldBoosts(posts)
 }
 
 /**
@@ -81,10 +79,12 @@ export function renderFeed(
   container: HTMLElement,
   options: RenderOptions = {}
 ): void {
-  container.innerHTML = ''
+  container.textContent = ''
 
   if (posts.length === 0) {
-    container.innerHTML = '<p class="feed-empty">No posts to display.</p>'
+    const empty = el('p', 'feed-empty')
+    empty.textContent = 'No posts to display.'
+    container.appendChild(empty)
     return
   }
 
@@ -92,6 +92,111 @@ export function renderFeed(
     container.appendChild(renderPostCard(post, options))
   }
 }
+
+// ─── People ──────────────────────────────────────────────────────────────────
+
+function profileHref(pubkey: string, options: RenderOptions): string {
+  const url = buildProfileUrl(options.profileUrlTemplate ?? '', {
+    npub: npubOf(pubkey),
+    nprofile: nprofileOf(pubkey, options.relayHints),
+    pubkey,
+  })
+  return safeLink(url) ?? '#'
+}
+
+/** The visible name: a profile name, or the complete npub in an ellipsised monospace element. */
+function nameNode(pubkey: string, options: RenderOptions, prefix = ''): Node {
+  const label = authorLabel(pubkey, options.profiles?.get(pubkey))
+  if (!label.isNpub) return document.createTextNode(prefix + label.text)
+  const frag = document.createDocumentFragment()
+  if (prefix) frag.appendChild(document.createTextNode(prefix))
+  const code = el('code', 'npub-text')
+  code.textContent = label.text
+  frag.appendChild(code)
+  return frag
+}
+
+/** A link to the person's profile in the reader's client. */
+function personLink(pubkey: string, options: RenderOptions, className: string, prefix = ''): HTMLAnchorElement {
+  const a = document.createElement('a')
+  a.className = className
+  a.href = profileHref(pubkey, options)
+  a.target = '_blank'
+  a.rel = 'noopener'
+  a.appendChild(nameNode(pubkey, options, prefix))
+  return a
+}
+
+/** Avatar (linked to the profile). Falls back to an initial from the name, else a neutral glyph. */
+function renderAvatar(pubkey: string, options: RenderOptions, className: string): HTMLElement {
+  const profile = options.profiles?.get(pubkey)
+  const container = el('div', className)
+  const link = document.createElement('a')
+  link.href = profileHref(pubkey, options)
+  link.target = '_blank'
+  link.rel = 'noopener'
+  link.tabIndex = -1 // the name next to it is the keyboard target
+  link.setAttribute('aria-hidden', 'true')
+
+  const showFallback = (): void => {
+    link.textContent = avatarInitial(profile)
+    container.classList.add('post-avatar-fallback')
+  }
+
+  if (profile?.picture && safeLink(profile.picture)) {
+    const img = document.createElement('img')
+    img.src = profile.picture
+    img.alt = ''
+    img.loading = 'lazy'
+    img.onerror = () => {
+      img.remove()
+      showFallback()
+    }
+    link.appendChild(img)
+  } else {
+    showFallback()
+  }
+  container.appendChild(link)
+  return container
+}
+
+/** "Boosted by a, b, c and d", each name a profile link; long lists expand on demand. */
+function renderBoostedBy(pubkeys: string[], options: RenderOptions): HTMLElement {
+  const line = el('div', 'boosted-by')
+  const { shown, rest } = summarizeBoosters(pubkeys)
+  line.appendChild(document.createTextNode('Boosted by '))
+
+  const names = (keys: string[], into: Node, closeWithAnd: boolean): void => {
+    keys.forEach((pk, i) => {
+      if (i > 0) into.appendChild(document.createTextNode(closeWithAnd && i === keys.length - 1 ? ' and ' : ', '))
+      into.appendChild(personLink(pk, options, 'booster-link'))
+    })
+  }
+
+  if (rest.length === 0) {
+    names(shown, line, true)
+    return line
+  }
+
+  names(shown, line, false)
+  line.appendChild(document.createTextNode(' '))
+  const more = el('button', 'boosted-by-more') as HTMLButtonElement
+  more.type = 'button'
+  more.textContent = `and ${rest.length} more`
+  more.setAttribute('aria-expanded', 'false')
+  const extra = el('span', 'boosted-by-rest hidden')
+  names(rest, extra, true)
+  more.addEventListener('click', () => {
+    const open = extra.classList.toggle('hidden') === false
+    more.setAttribute('aria-expanded', String(open))
+    more.textContent = open ? 'fewer' : `and ${rest.length} more`
+  })
+  line.appendChild(more)
+  line.appendChild(extra)
+  return line
+}
+
+// ─── Cards ───────────────────────────────────────────────────────────────────
 
 /**
  * Render a single post card.
@@ -101,32 +206,11 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
 
   // ── Header: profile pic + name + type label + timestamp ──
   const header = el('div', 'post-header')
+  header.appendChild(renderAvatar(post.author, options, 'post-avatar'))
 
-  // Profile picture
-  const profile = options.profiles?.get(post.author)
-  const avatarContainer = el('div', 'post-avatar')
-  if (profile?.picture) {
-    const img = document.createElement('img')
-    img.src = profile.picture
-    img.alt = profile.name ?? 'avatar'
-    img.loading = 'lazy'
-    img.onerror = () => {
-      img.style.display = 'none'
-      avatarContainer.textContent = post.author.slice(0, 2)
-      avatarContainer.classList.add('post-avatar-fallback')
-    }
-    avatarContainer.appendChild(img)
-  } else {
-    avatarContainer.textContent = post.author.slice(0, 2)
-    avatarContainer.classList.add('post-avatar-fallback')
-  }
-  header.appendChild(avatarContainer)
-
-  // Name + type
   const meta = el('div', 'post-meta')
   const author = el('div', 'post-author')
-  author.textContent = profile?.name ?? formatAuthor(post.author)
-  author.title = post.author
+  author.appendChild(personLink(post.author, options, 'author-link'))
   meta.appendChild(author)
 
   if (post.type !== 'original') {
@@ -134,47 +218,34 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
     typeLabel.textContent = post.type === 'boost' ? 'Boosted' : 'Quoted'
     meta.appendChild(typeLabel)
   }
-
   header.appendChild(meta)
 
-  // Timestamp (right side)
   const time = el('span', 'post-time')
   time.textContent = formatTime(post.createdAt)
   header.appendChild(time)
-
   card.appendChild(header)
 
+  if (post.boostedBy && post.boostedBy.length > 0) {
+    card.appendChild(renderBoostedBy(post.boostedBy, options))
+  }
+
   // ── Content ──
-  if (post.type === 'boost' && post.originalPost) {
-    // When several people boosted the same note, name them all on one line
-    // rather than repeating the note once per booster.
-    if (post.boostedBy && post.boostedBy.length > 1) {
-      const line = el('div', 'boosted-by')
-      line.textContent = `${formatBoosterList(post.boostedBy, options.profiles)} boosted it`
-      card.appendChild(line)
-    }
-    const embedded = renderEmbeddedPost(post.originalPost, options)
-    card.appendChild(embedded)
-  } else {
-    const content = el('div', 'post-content')
-    content.innerHTML = formatContent(post.content, options)
-    card.appendChild(content)
+  const content = el('div', 'post-content')
+  content.appendChild(renderContent(post.content, options))
+  card.appendChild(content)
 
-    // Media
-    const media = extractMedia(post.content, post.rawEvent?.tags ?? [])
-    if (media.length > 0) {
-      const mediaContainer = el('div', 'post-media')
-      for (const m of media) {
-        mediaContainer.appendChild(renderMedia(m))
-      }
-      card.appendChild(mediaContainer)
-    }
+  const media = extractMedia(post.content, post.rawEvent?.tags ?? [])
+  if (media.length > 0) {
+    const mediaContainer = el('div', 'post-media')
+    for (const m of media) mediaContainer.appendChild(renderMedia(m))
+    card.appendChild(mediaContainer)
+  }
 
-    // For quote posts, show the embedded post
-    if (post.type === 'quote' && post.quotedPost) {
-      const embedded = renderEmbeddedPost(post.quotedPost, options)
-      card.appendChild(embedded)
-    }
+  if (post.type === 'quote' && post.quotedPost) {
+    card.appendChild(renderEmbeddedPost(post.quotedPost, options))
+  } else if (post.type === 'boost' && post.originalPost) {
+    // Only reached for a boost that was not folded (kept for safety).
+    card.appendChild(renderEmbeddedPost(post.originalPost, options))
   }
 
   // ── Score row (below content) ──
@@ -192,147 +263,203 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
   scoreRow.appendChild(scoreBar)
   scoreRow.appendChild(scoreLabel)
 
-  // Justification (hidden by default, shown on click)
   const justification = el('div', 'post-justification hidden')
-  if (post.justification) {
-    justification.textContent = post.justification
-  } else {
-    justification.textContent = 'No justification available'
-  }
-
-  scoreRow.addEventListener('click', () => {
-    justification.classList.toggle('hidden')
-  })
+  justification.textContent = post.justification || 'No justification available'
+  scoreRow.addEventListener('click', () => justification.classList.toggle('hidden'))
 
   card.appendChild(scoreRow)
   card.appendChild(justification)
 
-  // ── Footer: context menu ──
+  // ── Footer: menu ──
   const footer = el('div', 'post-footer')
-
-  const menuContainer = el('div', 'post-context-menu')
-  const menuBtn = el('button', 'post-menu-btn')
-  menuBtn.textContent = '\u2022\u2022\u2022' // three dots (•••)
-  menuBtn.title = 'Actions'
-
-  const dropdown = el('div', 'post-menu-dropdown hidden')
-
-  // Generate nevent
-  let neventStr = ''
-  try {
-    neventStr = nip19.neventEncode({ id: post.id, author: post.author, kind: post.rawEvent?.kind })
-  } catch {
-    // fallback — use raw hex
-    neventStr = post.id
-  }
-
-  const copyNeventItem = el('button', 'post-menu-item')
-  copyNeventItem.textContent = 'Copy Nevent ID'
-  copyNeventItem.addEventListener('click', (e) => {
-    e.stopPropagation()
-    navigator.clipboard.writeText(neventStr).catch(() => {})
-    closeDropdown()
-  })
-
-  const postUrl = buildEventUrl(options.eventUrlTemplate ?? '', neventStr)
-
-  const copyUrlItem = el('button', 'post-menu-item')
-  copyUrlItem.textContent = 'Copy URL'
-  copyUrlItem.addEventListener('click', (e) => {
-    e.stopPropagation()
-    navigator.clipboard.writeText(postUrl).catch(() => {})
-    closeDropdown()
-  })
-
-  const openUrlItem = el('button', 'post-menu-item')
-  openUrlItem.textContent = `Open in ${clientLabel(options.clientPreset ?? 'njump')}`
-  openUrlItem.addEventListener('click', (e) => {
-    e.stopPropagation()
-    window.open(postUrl, '_blank', 'noopener')
-    closeDropdown()
-  })
-
-  dropdown.appendChild(copyNeventItem)
-  dropdown.appendChild(copyUrlItem)
-  dropdown.appendChild(openUrlItem)
-
-  function closeDropdown() {
-    dropdown.classList.add('hidden')
-  }
-
-  menuBtn.addEventListener('click', (e) => {
-    e.stopPropagation()
-    // Close any other open dropdowns
-    document.querySelectorAll('.post-menu-dropdown').forEach((d) => d.classList.add('hidden'))
-    dropdown.classList.toggle('hidden')
-  })
-
-  // Close dropdown on outside click
-  document.addEventListener('click', closeDropdown)
-
-  menuContainer.appendChild(menuBtn)
-  menuContainer.appendChild(dropdown)
-
-  footer.appendChild(menuContainer)
+  footer.appendChild(renderMenu(post, options))
   card.appendChild(footer)
 
   return card
 }
 
+// ─── Menu ────────────────────────────────────────────────────────────────────
+
+/** Copy text: async Clipboard API, with a textarea fallback for older or insecure contexts. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // fall through to the legacy path
+  }
+  const area = document.createElement('textarea')
+  area.value = text
+  area.setAttribute('readonly', '')
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.select()
+  try {
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    area.remove()
+  }
+}
+
+let menuListenersInstalled = false
+
+function closeAllMenus(except?: Element | null): void {
+  document.querySelectorAll('.post-menu-dropdown:not(.hidden)').forEach((d) => {
+    if (d === except) return
+    d.classList.add('hidden')
+    d.parentElement?.querySelector('.post-menu-btn')?.setAttribute('aria-expanded', 'false')
+  })
+}
+
+/** One pair of document listeners for every card, however often the feed re-renders. */
+function installMenuListeners(): void {
+  if (menuListenersInstalled) return
+  menuListenersInstalled = true
+  document.addEventListener('click', (e) => {
+    if (!(e.target as Element | null)?.closest?.('.post-context-menu')) closeAllMenus()
+  })
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return
+    const open = document.querySelector('.post-menu-dropdown:not(.hidden)')
+    if (!open) return
+    closeAllMenus()
+    ;(open.parentElement?.querySelector('.post-menu-btn') as HTMLElement | null)?.focus()
+  })
+}
+
+function renderMenu(post: DisplayPost, options: RenderOptions): HTMLElement {
+  installMenuListeners()
+  const preset = options.clientPreset ?? 'njump'
+  const label = clientLabel(preset)
+
+  const npub = npubOf(post.author)
+  const nprofile = nprofileOf(post.author, options.relayHints)
+  let nevent = ''
+  try {
+    nevent = nip19.neventEncode({ id: post.id, author: post.author, kind: post.rawEvent?.kind ?? 1, relays: (options.relayHints ?? []).slice(0, 3) })
+  } catch {
+    // invalid id: the note actions are left out
+  }
+
+  const container = el('div', 'post-context-menu')
+  const btn = el('button', 'post-menu-btn') as HTMLButtonElement
+  btn.type = 'button'
+  btn.textContent = '•••'
+  btn.title = 'Actions'
+  btn.setAttribute('aria-label', 'Actions')
+  btn.setAttribute('aria-haspopup', 'menu')
+  btn.setAttribute('aria-expanded', 'false')
+
+  const dropdown = el('div', 'post-menu-dropdown hidden')
+  dropdown.setAttribute('role', 'menu')
+
+  const items = (): HTMLElement[] => Array.from(dropdown.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+
+  const close = (): void => {
+    dropdown.classList.add('hidden')
+    btn.setAttribute('aria-expanded', 'false')
+  }
+
+  const addCopy = (text: string, value: string): void => {
+    if (!value) return
+    const item = el('button', 'post-menu-item') as HTMLButtonElement
+    item.type = 'button'
+    item.setAttribute('role', 'menuitem')
+    item.textContent = text
+    item.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      const ok = await copyText(value)
+      item.textContent = ok ? 'Copied' : 'Copy failed'
+      setTimeout(() => {
+        item.textContent = text
+        close()
+        btn.focus()
+      }, 900)
+    })
+    dropdown.appendChild(item)
+  }
+
+  const addLink = (text: string, href: string): void => {
+    const safe = safeLink(href)
+    if (!safe) return
+    const item = document.createElement('a')
+    item.className = 'post-menu-item'
+    item.setAttribute('role', 'menuitem')
+    item.href = safe
+    item.target = '_blank'
+    item.rel = 'noopener'
+    item.textContent = text
+    item.addEventListener('click', (e) => {
+      e.stopPropagation()
+      close()
+    })
+    dropdown.appendChild(item)
+  }
+
+  addCopy('Copy npub', npub)
+  addCopy('Copy nprofile', nprofile)
+  addLink(`Open profile in ${label}`, profileHref(post.author, options))
+  if (preset !== 'app' && npub) addLink('Open profile in my Nostr app (nostr: link)', nostrUri(nprofile || npub))
+  if (nevent) {
+    addCopy('Copy note link (nevent)', nevent)
+    addLink(`Open note in ${label}`, buildEventUrl(options.eventUrlTemplate ?? '', nevent))
+    if (preset !== 'app') addLink('Open note in my Nostr app (nostr: link)', nostrUri(nevent))
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const wasHidden = dropdown.classList.contains('hidden')
+    closeAllMenus()
+    if (!wasHidden) return
+    dropdown.classList.remove('hidden')
+    btn.setAttribute('aria-expanded', 'true')
+    items()[0]?.focus()
+  })
+
+  dropdown.addEventListener('keydown', (e) => {
+    const list = items()
+    const at = list.indexOf(document.activeElement as HTMLElement)
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      list[(at + 1) % list.length]?.focus()
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      list[(at - 1 + list.length) % list.length]?.focus()
+    } else if (e.key === 'Tab') {
+      close()
+    }
+  })
+
+  container.appendChild(btn)
+  container.appendChild(dropdown)
+  return container
+}
+
 /**
- * Render an embedded post (for quotes and boosts).
+ * Render an embedded post (for quotes).
  */
 function renderEmbeddedPost(post: EmbeddedPost, options: RenderOptions): HTMLElement {
   const container = el('div', 'embedded-post')
-  const profileBase = options.eventUrlTemplate ?? ''
 
-  // ── Header: avatar + name (like top-level posts) ──
   const header = el('div', 'embedded-header')
-
-  const profile = options.profiles?.get(post.author)
-  const avatarContainer = el('div', 'embedded-avatar')
-  if (profile?.picture) {
-    const img = document.createElement('img')
-    img.src = profile.picture
-    img.alt = profile.name ?? 'avatar'
-    img.loading = 'lazy'
-    img.onerror = () => {
-      img.style.display = 'none'
-      avatarContainer.textContent = post.author.slice(0, 2)
-      avatarContainer.classList.add('post-avatar-fallback')
-    }
-    avatarContainer.appendChild(img)
-  } else {
-    avatarContainer.textContent = post.author.slice(0, 2)
-    avatarContainer.classList.add('post-avatar-fallback')
-  }
-  header.appendChild(avatarContainer)
+  header.appendChild(renderAvatar(post.author, options, 'embedded-avatar'))
 
   const authorEl = el('div', 'embedded-author')
-  const displayName = profile?.name ?? formatAuthor(post.author)
-  const npub = nip19.npubEncode(post.author)
-  const authorLink = document.createElement('a')
-  authorLink.href = buildEventUrl(profileBase, npub)
-  authorLink.target = '_blank'
-  authorLink.rel = 'noopener'
-  authorLink.textContent = displayName
-  authorLink.title = post.author
-  authorEl.appendChild(authorLink)
+  authorEl.appendChild(personLink(post.author, options, 'author-link'))
   header.appendChild(authorEl)
-
   container.appendChild(header)
 
   const content = el('div', 'embedded-content')
-  content.innerHTML = formatContent(post.content, options)
+  content.appendChild(renderContent(post.content, options))
   container.appendChild(content)
 
-  // Extract and render media from embedded post content
-  const media = extractMediaFromContent(post.content)
+  const media = extractMedia(post.content, [])
   if (media.length > 0) {
     const mediaContainer = el('div', 'post-media')
-    for (const m of media) {
-      mediaContainer.appendChild(renderMedia(m))
-    }
+    for (const m of media) mediaContainer.appendChild(renderMedia(m))
     container.appendChild(mediaContainer)
   }
 
@@ -347,88 +474,67 @@ interface MediaItem {
 }
 
 /**
- * Decode a nostr:npub1... or nostr:nprofile1... reference to a hex pubkey.
- * Returns null if decoding fails.
- */
-function decodeNostrPubkey(bech32: string): string | null {
-  try {
-    const decoded = nip19.decode(bech32)
-    if (decoded.type === 'npub') return decoded.data as string
-    if (decoded.type === 'nprofile') return (decoded.data as { pubkey: string }).pubkey
-  } catch {
-    // Ignore decode failures
-  }
-  return null
-}
-
-/**
- * Format post content for HTML display.
+ * Build post text as DOM nodes.
  *
- * Strategy: work on RAW content (not pre-escaped). Split into tokens
- * (nostr refs, URLs, plain text), escape only the plain text segments,
- * and build HTML for the special tokens from unescaped source data.
+ * Plain text goes in as text nodes (so nothing in a post can inject markup),
+ * `nostr:npub/nprofile` mentions become "@name" links or a truncated-npub
+ * element, and media URLs are dropped here because they render as media.
  */
-function formatContent(content: string, options: RenderOptions = {}): string {
-  const profileBase = options.eventUrlTemplate ?? ''
-  const profiles = options.profiles
+function renderContent(content: string, options: RenderOptions): DocumentFragment {
+  const frag = document.createDocumentFragment()
+  const tokens = tokenizeContent(content)
+  const text = (t: string): void => {
+    if (t) frag.appendChild(document.createTextNode(t))
+  }
 
-  // Tokenize: match nostr: references and URLs as special tokens
-  // Everything between them is plain text that needs escaping
-  const tokenPattern = /nostr:(npub1[a-z0-9]+|nprofile1[a-z0-9]+|n(?:event|ote|addr)1[a-z0-9]+)|https?:\/\/[^\s]+/gi
-
-  let result = ''
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = tokenPattern.exec(content)) !== null) {
-    // Append escaped plain text before this match
-    if (match.index > lastIndex) {
-      result += escapeHtml(content.slice(lastIndex, match.index))
-    }
-
-    const fullMatch = match[0]
-    const nostrBech32 = match[1] // Capture group from nostr: pattern
-
-    if (nostrBech32) {
-      // nostr: reference
-      if (/^npub1|^nprofile1/i.test(nostrBech32)) {
-        // Profile reference — resolve to name + link
-        const pubkey = decodeNostrPubkey(nostrBech32)
-        const profile = pubkey ? profiles?.get(pubkey) : undefined
-        const displayName = profile?.name ?? nostrBech32.slice(0, 16) + '...'
-        const href = buildEventUrl(profileBase, nostrBech32)
-        result += `<a href="${escapeAttr(href)}" target="_blank" rel="noopener" class="nostr-profile-link" title="${escapeAttr(pubkey ?? nostrBech32)}">@${escapeHtml(displayName)}</a>`
-      } else {
-        // Event/note/addr reference — generic link
-        const href = buildEventUrl(profileBase, nostrBech32)
-        result += `<a href="${escapeAttr(href)}" target="_blank" rel="noopener" class="nostr-ref-link">[referenced post]</a>`
+  tokens.forEach((token, i) => {
+    switch (token.kind) {
+      case 'text': {
+        let t = token.text.replace(/\n{3,}/g, '\n\n')
+        if (i === 0) t = t.replace(/^\s+/, '')
+        if (i === tokens.length - 1) t = t.replace(/\s+$/, '')
+        text(t)
+        break
       }
-    } else {
-      // URL — clean trailing punctuation, check if media
-      const cleanUrl = fullMatch.replace(/[)>]+$/, '')
-      if (isMediaUrl(cleanUrl)) {
-        // Will be rendered separately as media; skip
-      } else {
-        result += `<a href="${escapeAttr(cleanUrl)}" target="_blank" rel="noopener">${escapeHtml(cleanUrl)}</a>`
-        // Append any trailing chars that were stripped
-        if (cleanUrl.length < fullMatch.length) {
-          result += escapeHtml(fullMatch.slice(cleanUrl.length))
+      case 'profile': {
+        if (!token.pubkey) {
+          text('@unknown')
+          break
         }
+        const a = personLink(token.pubkey, options, 'nostr-profile-link', '@')
+        frag.appendChild(a)
+        break
+      }
+      case 'ref': {
+        const a = document.createElement('a')
+        a.className = 'nostr-ref-link'
+        a.href = safeLink(buildEventUrl(options.eventUrlTemplate ?? '', token.bech32)) ?? '#'
+        a.target = '_blank'
+        a.rel = 'noopener'
+        a.textContent = '[referenced post]'
+        frag.appendChild(a)
+        break
+      }
+      case 'url': {
+        if (isMediaUrl(token.url)) break
+        const safe = safeLink(token.url)
+        if (safe) {
+          const a = document.createElement('a')
+          a.href = safe
+          a.target = '_blank'
+          a.rel = 'noopener'
+          a.textContent = token.url
+          frag.appendChild(a)
+        } else {
+          text(token.url)
+        }
+        text(token.trailing)
+        break
       }
     }
+  })
 
-    lastIndex = match.index + fullMatch.length
-  }
-
-  // Append remaining plain text
-  if (lastIndex < content.length) {
-    result += escapeHtml(content.slice(lastIndex))
-  }
-
-  // Clean up extra whitespace from removed media URLs
-  result = result.replace(/\n{3,}/g, '\n\n').trim()
-
-  return result
+  return frag
 }
 
 /**
@@ -538,24 +644,6 @@ function renderMedia(item: MediaItem): HTMLElement {
   return img
 }
 
-/**
- * "alice, bob and carol" — with a cap, because a viral note can be boosted by
- * dozens of people and the list would swamp the post itself.
- */
-function formatBoosterList(pubkeys: string[], profiles?: Map<string, ProfileData>): string {
-  const MAX_NAMED = 3
-  const names = pubkeys.map((pk) => profiles?.get(pk)?.name ?? formatAuthor(pk))
-
-  if (names.length <= MAX_NAMED) {
-    if (names.length === 1) return names[0]
-    return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
-  }
-
-  const shown = names.slice(0, MAX_NAMED).join(', ')
-  const rest = names.length - MAX_NAMED
-  return `${shown} and ${rest} ${rest === 1 ? 'other' : 'others'}`
-}
-
 // ─── Utility helpers ─────────────────────────────────────────────────────────
 
 function isMediaUrl(url: string): boolean {
@@ -575,10 +663,6 @@ function getScoreClass(score: number): string {
   if (score >= 7) return 'score-high'
   if (score >= 4) return 'score-mid'
   return 'score-low'
-}
-
-function formatAuthor(pubkey: string): string {
-  return pubkey.slice(0, 8) + '...' + pubkey.slice(-4)
 }
 
 function formatTime(unixSeconds: number): string {
@@ -601,20 +685,6 @@ function formatTime(unixSeconds: number): string {
     hour: '2-digit',
     minute: '2-digit',
   })
-}
-
-function escapeHtml(text: string): string {
-  const div = document.createElement('div')
-  div.textContent = text
-  return div.innerHTML
-}
-
-function escapeAttr(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
 }
 
 function el(tag: string, className?: string): HTMLElement {

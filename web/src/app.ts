@@ -11,14 +11,13 @@ import {
   createRanker,
   createLearner,
   pubkeyToHex,
+  collectPostPubkeys,
   scoreCacheKey,
   type FetchedPost,
   type ScoredPost,
   type ProfileData,
   type DebugEntry,
 } from 'nalgorithm'
-
-import * as nip19 from 'nostr-tools/nip19'
 
 import {
   loadSettings,
@@ -29,8 +28,7 @@ import {
   pruneScoreCache,
 } from './settings.js'
 
-import { renderFeed, aggregateBoosts } from './render.js'
-import { resolveTemplate } from './client-url.js'
+import { renderFeed, aggregateBoosts, clientRenderOptions } from './render.js'
 
 import {
   initUI,
@@ -58,22 +56,6 @@ let currentPosts: ScoredPost[] = []
 let currentProfiles = new Map<string, ProfileData>()
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Extract hex pubkeys from nostr:npub1.../nostr:nprofile1... references in text.
- */
-function extractReferencedPubkeys(content: string, out: Set<string>): void {
-  const matches = content.matchAll(/nostr:(npub1[a-z0-9]+|nprofile1[a-z0-9]+)/gi)
-  for (const m of matches) {
-    try {
-      const decoded = nip19.decode(m[1])
-      if (decoded.type === 'npub') out.add(decoded.data as string)
-      if (decoded.type === 'nprofile') out.add((decoded.data as { pubkey: string }).pubkey)
-    } catch {
-      // Ignore decode failures
-    }
-  }
-}
 
 function logDebug(debug: DebugEntry[]): void {
   if (debug.length === 0) return
@@ -152,8 +134,7 @@ function renderCurrent(settings: ReturnType<typeof loadSettings>): void {
   showEmptyState(false)
   renderFeed(aggregateBoosts(currentPosts), getFeedContainer(), {
     profiles: currentProfiles,
-    eventUrlTemplate: resolveTemplate(settings.clientPreset, settings.clientCustomUrl),
-    clientPreset: settings.clientPreset,
+    ...clientRenderOptions(settings, settings.relays),
   })
 }
 
@@ -247,18 +228,9 @@ async function runFeed(): Promise<void> {
 
     // 3. Fetch profiles for all post authors (including embedded + referenced in content)
     setStatusLoading(`Fetched ${posts.length} posts. Loading profiles...`)
-    const allPubkeys = new Set<string>()
-    for (const p of posts) {
-      allPubkeys.add(p.author)
-      if (p.originalPost) allPubkeys.add(p.originalPost.author)
-      if (p.quotedPost) allPubkeys.add(p.quotedPost.author)
-      // Extract pubkeys from nostr:npub/nprofile references in content
-      extractReferencedPubkeys(p.content, allPubkeys)
-      if (p.originalPost) extractReferencedPubkeys(p.originalPost.content, allPubkeys)
-      if (p.quotedPost) extractReferencedPubkeys(p.quotedPost.content, allPubkeys)
-    }
+    const allPubkeys = collectPostPubkeys(posts)
     try {
-      currentProfiles = await fetcher.getProfiles([...allPubkeys])
+      currentProfiles = await fetcher.getProfiles(allPubkeys)
     } catch (err) {
       console.warn('Failed to fetch profiles:', err)
       // Continue without profiles
