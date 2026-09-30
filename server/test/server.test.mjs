@@ -4,6 +4,8 @@ import { createServer } from 'node:http'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { openDb, createStore, pruneScores, SCORE_TTL_SECONDS } from '../dist/db.js'
 import { createApp } from '../dist/app.js'
+import { loadFeedProfiles } from '../dist/feed.js'
+import * as nip19 from 'nostr-tools/nip19'
 import { createBillingClient, BillingUnavailable } from '../dist/billing-client.js'
 import { applySettings, DEFAULT_SETTINGS, SettingsError } from '../dist/settings.js'
 import { issueChallenge, verifyLogin, AuthError } from '../dist/auth.js'
@@ -311,6 +313,37 @@ test('HTTP: feed for an active user returns trimmed posts and only relevant prof
     assert.deepEqual(billing.consumed[0].kind, 'feed')
     assert.equal(feedCalls[0].npub, npub)
   })
+})
+
+test('HTTP: profiles cover boosted, quoted and mentioned authors, and nobody else', async () => {
+  const H = (c) => c.repeat(64)
+  const mention = nip19.npubEncode(H('d'))
+  const feed = async () => ({
+    fetched: 2,
+    profiles: Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((c) => [H(c), { name: `n${c}` }])),
+    posts: [
+      { id: 'p1', type: 'boost', author: H('a'), content: '', createdAt: T0, score: 9, originalPost: { id: 'o', author: H('b'), content: `hi nostr:${mention}` } },
+      { id: 'p2', type: 'quote', author: H('a'), content: 'q', createdAt: T0, score: 5, quotedPost: { id: 'q', author: H('c'), content: '' } },
+    ],
+  })
+  await withApp(async ({ json, login }) => {
+    const { body } = await login()
+    await setPrompt(json, body.token)
+    const data = await (await json('/feed', { token: body.token })).json()
+    assert.deepEqual(Object.keys(data.profiles).sort(), [H('a'), H('b'), H('c'), H('d')])
+  }, { feed })
+})
+
+test('loadFeedProfiles asks the fetcher for embedded and mentioned authors', async () => {
+  const H = (c) => c.repeat(64)
+  let asked
+  const fetcher = { async getProfiles(pks) { asked = pks; return new Map() } }
+  await loadFeedProfiles(fetcher, [
+    { author: H('a'), content: '', originalPost: { author: H('b'), content: `x nostr:${nip19.npubEncode(H('d'))}` } },
+  ])
+  assert.deepEqual(asked, [H('a'), H('b'), H('d')])
+  await loadFeedProfiles(fetcher, [{ author: H('a'), content: '', originalPost: { author: H('b'), content: '' } }], 1)
+  assert.deepEqual(asked, [H('a')])
 })
 
 test('HTTP: a never-seen npub starts its trial on first feed use', async () => {

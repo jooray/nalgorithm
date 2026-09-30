@@ -1,4 +1,4 @@
-import { createFetcher, createRanker, refreshLearnedPrompt, scorePostsCached, sortByRelevance } from 'nalgorithm'
+import { collectPostPubkeys, createFetcher, createRanker, refreshLearnedPrompt, scorePostsCached, sortByRelevance } from 'nalgorithm'
 import type { PipelineLogger, PipelineStore, ProfileData, ScoredPost } from 'nalgorithm'
 import type { ServerConfig } from './config.js'
 import type { UserSettings } from './settings.js'
@@ -17,6 +17,19 @@ export type FeedRunner = (npub: string, settings: UserSettings, store: PipelineS
 /** Cap on posts fetched per run, so a huge follow list cannot run up cost. */
 export const MAX_POSTS = 500
 
+/**
+ * Profiles for everyone the feed shows: authors, the original authors inside
+ * boosts and quotes, and people mentioned in the text. A boost's own author is
+ * only the booster, so looking up `author` alone leaves boosted notes nameless.
+ */
+export async function loadFeedProfiles(
+  fetcher: { getProfiles(pubkeys: string[]): Promise<Map<string, ProfileData>> },
+  posts: Parameters<typeof collectPostPubkeys>[0],
+  cap?: number
+): Promise<Map<string, ProfileData>> {
+  return fetcher.getProfiles(collectPostPubkeys(posts, cap))
+}
+
 export function createFeedRunner(config: ServerConfig, log: PipelineLogger): FeedRunner {
   return async (npub, settings, store) => {
     const fetcher = createFetcher({ relays: config.relays })
@@ -27,7 +40,7 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger): Fee
       const posts = await fetcher.getPosts(follows, { hoursBack: settings.hoursBack, maxPosts: MAX_POSTS })
       if (posts.length === 0) return { posts: [], profiles: {}, fetched: 0 }
 
-      const profiles = await fetcher.getProfiles([...new Set(posts.map((p) => p.author))])
+      const profiles = await loadFeedProfiles(fetcher, posts)
 
       let learnedPrompt: string | undefined
       if (settings.learnFromLikes) {

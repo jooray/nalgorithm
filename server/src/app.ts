@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { collectPostPubkeys } from 'nalgorithm'
 import type { PipelineLogger, ScoredPost } from 'nalgorithm'
 import { AuthError, createSession, getSession, issueChallenge, revokeSession, verifyLogin, SESSION_TTL_SECONDS } from './auth.js'
 import type { BillingClient } from './billing-client.js'
@@ -267,12 +268,8 @@ export function createApp(deps: AppDeps) {
         const result = await deps.feed(npub, settings, createStore(db, npub, nowSec))
         const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 200)
         const posts = result.posts.slice(0, limit)
-        const authors = new Set<string>()
-        for (const p of posts) {
-          authors.add(p.author)
-          if (p.originalPost) authors.add(p.originalPost.author)
-          if (p.quotedPost) authors.add(p.quotedPost.author)
-        }
+        // Authors plus anyone mentioned in the text, so mentions render as names.
+        const authors = new Set(collectPostPubkeys(posts, Infinity))
         const profiles = Object.fromEntries(Object.entries(result.profiles).filter(([k]) => authors.has(k)))
         return send(res, 200, {
           entitlement: state,
