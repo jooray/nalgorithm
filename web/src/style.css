@@ -74,6 +74,13 @@ a:hover {
   gap: 12px;
 }
 
+.header-left .logo {
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
 .header-left h1 {
   font-size: 1.25rem;
   font-weight: 700;
