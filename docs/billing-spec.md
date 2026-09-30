@@ -43,6 +43,10 @@ One small service that answers "which products has this npub paid for, and until
 
 Pro rata: `days = sats / plan.sats * plan.days`, rounded down to whole seconds of entitlement.
 
+Trial credit: paid time is appended after the end of any running trial for that product, so paying during the 3-day trial keeps the unused trial days instead of swallowing them (paying on day 1 of a trial gives 2 remaining trial days plus the paid period). An expired trial gives no credit.
+
+Gifts: free time (beta testers, the operator) is recorded as a payment with provider `gift` and zero sats, extended the same way, so it appears in the ledger without inventing revenue.
+
 ## 5. API
 
 All calls carry `Authorization: Bearer <client key>`. JSON in and out.
