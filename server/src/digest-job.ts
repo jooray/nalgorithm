@@ -46,6 +46,8 @@ export interface DigestDeps {
   upload?: (audio: Uint8Array) => Promise<UploadedAudio>
   dm: DmSender
   log: PipelineLogger
+  /** Where the app lives, named in a DM that had to be shortened. */
+  appUrl?: string
   now?: () => number
   /** Replaceable in tests. */
   writeDigest?: typeof libWriteDigest
@@ -79,12 +81,28 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * the digest. The date is built by hand, not with Intl, because its short month
  * names differ between Node/ICU versions ("Sep" vs "Sept").
  */
-export function composeMessage(text: string, audioUrl: string | null, nowSec: number, notes: DigestSourceNote[] = []): string {
+export function composeMessage(text: string, audioUrl: string | null, nowSec: number, notes: DigestSourceNote[] = [], appUrl?: string): string {
   const d = new Date(nowSec * 1000)
   const date = `${WEEKDAYS[d.getUTCDay()]}, ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`
-  const body = audioUrl ? `Your nalgorithm digest, ${date}\n${audioUrl}\n\n${text}` : `Your nalgorithm digest, ${date}\n\n${text}`
+  const head = audioUrl ? `Your nalgorithm digest, ${date}\n${audioUrl}\n\n` : `Your nalgorithm digest, ${date}\n\n`
+  const body = head + fitSpokenText(text, MAX_TEXT_LENGTH - head.length, appUrl)
   // Show notes go after the spoken text and shrink first when the DM is too long.
   return body + notesSection(notes, MAX_TEXT_LENGTH - body.length)
+}
+
+/**
+ * A digest that does not fit one DM is cut at a paragraph end and says where the rest is.
+ * The audio link and the app carry the whole digest, so a long one is never a failed one.
+ */
+export function fitSpokenText(text: string, room: number, appUrl?: string): string {
+  if (text.length <= room) return text
+  const tail = `\n\n…\nThe rest of the text, and every note, is in the app${appUrl ? `: ${appUrl}` : '.'}`
+  const budget = Math.max(0, room - tail.length)
+  const cut = text.slice(0, budget)
+  const paragraph = cut.lastIndexOf('\n\n')
+  const sentence = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '))
+  const at = paragraph > budget * 0.6 ? paragraph : sentence > budget * 0.6 ? sentence + 1 : budget
+  return cut.slice(0, at).trimEnd() + tail
 }
 
 const all = (r: DmSendOutcome | DmSendOutcome[]): DmSendOutcome[] => (Array.isArray(r) ? r : [r])
@@ -182,7 +200,7 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   let tier: string | null = null
   let detail: string | null = null
   try {
-    const results = all(await deps.dm.send(npub, composeMessage(text, audioUrl, now, notes), { format }))
+    const results = all(await deps.dm.send(npub, composeMessage(text, audioUrl, now, notes, deps.appUrl), { format }))
     delivered = results.length > 0 && results.every((r) => r.delivered)
     tier = results[0]?.tier ?? null
     detail = results.filter((r) => !r.delivered).map((r) => r.detail ?? 'not delivered').join('; ') || null

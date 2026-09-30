@@ -117,3 +117,16 @@ test('migration: a digests table from before the notes column gains it, keeping 
   assert.equal((await again.get('SELECT body FROM digests')).body, 'old digest')
   await again.close()
 })
+
+test('a digest longer than one DM is cut at a paragraph and points to the app; it is not a failure', async () => {
+  const { MAX_TEXT_LENGTH } = await import('../dist/dm/send.js')
+  const para = 'Sentence one is here. Sentence two follows it closely.'
+  const text = Array.from({ length: 400 }, () => para).join('\n\n')
+  assert.ok(text.length > MAX_TEXT_LENGTH)
+  const msg = composeMessage(text, 'https://a/x.mp3', T0, [], 'https://app.test/app/')
+  assert.ok(msg.length <= MAX_TEXT_LENGTH, `message is ${msg.length}`)
+  assert.match(msg, /^Your nalgorithm digest, .*\nhttps:\/\/a\/x\.mp3\n\nSentence one/)
+  assert.match(msg, /…\nThe rest of the text, and every note, is in the app: https:\/\/app\.test\/app\/$/)
+  assert.ok(msg.includes(para + '\n\n…') || /\.\n\n…/.test(msg), 'cut on a sentence end, not mid-word')
+  assert.equal(composeMessage('short', null, T0), composeMessage('short', null, T0, [], 'https://app.test/'), 'short digests are untouched')
+})

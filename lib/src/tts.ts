@@ -214,12 +214,18 @@ async function synthesizeChunk(config: TTSConfig, text: string, format: TTSForma
 }
 
 export interface SynthesizeOptions {
-  /** Called before each chunk is sent, for progress reporting. */
+  /** Called as each chunk is sent, for progress reporting (chunks may overlap). */
   onProgress?: (chunk: number, total: number) => void
   /** Attempts per chunk before giving up (default: 3). */
   maxAttempts?: number
   /** Base delay for exponential backoff between retries (default: 2000ms). */
   baseDelayMs?: number
+  /**
+   * Chunks synthesized at the same time (default: 3). Each chunk is an independent
+   * request, so a long digest takes about as long as its slowest chunk instead of the
+   * sum. Audio is joined in text order whatever order the chunks finish in.
+   */
+  concurrency?: number
 }
 
 /**
@@ -250,32 +256,40 @@ export async function synthesizeSpeech(
     )
   }
 
-  const parts: Uint8Array[] = []
+  const parts: Uint8Array[] = new Array(chunks.length)
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? 3, chunks.length))
+  let next = 0
+  let failure: Error | undefined
 
-  for (let i = 0; i < chunks.length; i++) {
-    onProgress?.(i + 1, chunks.length)
+  async function worker(): Promise<void> {
+    while (!failure) {
+      const i = next++
+      if (i >= chunks.length) return
+      onProgress?.(i + 1, chunks.length)
 
-    let lastErr: Error | undefined
-    let audio: Uint8Array | undefined
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        audio = await synthesizeChunk(config, chunks[i], format)
-        break
-      } catch (err) {
-        lastErr = err as Error
-        if (attempt < maxAttempts) {
-          await sleep(baseDelayMs * Math.pow(2, attempt - 1))
+      let lastErr: Error | undefined
+      let audio: Uint8Array | undefined
+      for (let attempt = 1; attempt <= maxAttempts && !failure; attempt++) {
+        try {
+          audio = await synthesizeChunk(config, chunks[i], format)
+          break
+        } catch (err) {
+          lastErr = err as Error
+          if (attempt < maxAttempts) await sleep(baseDelayMs * Math.pow(2, attempt - 1))
         }
       }
+      if (!audio) {
+        failure ??= lastErr ?? new Error('TTS: synthesis failed')
+        return
+      }
+      // Keep the first chunk's tags (players read them); drop them from the rest
+      // so the joined stream has no metadata blocks partway through.
+      parts[i] = format === 'mp3' && i > 0 ? stripId3(audio) : audio
     }
-
-    if (!audio) throw lastErr ?? new Error('TTS: synthesis failed')
-
-    // Keep the first chunk's tags (players read them); drop them from the rest
-    // so the joined stream has no metadata blocks partway through.
-    parts.push(format === 'mp3' && i > 0 ? stripId3(audio) : audio)
   }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()))
+  if (failure) throw failure
 
   if (parts.length === 1) return parts[0]
 

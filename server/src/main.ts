@@ -71,6 +71,7 @@ if (config.bot) {
       ttsModel: config.venice.ttsModel,
       ttsVoice: config.venice.ttsVoice,
     },
+    appUrl: config.webUrl,
     upload: (audio: Uint8Array) => uploadAudio({ servers: config.bot!.blossomServers, secretKey, log }, audio),
   }
 
