@@ -1,3 +1,4 @@
+import { upsert } from './database.js'
 import type { Db } from './db.js'
 
 export interface UserSettings {
@@ -49,19 +50,16 @@ export function applySettings(current: UserSettings, patch: unknown): UserSettin
   return next
 }
 
-export function loadSettings(db: Db, npub: string): UserSettings {
-  const row = db.prepare('SELECT json FROM settings WHERE npub = ?').get(npub) as { json: string } | undefined
+export async function loadSettings(db: Db, npub: string): Promise<UserSettings> {
+  const row = await db.get<{ data: string }>('SELECT data FROM settings WHERE npub = ?', [npub])
   if (!row) return { ...DEFAULT_SETTINGS }
   try {
-    return { ...DEFAULT_SETTINGS, ...(JSON.parse(row.json) as Partial<UserSettings>) }
+    return { ...DEFAULT_SETTINGS, ...(JSON.parse(row.data) as Partial<UserSettings>) }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }
 }
 
-export function saveSettings(db: Db, npub: string, settings: UserSettings, now = Math.floor(Date.now() / 1000)): void {
-  db.prepare(
-    `INSERT INTO settings (npub, json, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT (npub) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at`,
-  ).run(npub, JSON.stringify(settings), now)
+export async function saveSettings(db: Db, npub: string, settings: UserSettings, now = Math.floor(Date.now() / 1000)): Promise<void> {
+  await db.run(upsert(db, 'settings', ['npub', 'data', 'updated_at'], ['npub'], ['data', 'updated_at']), [npub, JSON.stringify(settings), now])
 }

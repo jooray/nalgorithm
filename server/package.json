@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/main.js",
     "test": "npm run build && node --test test/"
   },
   "dependencies": {
+    "mariadb": "^3.5.4",
     "nalgorithm": "*",
     "nostr-tools": "^2.10.4"
   },

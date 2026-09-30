@@ -6,7 +6,9 @@ Hosted, prepaid nalgorithm: login by npub, ranked feed with the server's own Ven
 npm run build:lib && npm test -w server
 ```
 
-Environment (all required unless a default is shown): `PUBLIC_URL` (API base, for example `https://cypherpunk.today/nalgorithm/api`, the login is bound to `<PUBLIC_URL>/auth/login`), `BILLING_API_URL`, `BILLING_API_TOKEN`, `VENICE_API_KEY` (use a dedicated service key), `PORT` (8350), `HOST` (127.0.0.1), `NALGORITHM_DB_PATH`, `RELAYS`, `COOKIE_SECURE`, and model overrides `SCORING_MODEL` (jev-latest), `DIGEST_MODEL` (claude-sonnet-5-5), `HUMANIZER_MODEL` and `LEARNER_MODEL` (deepseek-v4-1-flash), `TTS_MODEL` (tts-kokoro), `TTS_VOICE` (af_sky).
+Environment (all required unless a default is shown): `PUBLIC_URL` (API base, for example `https://cypherpunk.today/nalgorithm/api`, the login is bound to `<PUBLIC_URL>/auth/login`), `BILLING_API_URL`, `BILLING_API_TOKEN`, `VENICE_API_KEY` (use a dedicated service key), `PORT` (8350), `HOST` (127.0.0.1), `DATABASE_URL`, `RELAYS`, `COOKIE_SECURE`, and model overrides `SCORING_MODEL` (jev-latest), `DIGEST_MODEL` (claude-sonnet-5-5), `HUMANIZER_MODEL` and `LEARNER_MODEL` (deepseek-v4-1-flash), `TTS_MODEL` (tts-kokoro), `TTS_VOICE` (af_sky).
+
+Storage: SQLite (`DATABASE_URL=sqlite:./nalgorithm-server.db`, the default, or a bare path) or MariaDB (`DATABASE_URL=mariadb://user:password@host:3306/database`). The tables are created on first start. `TEST_DATABASE_URL=mariadb://... npm test -w server` runs the suite against a MariaDB test database, which the tests empty first, so never point it at real data.
 
 Endpoints: `POST /auth/challenge`, `POST /auth/login` (`{event}`, a signed kind 27235 with tags `u`, `method=POST`, `nonce`), `POST /auth/logout`, `GET /me`, `GET|PUT /settings`, `GET /feed`, `POST /billing/checkout`. Writes require `Content-Type: application/json`. Sessions are an HttpOnly SameSite=Strict cookie or a Bearer token.
 

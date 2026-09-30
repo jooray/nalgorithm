@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
-import { openDb, createSqliteStore, pruneScores, SCORE_TTL_SECONDS } from '../dist/db.js'
+import { openDb, createStore, pruneScores, SCORE_TTL_SECONDS } from '../dist/db.js'
 import { createApp } from '../dist/app.js'
 import { createBillingClient, BillingUnavailable } from '../dist/billing-client.js'
 import { applySettings, DEFAULT_SETTINGS, SettingsError } from '../dist/settings.js'
@@ -13,59 +13,67 @@ const LOGIN_URL = `${PUBLIC}/auth/login`
 const T0 = 1_800_000_000
 const silent = { info() {}, warn() {} }
 
+// Set TEST_DATABASE_URL to run the whole suite against MariaDB instead of SQLite.
+async function freshDb() {
+  const url = process.env.TEST_DATABASE_URL
+  const db = await openDb(url ?? ':memory:')
+  if (url) for (const t of ['scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await db.exec(`DELETE FROM ${t}`)
+  return db
+}
+
 function loginEvent(sk, { nonce, url = LOGIN_URL, method = 'POST', at = T0, kind = 27235 }) {
   return finalizeEvent({ kind, created_at: at, tags: [['u', url], ['method', method], ['nonce', nonce]], content: '' }, sk)
 }
 
 // ─── auth ────────────────────────────────────────────────────────────────────
 
-test('login: a valid signed challenge yields the signer npub, once', () => {
-  const db = openDb(':memory:')
+test('login: a valid signed challenge yields the signer npub, once', async () => {
+  const db = await freshDb()
   const sk = generateSecretKey()
-  const { nonce } = issueChallenge(db, T0)
-  assert.equal(verifyLogin(db, loginEvent(sk, { nonce }), LOGIN_URL, T0), getPublicKey(sk))
+  const { nonce } = await issueChallenge(db, T0)
+  assert.equal(await verifyLogin(db, loginEvent(sk, { nonce }), LOGIN_URL, T0), getPublicKey(sk))
   // Replaying the same nonce fails.
-  assert.throws(() => verifyLogin(db, loginEvent(sk, { nonce }), LOGIN_URL, T0), AuthError)
+  await assert.rejects(verifyLogin(db, loginEvent(sk, { nonce }), LOGIN_URL, T0), AuthError)
 })
 
-test('login: rejects wrong URL, method, kind, stale time, unknown nonce and tampering', () => {
-  const db = openDb(':memory:')
+test('login: rejects wrong URL, method, kind, stale time, unknown nonce and tampering', async () => {
+  const db = await freshDb()
   const sk = generateSecretKey()
-  const fresh = () => issueChallenge(db, T0).nonce
-  assert.throws(() => verifyLogin(db, loginEvent(sk, { nonce: fresh(), url: 'https://evil.test/auth/login' }), LOGIN_URL, T0), /different URL/)
-  assert.throws(() => verifyLogin(db, loginEvent(sk, { nonce: fresh(), method: 'GET' }), LOGIN_URL, T0), /different method/)
-  assert.throws(() => verifyLogin(db, loginEvent(sk, { nonce: fresh(), kind: 1 }), LOGIN_URL, T0), /wrong event kind/)
-  assert.throws(() => verifyLogin(db, loginEvent(sk, { nonce: fresh(), at: T0 - 600 }), LOGIN_URL, T0), /not fresh/)
-  assert.throws(() => verifyLogin(db, loginEvent(sk, { nonce: 'never-issued' }), LOGIN_URL, T0), /nonce/)
-  const tampered = loginEvent(sk, { nonce: fresh() })
+  const fresh = async () => (await issueChallenge(db, T0)).nonce
+  await assert.rejects(verifyLogin(db, loginEvent(sk, { nonce: await fresh(), url: 'https://evil.test/auth/login' }), LOGIN_URL, T0), /different URL/)
+  await assert.rejects(verifyLogin(db, loginEvent(sk, { nonce: await fresh(), method: 'GET' }), LOGIN_URL, T0), /different method/)
+  await assert.rejects(verifyLogin(db, loginEvent(sk, { nonce: await fresh(), kind: 1 }), LOGIN_URL, T0), /wrong event kind/)
+  await assert.rejects(verifyLogin(db, loginEvent(sk, { nonce: await fresh(), at: T0 - 600 }), LOGIN_URL, T0), /not fresh/)
+  await assert.rejects(verifyLogin(db, loginEvent(sk, { nonce: 'never-issued' }), LOGIN_URL, T0), /nonce/)
+  const tampered = loginEvent(sk, { nonce: await fresh() })
   tampered.content = 'changed'
-  assert.throws(() => verifyLogin(db, tampered, LOGIN_URL, T0), /bad signature/)
-  assert.throws(() => verifyLogin(db, null, LOGIN_URL, T0), AuthError)
+  await assert.rejects(verifyLogin(db, tampered, LOGIN_URL, T0), /bad signature/)
+  await assert.rejects(verifyLogin(db, null, LOGIN_URL, T0), AuthError)
 })
 
-test('login: an expired nonce is rejected', () => {
-  const db = openDb(':memory:')
+test('login: an expired nonce is rejected', async () => {
+  const db = await freshDb()
   const sk = generateSecretKey()
-  const { nonce } = issueChallenge(db, T0)
-  assert.throws(() => verifyLogin(db, loginEvent(sk, { nonce, at: T0 + 400 }), LOGIN_URL, T0 + 400), /nonce/)
+  const { nonce } = await issueChallenge(db, T0)
+  await assert.rejects(verifyLogin(db, loginEvent(sk, { nonce, at: T0 + 400 }), LOGIN_URL, T0 + 400), /nonce/)
 })
 
 // ─── store ───────────────────────────────────────────────────────────────────
 
 test('store: scores are isolated per npub and respect the TTL', async () => {
-  const db = openDb(':memory:')
+  const db = await freshDb()
   const now = () => T0
-  const a = createSqliteStore(db, 'a'.repeat(64), now)
-  const b = createSqliteStore(db, 'b'.repeat(64), now)
+  const a = createStore(db, 'a'.repeat(64), now)
+  const b = createStore(db, 'b'.repeat(64), now)
   await a.putScores({ e1: { score: 8, justification: 'j', createdAt: T0 - 100, scorer: 'decision' }, old: { score: 3, createdAt: T0 - SCORE_TTL_SECONDS - 10 } })
   assert.deepEqual(await a.getScores(['e1', 'old', 'missing']), { e1: { score: 8, justification: 'j', createdAt: T0 - 100, scorer: 'decision' } })
   assert.deepEqual(await b.getScores(['e1']), {})
-  assert.equal(pruneScores(db, T0), 1)
+  assert.equal(await pruneScores(db, T0), 1)
 })
 
 test('store: learned prompt round trips and updates in place', async () => {
-  const db = openDb(':memory:')
-  const s = createSqliteStore(db, 'a'.repeat(64), () => T0)
+  const db = await freshDb()
+  const s = createStore(db, 'a'.repeat(64), () => T0)
   assert.equal(await s.getLearned(), null)
   await s.putLearned({ prompt: 'p1', updatedAt: 't1', lastLikeTimestamp: 5 })
   await s.putLearned({ prompt: 'p2', updatedAt: 't2' })
@@ -73,8 +81,8 @@ test('store: learned prompt round trips and updates in place', async () => {
 })
 
 test('store: a large key list is queried in chunks', async () => {
-  const db = openDb(':memory:')
-  const s = createSqliteStore(db, 'a'.repeat(64), () => T0)
+  const db = await freshDb()
+  const s = createStore(db, 'a'.repeat(64), () => T0)
   const entries = {}
   const keys = []
   for (let i = 0; i < 1300; i++) { keys.push(`k${i}`); entries[`k${i}`] = { score: i % 10, createdAt: T0 } }
@@ -84,7 +92,7 @@ test('store: a large key list is queried in chunks', async () => {
 
 // ─── settings ────────────────────────────────────────────────────────────────
 
-test('settings: validates every field and rejects unknown ones', () => {
+test('settings: validates every field and rejects unknown ones', async () => {
   const ok = applySettings(DEFAULT_SETTINGS, { userPrompt: '  bitcoin and nostr  ', hoursBack: 12, topN: 5, learnFromLikes: false })
   assert.deepEqual(ok, { userPrompt: 'bitcoin and nostr', hoursBack: 12, topN: 5, learnFromLikes: false })
   for (const bad of [{ hoursBack: 0 }, { hoursBack: 100 }, { topN: 1.5 }, { userPrompt: 5 }, { userPrompt: 'x'.repeat(2001) }, { learnFromLikes: 'yes' }, { apiKey: 'x' }, []]) {
@@ -192,7 +200,7 @@ function fakeBilling(initial = { state: 'active', until: T0 + 86400 }) {
 }
 
 async function withApp(fn, { billing = fakeBilling(), feed } = {}) {
-  const db = openDb(':memory:')
+  const db = await freshDb()
   const feedCalls = []
   const runner = feed ?? (async (npub, settings) => {
     feedCalls.push({ npub, settings })

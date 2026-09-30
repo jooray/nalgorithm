@@ -3,7 +3,7 @@ import type { PipelineLogger, ScoredPost } from 'nalgorithm'
 import { AuthError, createSession, getSession, issueChallenge, revokeSession, verifyLogin, SESSION_TTL_SECONDS } from './auth.js'
 import type { BillingClient } from './billing-client.js'
 import { BillingUnavailable } from './billing-client.js'
-import { createSqliteStore } from './db.js'
+import { createStore } from './db.js'
 import type { Db } from './db.js'
 import type { FeedRunner } from './feed.js'
 import { SettingsError, applySettings, loadSettings, saveSettings } from './settings.js'
@@ -95,9 +95,9 @@ export function createApp(deps: AppDeps) {
     return parseCookies(req.headers.cookie)[COOKIE]
   }
 
-  function requireSession(req: IncomingMessage): { npub: string; token: string } {
+  async function requireSession(req: IncomingMessage): Promise<{ npub: string; token: string }> {
     const token = sessionToken(req)
-    const npub = token ? getSession(db, token, nowSec()) : null
+    const npub = token ? await getSession(db, token, nowSec()) : null
     if (!token || !npub) throw new HttpError(401, 'not signed in')
     return { npub, token }
   }
@@ -120,19 +120,19 @@ export function createApp(deps: AppDeps) {
     if (method === 'GET' && path === '/healthz') return send(res, 200, { ok: true })
 
     if (method === 'POST' && path === '/auth/challenge') {
-      return send(res, 200, { ...issueChallenge(db, nowSec()), url: loginUrl })
+      return send(res, 200, { ...(await issueChallenge(db, nowSec())), url: loginUrl })
     }
 
     if (method === 'POST' && path === '/auth/login') {
       const body = await readJson(req)
       let npub: string
       try {
-        npub = verifyLogin(db, body.event, loginUrl, nowSec())
+        npub = await verifyLogin(db, body.event, loginUrl, nowSec())
       } catch (err) {
         if (err instanceof AuthError) throw new HttpError(401, err.message)
         throw err
       }
-      const session = createSession(db, npub, nowSec())
+      const session = await createSession(db, npub, nowSec())
       return send(res, 200, { npub, token: session.token, expires_at: session.expires_at }, {
         'Set-Cookie': cookie(session.token, SESSION_TTL_SECONDS),
       })
@@ -140,24 +140,24 @@ export function createApp(deps: AppDeps) {
 
     if (method === 'POST' && path === '/auth/logout') {
       const token = sessionToken(req)
-      if (token) revokeSession(db, token)
+      if (token) await revokeSession(db, token)
       return send(res, 200, { ok: true }, { 'Set-Cookie': cookie('', 0) })
     }
 
     // Everything below needs a session.
-    const { npub } = requireSession(req)
+    const { npub } = await requireSession(req)
 
     if (method === 'GET' && path === '/me') {
       return send(res, 200, { npub, entitlement: await billing.entitlement(npub) })
     }
 
-    if (method === 'GET' && path === '/settings') return send(res, 200, loadSettings(db, npub))
+    if (method === 'GET' && path === '/settings') return send(res, 200, await loadSettings(db, npub))
 
     if (method === 'PUT' && path === '/settings') {
       const body = await readJson(req)
       try {
-        const next = applySettings(loadSettings(db, npub), body)
-        saveSettings(db, npub, next, nowSec())
+        const next = applySettings(await loadSettings(db, npub), body)
+        await saveSettings(db, npub, next, nowSec())
         return send(res, 200, next)
       } catch (err) {
         if (err instanceof SettingsError) throw new HttpError(400, err.message)
@@ -182,7 +182,7 @@ export function createApp(deps: AppDeps) {
     }
 
     if (method === 'GET' && path === '/feed') {
-      const settings = loadSettings(db, npub)
+      const settings = await loadSettings(db, npub)
       if (!settings.userPrompt) throw new HttpError(400, 'set a prompt first', { code: 'no_prompt' })
 
       // Entitlement: a never-seen npub starts its trial here, on first real use.
@@ -209,7 +209,7 @@ export function createApp(deps: AppDeps) {
 
       running.add(npub)
       try {
-        const result = await deps.feed(npub, settings, createSqliteStore(db, npub, nowSec))
+        const result = await deps.feed(npub, settings, createStore(db, npub, nowSec))
         const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 200)
         const posts = result.posts.slice(0, limit)
         const authors = new Set<string>()

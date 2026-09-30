@@ -12,7 +12,7 @@ const log: PipelineLogger = {
 }
 
 const config = loadConfig()
-const db = openDb(config.dbPath)
+const db = await openDb(config.databaseUrl)
 const billing = createBillingClient({ url: config.billing.url, token: config.billing.token, product: 'nalgorithm' })
 const app = createApp({
   db,
@@ -24,8 +24,10 @@ const app = createApp({
 })
 
 // Old cached scores are useless after 30 days; prune once a day.
-setInterval(() => log.info(`pruned ${pruneScores(db)} old scores`), 86_400_000).unref()
+setInterval(() => {
+  pruneScores(db).then((n) => log.info(`pruned ${n} old scores`), (e) => log.warn(`prune failed: ${(e as Error).message}`))
+}, 86_400_000).unref()
 
 createServer(app).listen(config.port, config.host, () => {
-  log.info(`listening on http://${config.host}:${config.port}, db ${config.dbPath}`)
+  log.info(`listening on http://${config.host}:${config.port}, db ${config.databaseUrl.replace(/:\/\/[^@/]*@/, '://***@')}`)
 })

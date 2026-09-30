@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { verifyEvent } from 'nostr-tools/pure'
 import type { Event } from 'nostr-tools/pure'
+import { insertIgnore } from './database.js'
 import type { Db } from './db.js'
 
 /** NIP-98 HTTP auth kind, reused for the login challenge. */
@@ -16,11 +17,11 @@ const nowSec = (): number => Math.floor(Date.now() / 1000)
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex')
 
 /** Issue a single-use nonce the client must sign into its login event. */
-export function issueChallenge(db: Db, now = nowSec()): { nonce: string; expires_at: number } {
-  db.prepare('DELETE FROM nonces WHERE expires_at < ?').run(now)
+export async function issueChallenge(db: Db, now = nowSec()): Promise<{ nonce: string; expires_at: number }> {
+  await db.run('DELETE FROM nonces WHERE expires_at < ?', [now])
   const nonce = randomBytes(16).toString('hex')
   const expiresAt = now + CHALLENGE_TTL_SECONDS
-  db.prepare('INSERT INTO nonces (nonce, expires_at) VALUES (?, ?)').run(nonce, expiresAt)
+  await db.run('INSERT INTO nonces (nonce, expires_at) VALUES (?, ?)', [nonce, expiresAt])
   return { nonce, expires_at: expiresAt }
 }
 
@@ -33,7 +34,7 @@ const tagValue = (event: Event, name: string): string | undefined => event.tags.
  * login URL and to POST, and carry a nonce we issued that has not been used.
  * The nonce is consumed here whether or not later steps succeed.
  */
-export function verifyLogin(db: Db, event: unknown, expectedUrl: string, now = nowSec()): string {
+export async function verifyLogin(db: Db, event: unknown, expectedUrl: string, now = nowSec()): Promise<string> {
   if (!event || typeof event !== 'object') throw new AuthError('missing event')
   const raw = event as Record<string, unknown>
   if (
@@ -64,36 +65,31 @@ export function verifyLogin(db: Db, event: unknown, expectedUrl: string, now = n
 
   const nonce = tagValue(ev, 'nonce')
   if (!nonce) throw new AuthError('missing nonce')
-  const row = db.prepare('SELECT expires_at FROM nonces WHERE nonce = ?').get(nonce) as { expires_at: number } | undefined
-  db.prepare('DELETE FROM nonces WHERE nonce = ?').run(nonce)
-  if (!row || row.expires_at < now) throw new AuthError('unknown or expired nonce')
+  // Consuming the nonce is a single DELETE: under concurrency only one caller
+  // can see it delete a row, so a nonce can never be used twice.
+  const row = await db.get<{ expires_at: number }>('SELECT expires_at FROM nonces WHERE nonce = ?', [nonce])
+  const removed = await db.run('DELETE FROM nonces WHERE nonce = ?', [nonce])
+  if (!row || removed.changes === 0 || Number(row.expires_at) < now) throw new AuthError('unknown or expired nonce')
 
   return ev.pubkey
 }
 
 /** Create the account if new and return a session token (shown once; only its hash is stored). */
-export function createSession(db: Db, npub: string, now = nowSec()): { token: string; expires_at: number } {
-  db.prepare('INSERT OR IGNORE INTO accounts (npub, created_at) VALUES (?, ?)').run(npub, now)
+export async function createSession(db: Db, npub: string, now = nowSec()): Promise<{ token: string; expires_at: number }> {
+  await db.run(insertIgnore(db, 'accounts', ['npub', 'created_at']), [npub, now])
   const token = randomBytes(32).toString('hex')
   const expiresAt = now + SESSION_TTL_SECONDS
-  db.prepare('INSERT INTO sessions (token_hash, npub, created_at, expires_at) VALUES (?, ?, ?, ?)').run(
-    sha256(token),
-    npub,
-    now,
-    expiresAt,
-  )
+  await db.run('INSERT INTO sessions (token_hash, npub, created_at, expires_at) VALUES (?, ?, ?, ?)', [sha256(token), npub, now, expiresAt])
   return { token, expires_at: expiresAt }
 }
 
 /** The npub for a session token, or null if unknown or expired. */
-export function getSession(db: Db, token: string, now = nowSec()): string | null {
-  const row = db.prepare('SELECT npub, expires_at FROM sessions WHERE token_hash = ?').get(sha256(token)) as
-    | { npub: string; expires_at: number }
-    | undefined
-  if (!row || row.expires_at < now) return null
+export async function getSession(db: Db, token: string, now = nowSec()): Promise<string | null> {
+  const row = await db.get<{ npub: string; expires_at: number }>('SELECT npub, expires_at FROM sessions WHERE token_hash = ?', [sha256(token)])
+  if (!row || Number(row.expires_at) < now) return null
   return row.npub
 }
 
-export function revokeSession(db: Db, token: string): void {
-  db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(token))
+export async function revokeSession(db: Db, token: string): Promise<void> {
+  await db.run('DELETE FROM sessions WHERE token_hash = ?', [sha256(token)])
 }

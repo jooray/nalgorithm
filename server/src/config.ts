@@ -6,7 +6,8 @@
 export interface ServerConfig {
   port: number
   host: string
-  dbPath: string
+  /** `mariadb://user:pass@host:3306/db`, or `sqlite:./file.db` (a bare path also works). */
+  databaseUrl: string
   /**
    * Public base URL of the API, no trailing slash, for example
    * `https://cypherpunk.today/nalgorithm/api`. The login challenge is bound to
@@ -41,7 +42,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   return {
     port: Number(env.PORT ?? 8350),
     host: env.HOST ?? '127.0.0.1',
-    dbPath: env.NALGORITHM_DB_PATH ?? './nalgorithm-server.db',
+    databaseUrl: env.DATABASE_URL ?? env.NALGORITHM_DB_PATH ?? './nalgorithm-server.db',
     publicUrl,
     secureCookie: env.COOKIE_SECURE ? env.COOKIE_SECURE !== 'false' : publicUrl.startsWith('https://'),
     relays: env.RELAYS ? env.RELAYS.split(',').map((r) => r.trim()).filter(Boolean) : DEFAULT_RELAYS,
