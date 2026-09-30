@@ -90,6 +90,13 @@ function schema(d: Dialect): string[] {
       last_seen_at BIGINT NOT NULL,
       relays TEXT NULL
     )${opts}`,
+    // Public page metadata, shared by everyone: nothing here is per user.
+    `CREATE TABLE IF NOT EXISTS link_previews (
+      url_hash ${t(64)} PRIMARY KEY,
+      found INTEGER NOT NULL,
+      data TEXT NULL,
+      fetched_at BIGINT NOT NULL
+    )${opts}`,
   ].filter(Boolean)
 }
 

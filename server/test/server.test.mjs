@@ -24,7 +24,7 @@ async function freshDb() {
   const url = process.env.TEST_DATABASE_URL
   if (!url) return openDb(':memory:')
   shared ??= await openDb(url)
-  for (const t of ['peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
+  for (const t of ['link_previews', 'peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
   return shared
 }
 
@@ -100,9 +100,9 @@ test('store: a large key list is queried in chunks', async () => {
 // ─── settings ────────────────────────────────────────────────────────────────
 
 test('settings: validates every field and rejects unknown ones', async () => {
-  const ok = applySettings(DEFAULT_SETTINGS, { userPrompt: '  bitcoin and nostr  ', hoursBack: 12, topN: 5, learnFromLikes: false })
-  assert.deepEqual(ok, { userPrompt: 'bitcoin and nostr', hoursBack: 12, topN: 5, learnFromLikes: false })
-  for (const bad of [{ hoursBack: 0 }, { hoursBack: 100 }, { topN: 1.5 }, { userPrompt: 5 }, { userPrompt: 'x'.repeat(2001) }, { learnFromLikes: 'yes' }, { apiKey: 'x' }, []]) {
+  const ok = applySettings(DEFAULT_SETTINGS, { userPrompt: '  bitcoin and nostr  ', hoursBack: 12, topN: 5, learnFromLikes: false, linkPreviews: false })
+  assert.deepEqual(ok, { userPrompt: 'bitcoin and nostr', hoursBack: 12, topN: 5, learnFromLikes: false, linkPreviews: false })
+  for (const bad of [{ hoursBack: 0 }, { hoursBack: 100 }, { topN: 1.5 }, { userPrompt: 5 }, { userPrompt: 'x'.repeat(2001) }, { learnFromLikes: 'yes' }, { linkPreviews: 'no' }, { apiKey: 'x' }, []]) {
     assert.throws(() => applySettings(DEFAULT_SETTINGS, bad), SettingsError, JSON.stringify(bad))
   }
 })

@@ -11,6 +11,7 @@ import { effectiveFormat, runDigest } from './digest-job.js'
 import type { DmSender, DmSendOutcome } from './digest-job.js'
 import { createDmInbox, createDmPool, createDmSender, createRelayResolver } from './dm/index.js'
 import { createFeedRunner } from './feed.js'
+import { createPreviewService } from './preview/service.js'
 import { configureWebSocket } from './websocket.js'
 
 const log: PipelineLogger = {
@@ -100,6 +101,11 @@ if (config.bot) {
   log.info('BOT_NSEC is not set: DM commands and digest delivery are off')
 }
 
+const previews = createPreviewService({
+  db,
+  skipHosts: [config.publicUrl, config.webUrl].map((u) => new URL(u).hostname),
+})
+
 const app = createApp({
   db,
   billing,
@@ -108,11 +114,13 @@ const app = createApp({
   secureCookie: config.secureCookie,
   log,
   runDigestNow,
+  previews,
 })
 
 // Old cached scores are useless after 30 days; prune once a day.
 setInterval(() => {
   pruneScores(db).then((n) => log.info(`pruned ${n} old scores`), (e) => log.warn(`prune failed: ${(e as Error).message}`))
+  previews.prune().then((n) => log.info(`pruned ${n} old link previews`), (e) => log.warn(`prune failed: ${(e as Error).message}`))
 }, 86_400_000).unref()
 
 const server = createServer(app)

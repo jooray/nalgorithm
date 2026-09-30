@@ -6,6 +6,8 @@ import { BillingUnavailable } from './billing-client.js'
 import { createStore } from './db.js'
 import type { Db } from './db.js'
 import type { FeedRunner } from './feed.js'
+import { PreviewError } from './preview/service.js'
+import type { PreviewService } from './preview/service.js'
 import { ScheduleError, applySchedulePatch, loadSchedule, saveSchedule } from './schedule.js'
 import type { Schedule } from './schedule.js'
 import { SettingsError, applySettings, loadSettings, saveSettings } from './settings.js'
@@ -21,6 +23,8 @@ export interface AppDeps {
   now?: () => number
   /** Queue a digest for the npub right now. Absent means the endpoint answers 503. */
   runDigestNow?: (npub: string) => Promise<string>
+  /** Link previews. Absent means `/preview` answers `{unavailable: true}`. */
+  previews?: PreviewService
 }
 
 const COOKIE = 'nalgorithm_session'
@@ -183,6 +187,26 @@ export function createApp(deps: AppDeps) {
       }
     }
 
+    if (method === 'GET' && path === '/preview') {
+      if (!deps.previews) return send(res, 200, { unavailable: true })
+      return send(res, 200, await deps.previews.preview(npub, url.searchParams.get('url') ?? ''), { 'Cache-Control': 'private, max-age=300' })
+    }
+
+    if (method === 'GET' && path === '/preview/image') {
+      if (!deps.previews) throw new HttpError(404, 'not found')
+      const img = await deps.previews.image(npub, url.searchParams.get('u') ?? '', url.searchParams.get('s') ?? '')
+      res.writeHead(200, {
+        'Content-Type': img.type,
+        'Content-Length': img.body.length,
+        // The path is content-addressed by the signed image URL, so a long private cache is safe.
+        'Cache-Control': 'private, max-age=604800, immutable',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'none'; sandbox",
+        'Cross-Origin-Resource-Policy': 'same-origin',
+      })
+      return void res.end(img.body)
+    }
+
     if (method === 'GET' && path === '/schedule') return send(res, 200, publicSchedule(await loadSchedule(db, npub)))
 
     if (method === 'PUT' && path === '/schedule') {
@@ -294,6 +318,7 @@ export function createApp(deps: AppDeps) {
       await route(req, res)
     } catch (err) {
       if (err instanceof HttpError) return send(res, err.status, { error: err.message, ...err.extra })
+      if (err instanceof PreviewError) return send(res, err.status, { error: err.message })
       if (err instanceof BillingUnavailable) return send(res, 503, { error: 'billing is unavailable, try again shortly', code: 'billing_unavailable' })
       log.warn(`${req.method} ${req.url} failed: ${(err as Error).message}`)
       send(res, 500, { error: 'internal error' })

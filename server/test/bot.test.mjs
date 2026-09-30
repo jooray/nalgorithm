@@ -18,7 +18,7 @@ async function freshDb() {
   const url = process.env.TEST_DATABASE_URL
   if (!url) return openDb(':memory:')
   shared ??= await openDb(url)
-  for (const t of ['peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'scores', 'learned', 'settings', 'sessions', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
+  for (const t of ['link_previews', 'peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'scores', 'learned', 'settings', 'sessions', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
   return shared
 }
 
