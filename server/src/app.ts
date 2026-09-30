@@ -12,6 +12,8 @@ import { PreviewError } from './preview/service.js'
 import type { PreviewService } from './preview/service.js'
 import { ScheduleError, applySchedulePatch, loadSchedule, saveSchedule } from './schedule.js'
 import type { Schedule } from './schedule.js'
+import { SNAPSHOT_FRESH_SECONDS, flagNew, loadSnapshot, saveSnapshot, settingsSignature } from './snapshot.js'
+import type { StoredSnapshot } from './snapshot.js'
 import { SettingsError, applySettings, loadSettings, saveSettings } from './settings.js'
 
 export interface AppDeps {
@@ -281,12 +283,15 @@ export function createApp(deps: AppDeps) {
       }
     }
 
-    if (method === 'GET' && path === '/feed') {
+    if (method === 'GET' && (path === '/feed' || path === '/feed/latest')) {
+      const latest = path === '/feed/latest'
       const settings = await loadSettings(db, npub)
-      if (!settings.userPrompt) throw new HttpError(400, 'set a prompt first', { code: 'no_prompt' })
+      if (!latest && !settings.userPrompt) throw new HttpError(400, 'set a prompt first', { code: 'no_prompt' })
 
-      // Entitlement: a never-seen npub starts its trial here, on first real use.
+      // Entitlement. A run starts a never-seen npub's trial; reading the last
+      // snapshot never does, and a never-seen npub has no snapshot anyway.
       let state = await billing.entitlement(npub)
+      if (state.state === 'none' && latest) return send(res, 200, { snapshot: null, entitlement: state })
       if (state.state === 'none') {
         try {
           state = await billing.startTrial(npub)
@@ -300,7 +305,38 @@ export function createApp(deps: AppDeps) {
         throw new HttpError(402, 'a subscription is required', { code: 'paywall', state: state.state, until: state.until })
       }
 
+      const previous = await loadSnapshot(db, npub)
+      const sig = settingsSignature(settings)
+      const answer = (snap: StoredSnapshot, posts: Array<Record<string, unknown>>, cached: boolean) => ({
+        entitlement: state,
+        fetched: snap.fetched,
+        hoursBack: snap.hoursBack,
+        posts,
+        profiles: snap.profiles,
+        learnedPrompt: snap.learnedPrompt,
+        createdAt: snap.createdAt,
+        ageSeconds: Math.max(0, nowSec() - snap.createdAt),
+        cached,
+        settingsChanged: snap.sig !== sig,
+      })
+
+      // Reading the snapshot never ranks and never touches the daily cap.
+      if (latest) {
+        if (!previous) return send(res, 200, { snapshot: null, entitlement: state })
+        return send(res, 200, { snapshot: answer(previous, previous.posts.map((p) => ({ ...p, isNew: false })), true), entitlement: state })
+      }
+
+      // A fresh snapshot for the same settings answers a repeat call without a
+      // run, so several tabs or an auto-refresh loop cost nothing.
+      const force = url.searchParams.get('force') === '1'
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 200)
+      if (!force && previous && previous.sig === sig && nowSec() - previous.createdAt < SNAPSHOT_FRESH_SECONDS) {
+        return send(res, 200, answer(previous, previous.posts.slice(0, limit).map((p) => ({ ...p, isNew: false })), true))
+      }
+
       if (running.has(npub)) throw new HttpError(429, 'a feed run is already in progress', { code: 'in_progress' })
+      // One unit per real run, as before. Served-from-snapshot answers above
+      // never reach this line, so they are free.
       const cap = await billing.consume(npub, 'feed', 1, `feed:${npub}:${nowSec()}`)
       if (!cap.allowed) {
         if (cap.reason === 'billing_unavailable') throw new HttpError(503, 'billing is unavailable, try again shortly', { code: 'billing_unavailable' })
@@ -310,18 +346,14 @@ export function createApp(deps: AppDeps) {
       running.add(npub)
       try {
         const result = await deps.feed(npub, settings, createStore(db, npub, nowSec))
-        const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 200)
-        const posts = result.posts.slice(0, limit)
+        const posts = result.posts.slice(0, limit).map(publicPost)
         // Authors plus anyone mentioned in the text, so mentions render as names.
-        const authors = new Set(collectPostPubkeys(posts, Infinity))
+        const authors = new Set(collectPostPubkeys(result.posts.slice(0, limit), Infinity))
         const profiles = Object.fromEntries(Object.entries(result.profiles).filter(([k]) => authors.has(k)))
-        return send(res, 200, {
-          entitlement: state,
-          fetched: result.fetched,
-          hoursBack: settings.hoursBack,
-          posts: posts.map(publicPost),
-          profiles,
-        })
+        const snap = { posts, profiles, fetched: result.fetched, hoursBack: settings.hoursBack, learnedPrompt: result.learnedPrompt, sig }
+        // A failed save must not turn a good ranking into an error.
+        await saveSnapshot(db, npub, snap, nowSec()).catch((err) => log.warn(`snapshot save failed: ${(err as Error).message}`))
+        return send(res, 200, answer({ ...snap, createdAt: nowSec() }, flagNew(posts, previous), false))
       } finally {
         running.delete(npub)
       }

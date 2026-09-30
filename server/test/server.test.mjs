@@ -5,6 +5,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { openDb, createStore, pruneScores, SCORE_TTL_SECONDS } from '../dist/db.js'
 import { createApp } from '../dist/app.js'
 import { loadFeedProfiles } from '../dist/feed.js'
+import { trimSnapshot, flagNew, SNAPSHOT_FRESH_SECONDS } from '../dist/snapshot.js'
 import * as nip19 from 'nostr-tools/nip19'
 import { createBillingClient, BillingUnavailable } from '../dist/billing-client.js'
 import { applySettings, DEFAULT_SETTINGS, SettingsError } from '../dist/settings.js'
@@ -26,7 +27,7 @@ async function freshDb() {
   const url = process.env.TEST_DATABASE_URL
   if (!url) return openDb(':memory:')
   shared ??= await openDb(url)
-  for (const t of ['link_previews', 'peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
+  for (const t of ['link_previews', 'peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'feed_snapshots', 'scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
   return shared
 }
 
@@ -208,7 +209,7 @@ function fakeBilling(initial = { state: 'active', until: T0 + 86400 }) {
   return b
 }
 
-async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow } = {}) {
+async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, clock = { t: T0 } } = {}) {
   const db = await freshDb()
   const feedCalls = []
   const runner = feed ?? (async (npub, settings) => {
@@ -222,7 +223,7 @@ async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow } = {})
       ],
     }
   })
-  const server = createServer(createApp({ db, billing, feed: runner, publicUrl: PUBLIC, secureCookie: false, log: silent, now: () => T0, runDigestNow }))
+  const server = createServer(createApp({ db, billing, feed: runner, publicUrl: PUBLIC, secureCookie: false, log: silent, now: () => clock.t, runDigestNow }))
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${server.address().port}`
   const sk = generateSecretKey()
@@ -239,7 +240,7 @@ async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow } = {})
     return { res, body: await res.clone().json() }
   }
   try {
-    await fn({ base, json, login, sk, npub, db, billing, feedCalls })
+    await fn({ base, json, login, sk, npub, db, billing, feedCalls, clock })
   } finally {
     server.close()
   }
@@ -404,6 +405,152 @@ test('HTTP: a second concurrent feed run for the same npub is refused', async ()
     release()
     assert.equal((await first).status, 200)
   }, { feed: async () => { await gate; return { fetched: 0, profiles: {}, posts: [] } } })
+})
+
+// ─── feed snapshots ──────────────────────────────────────────────────────────
+
+test('snapshot: /feed saves the ranking and /feed/latest returns it with its age, never ranking or consuming', async () => {
+  const clock = { t: T0 }
+  await withApp(async ({ json, login, npub, billing, feedCalls, db }) => {
+    const { body } = await login()
+    await setPrompt(json, body.token)
+    let res = await json('/feed/latest', { token: body.token })
+    assert.equal(res.status, 200)
+    assert.equal((await res.json()).snapshot, null)
+
+    const run = await (await json('/feed', { token: body.token })).json()
+    assert.equal(run.cached, false)
+    assert.equal(run.ageSeconds, 0)
+    assert.equal(billing.consumed.length, 1)
+    const row = await db.get('SELECT created_at, json FROM feed_snapshots WHERE npub = ?', [npub])
+    assert.equal(Number(row.created_at), T0)
+    assert.equal(JSON.parse(row.json).posts.length, 2)
+    assert.equal('rawEvent' in JSON.parse(row.json).posts[0], false)
+
+    clock.t = T0 + 300
+    res = await json('/feed/latest', { token: body.token })
+    const data = await res.json()
+    assert.equal(data.snapshot.ageSeconds, 300)
+    assert.equal(data.snapshot.posts.length, 2)
+    assert.equal(data.snapshot.posts.every((p) => p.isNew === false), true)
+    assert.deepEqual(Object.keys(data.snapshot.profiles), [npub])
+    assert.equal(data.entitlement.state, 'active')
+    assert.equal(data.snapshot.settingsChanged, false)
+    assert.equal(feedCalls.length, 1, 'latest never runs the feed')
+    assert.equal(billing.consumed.length, 1, 'latest never consumes the cap')
+  }, { clock })
+})
+
+test('snapshot: /feed/latest follows the paywall and billing rules, and never starts a trial', async () => {
+  await withApp(async ({ json, login, billing }) => {
+    const { body } = await login()
+    await setPrompt(json, body.token)
+    await json('/feed', { token: body.token })
+    billing.current = { state: 'expired', until: T0 - 5 }
+    let res = await json('/feed/latest', { token: body.token })
+    assert.equal(res.status, 402)
+    assert.equal((await res.json()).code, 'paywall')
+    billing.current = 'throw'
+    res = await json('/feed/latest', { token: body.token })
+    assert.equal(res.status, 503)
+    billing.current = { state: 'none' }
+    res = await json('/feed/latest', { token: body.token })
+    assert.equal(res.status, 200)
+    assert.equal((await res.json()).snapshot, null)
+    assert.equal(billing.trials.length, 0)
+    assert.equal((await json('/feed/latest')).status, 401)
+  })
+})
+
+test('snapshot: isNew flags posts that were not in the previous snapshot', async () => {
+  const clock = { t: T0 }
+  let round = 0
+  const feed = async (npub) => {
+    round++
+    const base = [{ id: 'p1', type: 'original', author: npub, content: 'a', createdAt: T0, score: 9 }]
+    if (round > 1) base.push({ id: 'p2', type: 'original', author: npub, content: 'b', createdAt: T0, score: 5 })
+    return { fetched: base.length, profiles: {}, posts: base }
+  }
+  await withApp(async ({ json, login }) => {
+    const { body } = await login()
+    await setPrompt(json, body.token)
+    const first = await (await json('/feed', { token: body.token })).json()
+    assert.deepEqual(first.posts.map((p) => p.isNew), [false], 'no previous snapshot: nothing is new')
+    clock.t = T0 + 600
+    const second = await (await json('/feed', { token: body.token })).json()
+    assert.deepEqual(second.posts.map((p) => [p.id, p.isNew]), [['p1', false], ['p2', true]])
+    clock.t = T0 + 1200
+    const third = await (await json('/feed', { token: body.token })).json()
+    assert.equal(third.posts.every((p) => p.isNew === false), true)
+  }, { feed, clock })
+})
+
+test('snapshot: a snapshot under two minutes old is served instead of a rerun, unless forced', async () => {
+  const clock = { t: T0 }
+  await withApp(async ({ json, login, billing, feedCalls }) => {
+    const { body } = await login()
+    await setPrompt(json, body.token)
+    await json('/feed', { token: body.token })
+    clock.t = T0 + SNAPSHOT_FRESH_SECONDS - 1
+    const again = await (await json('/feed', { token: body.token })).json()
+    assert.equal(again.cached, true)
+    assert.equal(again.ageSeconds, SNAPSHOT_FRESH_SECONDS - 1)
+    assert.equal(feedCalls.length, 1)
+    assert.equal(billing.consumed.length, 1, 'a served snapshot costs nothing')
+    const forced = await (await json('/feed?force=1', { token: body.token })).json()
+    assert.equal(forced.cached, false)
+    assert.equal(feedCalls.length, 2)
+    clock.t += SNAPSHOT_FRESH_SECONDS
+    assert.equal((await (await json('/feed', { token: body.token })).json()).cached, false)
+    assert.equal(feedCalls.length, 3)
+    // Changed settings make a young snapshot stale.
+    await json('/settings', { method: 'PUT', body: { userPrompt: 'something else' }, token: body.token })
+    const changed = await (await json('/feed/latest', { token: body.token })).json()
+    assert.equal(changed.snapshot.settingsChanged, true)
+    clock.t += 5
+    assert.equal((await (await json('/feed', { token: body.token })).json()).cached, false)
+    assert.equal(feedCalls.length, 4)
+  }, { clock })
+})
+
+test('snapshot: the guard does not bypass the paywall', async () => {
+  await withApp(async ({ json, login, billing }) => {
+    const { body } = await login()
+    await setPrompt(json, body.token)
+    await json('/feed', { token: body.token })
+    billing.current = { state: 'expired', until: T0 - 5 }
+    assert.equal((await json('/feed', { token: body.token })).status, 402)
+  })
+})
+
+test('snapshot: a capped run leaves the stored snapshot readable', async () => {
+  const clock = { t: T0 }
+  await withApp(async ({ json, login, billing }) => {
+    const { body } = await login()
+    await setPrompt(json, body.token)
+    await json('/feed', { token: body.token })
+    clock.t = T0 + 900
+    billing.consumeResult = { allowed: false, reason: 'cap_reached' }
+    assert.equal((await json('/feed', { token: body.token })).status, 429)
+    const latest = await (await json('/feed/latest', { token: body.token })).json()
+    assert.equal(latest.snapshot.posts.length, 2)
+  }, { clock })
+})
+
+test('snapshot: trimSnapshot drops the lowest-ranked posts and the profiles only they needed', () => {
+  const H = (c) => c.repeat(64)
+  const posts = Array.from({ length: 40 }, (_, i) => ({ id: `p${i}`, type: 'original', author: i < 20 ? H('a') : H('b'), content: 'x'.repeat(1000), createdAt: T0, score: 40 - i }))
+  const snap = { posts, profiles: { [H('a')]: { name: 'a' }, [H('b')]: { name: 'b' } }, fetched: 40, hoursBack: 24, sig: 's' }
+  const out = trimSnapshot(snap, 15_000)
+  assert.ok(Buffer.byteLength(JSON.stringify(out)) <= 15_000)
+  assert.ok(out.posts.length > 0 && out.posts.length < 40)
+  assert.deepEqual(out.posts.map((p) => p.id), posts.slice(0, out.posts.length).map((p) => p.id))
+  assert.deepEqual(Object.keys(out.profiles), [H('a')])
+  assert.equal(trimSnapshot(snap), snap, 'under the bound nothing changes')
+})
+
+test('snapshot: flagNew with no previous snapshot marks nothing', () => {
+  assert.deepEqual(flagNew([{ id: 'a' }], null), [{ id: 'a', isNew: false }])
 })
 
 test('HTTP: checkout uses the session npub, allowlists plans, and never takes an npub from the body', async () => {

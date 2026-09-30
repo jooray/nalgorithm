@@ -107,6 +107,13 @@ function schema(d: Dialect): string[] {
       missing INTEGER NOT NULL DEFAULT 0,
       fetched_at BIGINT NOT NULL
     )${opts}`,
+    // The last ranked feed per npub, so a reload can show it without re-ranking.
+    // MariaDB TEXT holds 64 KB, which a feed does not fit in.
+    `CREATE TABLE IF NOT EXISTS feed_snapshots (
+      npub ${t(64)} PRIMARY KEY,
+      created_at BIGINT NOT NULL,
+      json ${d === 'sqlite' ? 'TEXT' : 'MEDIUMTEXT'} NOT NULL
+    )${opts}`,
   ].filter(Boolean)
 }
 
