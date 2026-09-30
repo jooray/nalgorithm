@@ -58,7 +58,7 @@
       </section>
 
       <!-- ─── Digest tab ───────────────────────────────────────────────────── -->
-      <section id="view-digest" class="view" data-view="digest" aria-label="Digest">
+      <section id="view-digest" class="view hidden" data-view="digest" aria-label="Digest">
         <div id="hero" class="hero">
           <div class="hero-head">
             <h1 class="hero-title" id="hero-title"><span id="hero-line1">Your morning,</span> <span id="hero-line2" class="hero-len"></span></h1>
@@ -68,6 +68,7 @@
           <div id="hero-empty" class="hero-empty hidden">
             <p id="hero-empty-text"></p>
             <button id="btn-make" class="btn btn-hero" type="button"></button>
+            <div id="make-bar-hero" class="indet on-hero hidden" role="progressbar" aria-label="Writing your digest"></div>
             <p id="hero-empty-status" class="form-status on-hero" role="status"></p>
           </div>
 
@@ -114,6 +115,8 @@
             <h2 id="digest-feed-title">Digest feed</h2>
             <button id="btn-make-list" class="btn btn-small" type="button"></button>
           </div>
+          <p id="make-again-hint" class="field-hint hidden"></p>
+          <div id="make-bar-list" class="indet hidden" role="progressbar" aria-label="Writing your digest"></div>
           <p id="list-status" class="form-status" role="status"></p>
           <div id="list-loading" class="state-row hidden" role="status"><span class="spinner"></span><span>Loading your digests…</span></div>
           <div id="list-error" class="state-card is-error hidden" role="alert">
@@ -126,13 +129,19 @@
       </section>
 
       <!-- ─── Feed tab ─────────────────────────────────────────────────────── -->
-      <section id="view-feed" class="view hidden" data-view="feed" aria-label="Feed">
+      <section id="view-feed" class="view" data-view="feed" aria-label="Feed">
         <header class="view-head">
           <h1>Feed</h1>
           <button id="btn-refresh" class="btn btn-primary byok-only" type="button" disabled></button>
           <button id="btn-hosted-refresh" class="btn btn-primary hosted-only" type="button"></button>
         </header>
         <p id="status" class="status" role="status" aria-live="polite"></p>
+        <div id="feed-meta" class="feed-meta hidden">
+          <span id="feed-age" class="feed-age"></span>
+          <span id="feed-busy" class="feed-busy hidden" role="status"><span class="spinner"></span><span id="feed-busy-text">Ranking new posts…</span></span>
+        </div>
+        <p id="feed-quiet" class="feed-quiet hidden" role="status"></p>
+        <div class="pill-anchor"><button id="new-pill" class="new-pill hidden" type="button"></button></div>
 
         <!-- Bring your own key -->
         <div id="feed-empty" class="state-card byok-only">
@@ -174,6 +183,7 @@
 
         <div id="hosted-empty" class="state-card hosted-only hidden">
           <p id="hosted-empty-text">Press Refresh to rank your feed.</p>
+          <button id="btn-hosted-empty-action" class="btn btn-primary btn-small hidden" type="button">Write what you care about</button>
         </div>
         <div id="hosted-feed" class="feed-list hosted-only"></div>
       </section>
@@ -221,7 +231,7 @@
             </div>
             <label class="check">
               <input type="checkbox" id="input-auto-refresh" checked>
-              <span>Load the feed automatically on open</span>
+              <span>Update my feed automatically when I open the app<small>Shows the feed from last time at once, then ranks new posts in the background. Off: it only updates when you press Refresh.</small></span>
             </label>
             <label class="check">
               <input type="checkbox" id="input-digest-speech" checked>
@@ -323,6 +333,7 @@
             <label for="hosted-prompt">Your words (the ranking rule)</label>
             <textarea id="hosted-prompt" rows="7" maxlength="2000" placeholder="I like cypherpunk culture, decentralized technology, Bitcoin, and thoughtful longform posts. I don't care about price speculation or GM posts."></textarea>
             <p id="hosted-prompt-count" class="field-hint count" aria-live="polite"></p>
+            <p id="hosted-prompt-firstrun" class="field-hint hidden">Ranking your feed and writing your first digest start as soon as you save this.</p>
           </section>
 
           <section class="tune-section">
@@ -378,7 +389,8 @@
             <button id="btn-digest-save" class="btn btn-secondary btn-full" type="button">Save digest schedule</button>
             <p id="digest-schedule-status" class="form-status" role="status"></p>
             <p id="digest-last-status" class="field-hint" role="status"></p>
-            <button id="btn-digest-now" class="btn btn-small btn-full" type="button">Send a digest now</button>
+            <button id="btn-digest-now" class="btn btn-small btn-full" type="button">Send me a digest now</button>
+            <div id="make-bar-tune" class="indet hidden" role="progressbar" aria-label="Writing your digest"></div>
             <p id="digest-now-status" class="form-status" role="status"></p>
           </section>
         </div>
@@ -425,8 +437,8 @@
     </main>
 
     <nav id="tabbar" class="tabbar" aria-label="Sections">
-      <button class="tab" type="button" data-tab="digest" aria-current="page"></button>
-      <button class="tab" type="button" data-tab="feed"></button>
+      <button class="tab" type="button" data-tab="feed" aria-current="page"></button>
+      <button class="tab" type="button" data-tab="digest"></button>
       <button class="tab" type="button" data-tab="tune"></button>
     </nav>
 

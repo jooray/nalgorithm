@@ -25,11 +25,14 @@ import { renderFeed, type RenderOptions } from './render.js'
 import { clockLabel, dayLabel } from './time.js'
 import { Waveform } from './waveform.js'
 import { safeAudioUrl } from './hosted/logic.js'
+import { ANOTHER_DIGEST_HINT, makeButtonView } from './digest-job-logic.js'
 
 export interface DigestBackend {
   mode: 'hosted' | 'byok'
-  /** The button that makes a new digest. */
+  /** The button that makes the first digest. */
   makeLabel: string
+  /** The same button once a digest exists. */
+  makeAnotherLabel: string
   /** What the empty hero says about getting the first one. */
   emptyText: string
   make(): Promise<void>
@@ -68,6 +71,8 @@ let notesOpen = false
 let notesTab: 'notes' | 'text' = 'notes'
 let scrubFraction: number | null = null
 let makeBusy = false
+/** A digest is being written somewhere else (the server), reported by the backend. */
+let jobRunning = false
 let lastShell = ''
 /** Audio files made in this session (bring your own key): digest id to blob URL. */
 const madeAudio = new Map<string, { url: string; filename: string }>()
@@ -98,9 +103,7 @@ export function initDigestView(b: DigestBackend): void {
   $('btn-back').addEventListener('click', () => player.skip(-15))
   $('btn-fwd').addEventListener('click', () => player.skip(30))
   $('btn-shownotes').addEventListener('click', () => toggleNotes())
-  $('btn-make').textContent = b.makeLabel
   $('btn-make').addEventListener('click', () => void runMake())
-  $('btn-make-list').textContent = b.makeLabel
   $('btn-make-list').addEventListener('click', () => void runMake())
   $('hero-empty-text').textContent = b.emptyText
   $('btn-audio').addEventListener('click', () => void onAudioButton())
@@ -134,13 +137,18 @@ export function digestCount(): number {
   return digests.length
 }
 
+export function digestIds(): string[] {
+  return digests.map((d) => d.id)
+}
+
 export function stopPlayback(): void {
   if (player?.current.playing) player.pause()
 }
 
 export function setMakeStatus(text: string, isError = false): void {
-  // One line, where the reader is looking: the empty hero has its own button, the list has its own.
-  const heroShown = $('hero-empty-status').offsetParent !== null
+  // One line, where the reader is looking: under the hero button while the hero asks for the
+  // first digest, in the list header once there are digests.
+  const heroShown = !$('hero-empty').classList.contains('hidden')
   for (const id of ['hero-empty-status', 'list-status']) {
     const el = $(id)
     el.textContent = (id === 'hero-empty-status') === heroShown ? text : ''
@@ -150,7 +158,48 @@ export function setMakeStatus(text: string, isError = false): void {
 
 export function setMakeBusy(busy: boolean): void {
   makeBusy = busy
-  for (const id of ['btn-make', 'btn-make-list']) $<HTMLButtonElement>(id).disabled = busy
+  applyMakeState()
+}
+
+/**
+ * A digest is (or is no longer) being written on the server. While it is, every
+ * make button is disabled and says so, and a progress bar shows where the reader looks.
+ */
+export function setDigestJobRunning(running: boolean): void {
+  jobRunning = running
+  applyMakeState()
+}
+
+export function digestJobRunning(): boolean {
+  return jobRunning || makeBusy
+}
+
+/** Label, disabled state and progress bars of the make buttons, from the current state. */
+export function applyMakeState(): void {
+  if (!backend) return
+  const running = jobRunning || makeBusy
+  const has = digests.length > 0
+  const view = makeButtonView({ running, hasDigests: has, firstLabel: backend.makeLabel, anotherLabel: backend.makeAnotherLabel })
+  for (const id of ['btn-make', 'btn-make-list']) {
+    const b = $<HTMLButtonElement>(id)
+    b.textContent = view.label
+    b.disabled = view.disabled
+    b.classList.toggle('is-busy', view.busy)
+    b.setAttribute('aria-busy', String(view.busy))
+  }
+  $('make-bar-hero').classList.toggle('hidden', !running)
+  $('make-bar-list').classList.toggle('hidden', !(running && has))
+  const hint = $('make-again-hint')
+  hint.textContent = ANOTHER_DIGEST_HINT
+  hint.classList.toggle('hidden', !has || running)
+  for (const id of ['btn-digest-now']) {
+    const tune = document.getElementById(id) as HTMLButtonElement | null
+    if (!tune) continue
+    tune.textContent = running ? view.label : has ? 'Send me another digest now' : 'Send me a digest now'
+    tune.disabled = running
+    tune.classList.toggle('is-busy', running)
+  }
+  document.getElementById('make-bar-tune')?.classList.toggle('hidden', !running)
 }
 
 /** Streaming progress of a digest being written in the browser. */
@@ -236,6 +285,7 @@ function renderAll(): void {
   $('hero-line1').textContent = d ? 'Your morning,' : 'No digest yet.'
   $('digest-list-empty').classList.toggle('hidden', has)
   $('btn-make-list').classList.toggle('hidden', !has)
+  applyMakeState()
   lastShell = ''
   renderList()
   renderShowNotes()

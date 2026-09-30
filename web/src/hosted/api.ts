@@ -10,6 +10,7 @@ import { verifyEvent } from 'nostr-tools/pure'
 import type { SignFn } from '../nostr-login.js'
 import type { ScoredPost } from 'nalgorithm'
 import { readDigest, type DigestRecord } from '../digest-model.js'
+import { readDigestStatus, type DigestStatus } from '../digest-job-logic.js'
 import {
   buildLoginTemplate,
   type Entitlement,
@@ -22,11 +23,14 @@ import {
 export class ApiError extends Error {
   readonly status: number
   readonly code?: string
-  constructor(status: number, message: string, code?: string) {
+  /** The rest of the error body (for example `startedAt` on a 409 digest_running). */
+  readonly data: Record<string, unknown>
+  constructor(status: number, message: string, code?: string, data: Record<string, unknown> = {}) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.data = data
   }
 }
 
@@ -47,8 +51,16 @@ export interface FeedResponse {
   fetched: number
   hoursBack: number
   /** Trimmed to what the renderer needs; the raw event stays on the server. */
-  posts: Array<Omit<ScoredPost, 'rawEvent'>>
+  posts: Array<Omit<ScoredPost, 'rawEvent'> & { isNew?: boolean }>
   profiles: Record<string, FeedProfile>
+  learnedPrompt?: string
+  /** Unix seconds of the run this ranking came from. */
+  createdAt?: number
+  ageSeconds?: number
+  /** True when the server answered from its stored snapshot instead of running. */
+  cached?: boolean
+  /** The prompt or window changed since this ranking was made. */
+  settingsChanged?: boolean
 }
 
 export interface Charge {
@@ -102,7 +114,8 @@ async function request<T>(
     throw new ApiError(
       res.status,
       typeof d.error === 'string' ? d.error : res.statusText || `HTTP ${res.status}`,
-      typeof d.code === 'string' ? d.code : undefined
+      typeof d.code === 'string' ? d.code : undefined,
+      (data && typeof data === 'object' ? (data as Record<string, unknown>) : {})
     )
   }
   return data as T
@@ -149,8 +162,15 @@ export function putSettings(patch: Partial<HostedSettings>): Promise<HostedSetti
   return request<HostedSettings>('PUT', 'settings', patch)
 }
 
-export function getFeed(limit = 100): Promise<FeedResponse> {
-  return request<FeedResponse>('GET', `feed?limit=${limit}`, undefined, FEED_TIMEOUT_MS)
+/** Rank the feed. `force` skips the server's 2-minute "just did that" shortcut (the Refresh button). */
+export function getFeed(limit = 100, force = false): Promise<FeedResponse> {
+  return request<FeedResponse>('GET', `feed?limit=${limit}${force ? '&force=1' : ''}`, undefined, FEED_TIMEOUT_MS)
+}
+
+/** The last ranking the server stored for this person, or null. Never ranks, never uses the daily cap. */
+export async function getLatestFeed(): Promise<FeedResponse | null> {
+  const res = await request<{ snapshot: Omit<FeedResponse, 'entitlement'> | null; entitlement: Entitlement }>('GET', 'feed/latest')
+  return res.snapshot ? { ...res.snapshot, entitlement: res.entitlement } : null
 }
 
 export function createCheckout(plan: PlanId, sats?: number): Promise<Charge> {
@@ -197,7 +217,13 @@ export async function getDigest(id: string): Promise<DigestRecord | null> {
   return readDigest(body)
 }
 
-/** The digest is made in the background and arrives by DM. */
-export function digestNow(): Promise<{ message: string }> {
-  return request<{ message: string }>('POST', 'digest/now')
+/** The digest is made in the background and arrives by DM. The answer carries the job's status. */
+export async function digestNow(): Promise<{ message: string; status: DigestStatus }> {
+  const res = await request<{ message: string }>('POST', 'digest/now')
+  return { message: res.message, status: readDigestStatus(res) }
+}
+
+/** Whether a digest is being written, since when, and how long the last one took. */
+export async function getDigestStatus(): Promise<DigestStatus> {
+  return readDigestStatus(await request<unknown>('GET', 'digest/status'))
 }
