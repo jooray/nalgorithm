@@ -43,6 +43,14 @@ const HOSTED_NOTICE = `
   never published to a relay and cannot post or spend anything for you. No API
   key is involved.`
 
+const ACTIONS_NOTICE = `
+  <strong>You choose every post.</strong> Nalgorithm asks your signer to sign a
+  reply, boost, like or zap only when you tap it. Nothing is sent on its own,
+  and the connection lives only while this tab is open.`
+
+/** The event kinds the note actions sign: reply, boost, like, generic boost, zap request. */
+export const ACTION_SIGN_KINDS = [1, 6, 7, 16, 9734]
+
 let dialog: HTMLDialogElement | null = null
 let activeSession: RemoteSignerSession | null = null
 
@@ -63,13 +71,27 @@ export function openHostedLoginDialog(signerRelays?: string[]): Promise<LoginRes
   return openDialog(signerRelays, true)
 }
 
-function openDialog(signerRelays: string[] | undefined, hosted: boolean): Promise<LoginResult | null> {
+/**
+ * Open the same dialog to connect a signer for note actions (reply, boost,
+ * like, zap). The result can sign; the caller owns `close()`.
+ */
+export function openActionSignerDialog(signerRelays?: string[]): Promise<LoginResult | null> {
+  return openDialog(signerRelays, true, true)
+}
+
+function openDialog(signerRelays: string[] | undefined, hosted: boolean, actions = false): Promise<LoginResult | null> {
   return new Promise((resolve) => {
     const el = ensureDialog()
-    el.querySelector<HTMLElement>('.login-readonly')!.innerHTML = hosted ? HOSTED_NOTICE : READONLY_NOTICE
-    el.querySelector<HTMLElement>('.login-header h2')!.textContent = hosted
-      ? 'Sign in to hosted Nalgorithm'
-      : 'Connect your Nostr identity'
+    el.querySelector<HTMLElement>('.login-readonly')!.innerHTML = actions
+      ? ACTIONS_NOTICE
+      : hosted
+        ? HOSTED_NOTICE
+        : READONLY_NOTICE
+    el.querySelector<HTMLElement>('.login-header h2')!.textContent = actions
+      ? 'Connect a signer'
+      : hosted
+        ? 'Sign in to hosted Nalgorithm'
+        : 'Connect your Nostr identity'
     const body = el.querySelector<HTMLElement>('.login-body')!
     const status = el.querySelector<HTMLElement>('.login-status')!
 
@@ -110,7 +132,9 @@ function openDialog(signerRelays: string[] | undefined, hosted: boolean): Promis
     const hint = document.createElement('p')
     hint.className = 'login-hint'
     hint.textContent = hasNip07()
-      ? hosted
+      ? actions
+        ? 'Uses Alby, nos2x, or a similar extension. It will ask you to approve each post.'
+        : hosted
         ? 'Reads your public key from Alby, nos2x, or a similar extension, then asks it to sign one login event.'
         : 'Reads your public key from Alby, nos2x, or a similar extension.'
       : 'Install Alby or nos2x to use this option, or scan the code below.'
@@ -128,13 +152,18 @@ function openDialog(signerRelays: string[] | undefined, hosted: boolean): Promis
     startBtn.textContent = 'Use a remote signer (Amber)'
     startBtn.addEventListener('click', () => {
       startBtn.remove()
-      beginRemoteSigner(signerWrap, status, finish, signerRelays, hosted)
+      beginRemoteSigner(signerWrap, status, finish, signerRelays, hosted, actions)
     })
     signerWrap.appendChild(startBtn)
 
     body.appendChild(divider('or'))
 
-    if (hosted) {
+    if (actions) {
+      const why = document.createElement('p')
+      why.className = 'login-hint'
+      why.textContent = 'A pasted npub cannot sign anything, so it is not offered here.'
+      body.appendChild(why)
+    } else if (hosted) {
       // No manual entry: an npub someone pasted proves nothing about who holds
       // the key, and the server only accepts a signed login.
       const why = document.createElement('p')
@@ -174,11 +203,15 @@ function beginRemoteSigner(
   status: HTMLElement,
   finish: (result: LoginResult | null) => void,
   relays?: string[],
-  hosted = false
+  hosted = false,
+  actions = false
 ): void {
   let session: RemoteSignerSession
   try {
-    session = startRemoteSignerLogin(relays?.length ? relays : undefined, { sign: hosted })
+    session = startRemoteSignerLogin(relays?.length ? relays : undefined, {
+      sign: hosted,
+      ...(actions ? { signKinds: ACTION_SIGN_KINDS } : {}),
+    })
   } catch (err) {
     setStatus(status, (err as Error).message, true)
     return
@@ -194,7 +227,9 @@ function beginRemoteSigner(
 
   const caption = document.createElement('p')
   caption.className = 'login-hint'
-  caption.textContent = hosted
+  caption.textContent = actions
+    ? 'Scan with Amber, or open the link below if your signer is on this device. Approve the connection and the kinds of post it lists.'
+    : hosted
     ? 'Scan with Amber, or open the link below if your signer is on this device. Approve the connection and the login signature.'
     : 'Scan with Amber, or open the link below if your signer is on this device.'
   wrap.appendChild(caption)

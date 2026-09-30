@@ -29,6 +29,7 @@ import {
 } from './settings.js'
 
 import { renderFeed, aggregateBoosts, clientRenderOptions } from './render.js'
+import { setActorProvider } from './signer.js'
 
 import '@fontsource-variable/inter/wght.css'
 import './style.css'
@@ -507,6 +508,12 @@ document.addEventListener('DOMContentLoaded', () => {
     initHosted()
     return
   }
+
+  // Whose key note actions sign for: the npub this reader set up.
+  setActorProvider(() => {
+    const npub = loadSettings().npub.trim()
+    return npub ? pubkeyToHex(npub) : null
+  })
 
   document.getElementById('mode-line')!.textContent = 'You are using your own model key. Everything runs in this browser.'
   document.getElementById('btn-switch-hosted')!.addEventListener('click', () => switchMode('hosted'))

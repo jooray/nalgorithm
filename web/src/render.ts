@@ -36,6 +36,11 @@ import type { AppSettings } from './settings.js'
 import { copyText } from './clipboard.js'
 import { noteActions, renderActionRow, type NoteLinks } from './actions.js'
 import { icon, type IconName } from './icons.js'
+import type { NoteTarget } from './note-ui.js'
+import { directReplies, parentOf } from './note-logic.js'
+import { fetchEvent, queryEvents, readRelaysFor } from './relays.js'
+import { knownProfiles, loadProfiles } from './profiles.js'
+import type { Event as NostrEvent } from 'nostr-tools/pure'
 import { openSheet } from './sheet.js'
 import { relativeTime } from './time.js'
 
@@ -237,6 +242,29 @@ function linksFor(post: DisplayPost, options: RenderOptions): NoteLinks & { even
   }
 }
 
+/**
+ * The note as the actions see it. A digest's stored note carries a stand-in raw
+ * event (no signature, no tags), which must never be mistaken for the real
+ * one: only a signed event counts as the original.
+ */
+function targetFor(post: DisplayPost, options: RenderOptions): NoteTarget {
+  const raw = post.rawEvent as NostrEvent | undefined
+  return {
+    id: post.id,
+    author: post.author,
+    kind: raw?.kind ?? 1,
+    relay: (post as { relay?: string }).relay,
+    event: raw && raw.sig ? raw : undefined,
+    content: post.content,
+    authorName: shortName(post.author, options),
+  }
+}
+
+function shortName(pubkey: string, options: RenderOptions): string {
+  const label = authorLabel(pubkey, options.profiles?.get(pubkey))
+  return label.isNpub ? `${label.text.slice(0, 12)}…${label.text.slice(-4)}` : label.text
+}
+
 /** Name, handle and time on one line, as Primal, Damus and Amethyst set them. */
 function renderNoteHead(post: DisplayPost, options: RenderOptions): HTMLElement {
   const head = el('div', 'note-head')
@@ -326,7 +354,7 @@ function renderPostCard(post: DisplayPost, options: RenderOptions, top = false):
   main.appendChild(renderScore(post))
 
   const links = linksFor(post, options)
-  main.appendChild(renderActionRow(noteActions(links), renderMenu(post, options, links)))
+  main.appendChild(renderActionRow(noteActions(targetFor(post, options)), renderMenu(post, options, links)))
   card.appendChild(main)
 
   if (options.detail !== false) {
@@ -348,7 +376,10 @@ function renderPostCard(post: DisplayPost, options: RenderOptions, top = false):
 
 // ─── Detail sheet ────────────────────────────────────────────────────────────
 
-/** The full note, why it ranked, and every way to open or copy it. Shallow: no thread is fetched. */
+/**
+ * The full note, its actions, what it replies to and its direct replies (one
+ * level each way), why it ranked, and every way to open or copy it.
+ */
 export function openNoteSheet(post: DisplayPost, options: RenderOptions): void {
   const links = linksFor(post, options)
   const sheet = openSheet({ title: 'Note' })
@@ -363,14 +394,24 @@ export function openNoteSheet(post: DisplayPost, options: RenderOptions): void {
   }
   renderNoteContent(post, options, main)
   note.appendChild(main)
+  const parentBox = el('section', 'thread-parent hidden')
+  body.appendChild(parentBox)
   body.appendChild(note)
+  body.appendChild(renderActionRow(noteActions(targetFor(post, options))))
 
-  const why = el('section', 'sheet-section')
-  const whyTitle = el('h3', 'sheet-section-title')
-  whyTitle.textContent = 'Why it ranked'
-  why.appendChild(whyTitle)
-  why.appendChild(renderScore(post, true))
-  body.appendChild(why)
+  const repliesBox = el('section', 'sheet-section thread-replies')
+  repliesBox.appendChild(statusLine('Loading replies…'))
+  body.appendChild(repliesBox)
+  void loadThread(post, options, parentBox, repliesBox)
+
+  if (Number.isFinite(post.score)) {
+    const why = el('section', 'sheet-section')
+    const whyTitle = el('h3', 'sheet-section-title')
+    whyTitle.textContent = 'Why it ranked'
+    why.appendChild(whyTitle)
+    why.appendChild(renderScore(post, true))
+    body.appendChild(why)
+  }
 
   const list = el('div', 'sheet-actions')
   const item = (labelText: string, iconName: IconName, run: () => Promise<boolean>, doneText: string): void => {
@@ -408,6 +449,95 @@ export function openNoteSheet(post: DisplayPost, options: RenderOptions): void {
   if (links.npub) item('Copy npub', 'copy', () => copyText(links.npub), 'Copied')
   link(`Open profile in ${links.clientLabel}`, 'user', profileHref(post.author, options))
   body.appendChild(list)
+}
+
+// ─── Thread (one level up, one level down) ──────────────────────────────────
+
+function statusLine(text: string): HTMLElement {
+  const p = el('p', 'thread-status')
+  p.textContent = text
+  return p
+}
+
+function sectionTitle(text: string): HTMLElement {
+  const t = el('h3', 'sheet-section-title')
+  t.textContent = text
+  return t
+}
+
+/** A note from a relay as the detail sheet draws it, without a ranking. */
+function unrankedPost(ev: NostrEvent): DisplayPost {
+  return {
+    id: ev.id,
+    type: 'original',
+    author: ev.pubkey,
+    content: ev.content,
+    createdAt: ev.created_at,
+    score: Number.NaN,
+    rawEvent: ev,
+  } as unknown as DisplayPost
+}
+
+/** A smaller note for a parent or a reply. Tapping it opens it in full. */
+function renderCompactNote(ev: NostrEvent, options: RenderOptions): HTMLElement {
+  const post = unrankedPost(ev)
+  const card = el('article', 'note note-compact')
+  card.tabIndex = 0
+  card.setAttribute('aria-label', `Note by ${shortName(ev.pubkey, options)}. Open`)
+  card.appendChild(renderAvatar(ev.pubkey, options, 'post-avatar'))
+  const main = el('div', 'note-main')
+  main.appendChild(renderNoteHead(post, options))
+  const content = el('div', 'post-content')
+  content.appendChild(renderContent(ev.content, options))
+  main.appendChild(content)
+  card.appendChild(main)
+  const open = (): void => openNoteSheet(post, options)
+  card.addEventListener('click', (e) => {
+    if ((e.target as Element | null)?.closest('a, button')) return
+    if (window.getSelection()?.toString()) return
+    open()
+  })
+  card.addEventListener('keydown', (e) => {
+    if (e.target !== card || (e.key !== 'Enter' && e.key !== ' ')) return
+    e.preventDefault()
+    open()
+  })
+  return card
+}
+
+async function loadThread(post: DisplayPost, options: RenderOptions, parentBox: HTMLElement, repliesBox: HTMLElement): Promise<void> {
+  const hint = (post as { relay?: string }).relay
+  const relays = await readRelaysFor(post.author, hint ? [hint] : [])
+  const raw = post.rawEvent as NostrEvent | undefined
+
+  const parentDone = (async (): Promise<NostrEvent | null> => {
+    const self = raw && raw.sig ? raw : await fetchEvent(post.id, relays)
+    const ref = self ? parentOf(self) : undefined
+    if (!ref) return null
+    return fetchEvent(ref.id, ref.relay ? [ref.relay, ...relays] : relays)
+  })()
+  const repliesDone = queryEvents(relays, { kinds: [1], '#e': [post.id], limit: 100 }).then((events) => directReplies(events, post.id, 20))
+
+  const [parent, replies] = await Promise.all([parentDone, repliesDone])
+  if (!repliesBox.isConnected) return // the sheet was closed while this loaded
+
+  const people = [...new Set([...(parent ? [parent.pubkey] : []), ...replies.map((r) => r.pubkey)])]
+  const shown = async (): Promise<RenderOptions> => ({ ...options, profiles: new Map([...(options.profiles ?? []), ...knownProfiles(people)]) })
+  const draw = async (): Promise<void> => {
+    const opts = await shown()
+    if (parent) {
+      parentBox.replaceChildren(sectionTitle('In reply to'), renderCompactNote(parent, opts))
+      parentBox.classList.remove('hidden')
+    }
+    repliesBox.replaceChildren(sectionTitle(replies.length === 0 ? 'Replies' : `Replies (${replies.length}${replies.length === 20 ? ', oldest first' : ''})`))
+    if (replies.length === 0) repliesBox.appendChild(statusLine('No replies found on your relays.'))
+    for (const r of replies) repliesBox.appendChild(renderCompactNote(r, opts))
+  }
+  await draw()
+  if (people.length > 0) {
+    await loadProfiles(people, relays)
+    if (repliesBox.isConnected) await draw()
+  }
 }
 
 // ─── Menu ────────────────────────────────────────────────────────────────────

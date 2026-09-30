@@ -1,14 +1,17 @@
 /**
  * Nalgorithm Web — note actions
  *
- * The one place that decides which actions a note offers. Stage 1 implements
- * open-in-client and copy-note-link. A later stage adds reply, boost, like and
- * zap here (signed with the reader's signer); `renderActionRow` draws whatever
- * this returns, so the row needs no change when they arrive.
+ * The one place that decides which actions a note offers. The row under a note
+ * is reply, boost, like and zap, signed with the reader's signer (see
+ * signer.ts). Opening a note elsewhere and copying its identifiers live in the
+ * overflow menu and the detail sheet, which keeps the row inside a phone's
+ * width. `renderActionRow` draws whatever this returns.
  */
 
-import { copyText } from './clipboard.js'
 import { icon, type IconName } from './icons.js'
+import { boostNote, isMarked, likeNote, replyToNote, type NoteTarget } from './note-ui.js'
+import { onMarkChange } from './note-state.js'
+import { zapNote } from './zap-ui.js'
 
 /** What an action needs to know about the note it acts on. */
 export interface NoteLinks {
@@ -35,23 +38,38 @@ export interface NoteAction {
   href?: string
   /** A button action. Resolves to true when it did its job (shows a check). */
   run?: () => Promise<boolean> | boolean
+  /** A button that does its own reporting (sheets, toasts) instead of flashing a check. */
+  press?: () => void
+  /** For a toggle: whether it is on now. The icon stays filled while it is. */
+  active?: () => boolean
 }
 
-/** Actions implemented so far, in display order. */
-export function noteActions(links: NoteLinks): NoteAction[] {
-  const actions: NoteAction[] = []
-  if (links.eventHref) {
-    actions.push({ id: 'open', label: `Open note in ${links.clientLabel}`, icon: 'external', href: links.eventHref })
-  }
-  if (links.nevent) {
-    actions.push({
-      id: 'copy-nevent',
-      label: 'Copy note link (nevent)',
-      icon: 'copy',
-      run: () => copyText(links.nevent),
-    })
-  }
-  return actions
+/** The four social actions, in display order. */
+export function noteActions(target: NoteTarget): NoteAction[] {
+  return [
+    { id: 'reply', label: 'Reply', icon: 'reply', press: () => void replyToNote(target) },
+    {
+      id: 'boost',
+      label: 'Boost',
+      icon: 'boost',
+      press: () => void boostNote(target),
+      active: () => isMarked('boosted', target.id),
+    },
+    {
+      id: 'like',
+      label: 'Like',
+      icon: 'like',
+      press: () => void likeNote(target),
+      active: () => isMarked('liked', target.id),
+    },
+    {
+      id: 'zap',
+      label: 'Zap',
+      icon: 'zap',
+      press: () => void zapNote(target),
+      active: () => isMarked('zapped', target.id),
+    },
+  ]
 }
 
 /**
@@ -77,6 +95,29 @@ export function renderActionRow(actions: NoteAction[], trailing?: HTMLElement): 
     const b = document.createElement('button')
     b.type = 'button'
     b.className = 'note-action'
+    if (action.press) {
+      b.classList.add(`note-action-${action.id}`)
+      b.title = action.label
+      b.setAttribute('aria-label', action.label)
+      b.innerHTML = icon(action.icon, 20)
+      const active = action.active
+      if (active) {
+        const paint = (): void => {
+          const on = active()
+          b.classList.toggle('is-on', on)
+          b.setAttribute('aria-pressed', String(on))
+        }
+        paint()
+        // Follow the mark while this button is on screen; let go of it once it is not.
+        const stop = onMarkChange(() => (b.isConnected ? paint() : stop()))
+      }
+      b.addEventListener('click', (e) => {
+        e.stopPropagation()
+        action.press?.()
+      })
+      row.appendChild(b)
+      continue
+    }
     b.title = action.label
     b.setAttribute('aria-label', action.label)
     b.innerHTML = icon(action.icon, 20)

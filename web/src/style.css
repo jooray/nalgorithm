@@ -1783,6 +1783,395 @@ dialog.sheet::backdrop {
   font-size: 1.0625rem;
 }
 
+/* ─── Note actions: state, sheets, composer, zap, thread, toast ───────────── */
+
+/* A toggled action keeps its icon filled in the accent, so it still reads as done. */
+.note-action[aria-pressed='true'] {
+  color: var(--accent-ink);
+}
+
+.note-action[aria-pressed='true'] .icon-like,
+.note-action[aria-pressed='true'] .icon-zap {
+  fill: currentColor;
+}
+
+.note-action .icon {
+  transition: transform 0.18s var(--ease-out);
+}
+
+.note-action:active .icon {
+  transform: scale(0.88);
+}
+
+.note-detail + .note-actions {
+  margin-top: 6px;
+}
+
+.sheet-footer {
+  display: flex;
+  gap: 10px;
+  padding: 12px 20px calc(env(safe-area-inset-bottom) + 14px);
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.sheet-footer .btn {
+  flex: 1;
+  margin: 0;
+}
+
+.sheet-footer a.btn {
+  text-decoration: none;
+}
+
+.sheet-lead {
+  margin-bottom: 10px;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+.sheet-note {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.sheet-problem {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.sheet-problem:empty {
+  display: none;
+}
+
+/* Composer */
+.compose-parent {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.compose-parent-name {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.compose-parent-text {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.compose-input {
+  min-height: 120px;
+  resize: none;
+}
+
+.compose-input:disabled {
+  opacity: 0.6;
+}
+
+.compose-count {
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.compose-status {
+  min-height: 1.25rem;
+  margin-top: 4px;
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+.compose-status.is-error {
+  color: var(--danger);
+}
+
+/* Sent and Zapped */
+.sent {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 8px 0 4px;
+}
+
+.sent-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  animation: pop-in 0.42s var(--ease-out);
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+.sent-title {
+  font-size: 1.375rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.sent-line {
+  color: var(--text-2);
+  font-size: 0.9375rem;
+}
+
+.sent-relays {
+  margin-top: 16px;
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+.sent-relays summary {
+  min-height: 44px;
+  padding: 10px 0;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sent-relay-list {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+}
+
+.sent-relay-list li {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.sent-relay-name {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sent-relay-state {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sent-relay-list .is-ok .sent-relay-state {
+  color: var(--accent-ink);
+}
+
+.sent-relay-list .is-failed .sent-relay-state {
+  color: var(--danger);
+}
+
+/* Zap */
+.zap-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 14px 0 16px;
+}
+
+.zap-chip {
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out);
+}
+
+.zap-chip:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.zap-chip[aria-pressed='true'] {
+  border-color: var(--accent-ink);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.zap-chip:disabled {
+  opacity: 0.5;
+}
+
+.zap-label {
+  display: block;
+  margin: 14px 0 6px;
+  color: var(--text-2);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.zap-presets + .zap-label {
+  margin-top: 0;
+}
+
+.zap-comment {
+  min-height: 64px;
+  resize: none;
+}
+
+.zap-address {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.zap-qr {
+  width: min(100%, 260px);
+  margin: 6px auto 12px;
+}
+
+.zap-status {
+  color: var(--text-2);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* Thread in the detail sheet */
+.thread-parent {
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.thread-status {
+  color: var(--text-3);
+  font-size: 0.875rem;
+}
+
+.note-compact {
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  margin: 0 -8px;
+  padding: 10px 8px;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
+.note-compact:hover {
+  background: var(--surface-2);
+}
+
+.note-compact .post-avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 0.875rem;
+}
+
+.note-compact .post-content {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 0.9375rem;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+}
+
+/* Toast: in the top layer, so it shows above an open sheet */
+.toast {
+  position: fixed;
+  inset: auto 0 calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 12px) 0;
+  z-index: 60;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  width: min(calc(100vw - 24px), 480px);
+  margin: 0 auto;
+  padding: 10px 10px 10px 18px;
+  border: 0;
+  border-radius: 22px;
+  background: var(--surface-3);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 0.9375rem;
+  line-height: 1.35;
+  animation: toast-in 0.3s var(--ease-out);
+}
+
+.toast-error {
+  background: var(--surface-2);
+  color: var(--danger);
+  outline: 1px solid var(--danger);
+  outline-offset: -1px;
+}
+
+.toast-action {
+  flex: none;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sent-mark,
+  .toast {
+    animation: none;
+  }
+}
+
 /* ─── First run ────────────────────────────────────────────────────────────── */
 
 .gate {

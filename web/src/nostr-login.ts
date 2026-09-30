@@ -123,6 +123,11 @@ export interface RemoteSignerOptions {
    * `cancel()`) the session itself.
    */
   sign?: boolean
+  /**
+   * Event kinds to ask permission for, instead of only the login kind. Used
+   * when the reader connects a signer to reply, boost, like or zap.
+   */
+  signKinds?: number[]
 }
 
 /**
@@ -148,7 +153,9 @@ export function startRemoteSignerLogin(
     // sign_event or encryption permissions we never use would be asking the
     // user to grant strictly more than this app needs. Hosted mode is the
     // exception, and asks for exactly one: signing the login event kind.
-    ...(keepOpen ? { perms: [`sign_event:${LOGIN_EVENT_KIND}`] } : {}),
+    ...(keepOpen
+      ? { perms: (options.signKinds ?? [LOGIN_EVENT_KIND]).map((k) => `sign_event:${k}`) }
+      : {}),
     name: 'Nalgorithm',
     url: typeof location !== 'undefined' ? location.origin : undefined,
   })

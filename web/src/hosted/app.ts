@@ -10,7 +10,8 @@
  * starts the free trial and counts against the daily cap.
  */
 
-import type { ProfileData, ScoredPost } from 'nalgorithm'
+import { pubkeyToHex, type ProfileData, type ScoredPost } from 'nalgorithm'
+import { setActorProvider } from '../signer.js'
 import { renderFeed, aggregateBoosts, clientRenderOptions } from '../render.js'
 import { attachLinkPreviews } from './previews.js'
 import { previewsEnabled } from './previews-logic.js'
@@ -107,6 +108,8 @@ const nowSec = (): number => Math.floor(Date.now() / 1000)
 const DIGEST_FEED_LIMIT = 30
 
 export function initHosted(): void {
+  // Whose key note actions sign for: the hosted session's key.
+  setActorProvider(() => (userNpub ? pubkeyToHex(userNpub) : null))
   // Settings are the Tune tab now, so there is no panel to close.
   const closeSettings = (): void => {}
   openSettingsPanel = () => showTab('tune')
