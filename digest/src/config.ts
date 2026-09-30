@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { TTSConfig, ReasoningEffort, ScorerKind, DecisionShape } from 'nalgorithm'
-import { buildDigestSystemPrompt, DEFAULT_DIGEST_PROMPT } from 'nalgorithm'
+import { DEFAULT_DIGEST_PROMPT } from 'nalgorithm'
 
 export interface ApiConfig {
   apiBaseUrl: string
@@ -337,7 +337,8 @@ export function loadConfig(path?: string): DigestConfig {
     hoursBack: (config.hoursBack as number) ?? 24,
     topN: (config.topN as number) ?? 15,
     maxPosts: (config.maxPosts as number) ?? 500,
-    digestSystemPrompt: buildDigestSystemPrompt(config.digestSystemPrompt as string | undefined),
+    // Raw: the library appends the humanizer rules when it builds the messages.
+    digestSystemPrompt: config.digestSystemPrompt as string | undefined,
     digestPrompt: (config.digestPrompt as string) ?? DEFAULT_DIGEST_PROMPT,
     ttsApi: parsedTtsApi,
     ttsOutputPath: config.ttsOutputPath as string | undefined,

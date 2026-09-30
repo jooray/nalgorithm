@@ -1,7 +1,7 @@
 {
   "name": "nalgorithm",
   "version": "0.1.0",
-  "description": "Nostr relevance library — rank your timeline by what matters to you",
+  "description": "Nostr relevance library \u2014 rank your timeline by what matters to you",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,8 @@
     "prebuild": "node ../scripts/sync-humanizer.mjs",
     "build": "tsc",
     "predev": "node ../scripts/sync-humanizer.mjs",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "node --test test/"
   },
   "dependencies": {
     "nostr-tools": "^2.10.4"

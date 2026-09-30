@@ -38,6 +38,24 @@ export {
 } from './digest.js'
 export type { DigestOptions } from './digest.js'
 export type { SynthesizeOptions } from './tts.js'
+export {
+  evolveLearnedPrompt,
+  refreshLearnedPrompt,
+  scorePostsCached,
+  writeDigest,
+  silentLogger,
+} from './pipeline.js'
+export type {
+  CachedScore,
+  LearnedState,
+  PipelineStore,
+  PipelineLogger,
+  RefreshLearnedOptions,
+  ScoreCachedOptions,
+  ScoreCachedInput,
+  DigestModel,
+  WriteDigestOptions,
+} from './pipeline.js'
 
 export type {
   // Config
