@@ -160,6 +160,32 @@ One NIP-17 kind 14 message whose content is the digest text followed by the plai
 
 Plus a self-copy wrap to the service npub, as emanator does (NIP-17 has no sent history).
 
+### 8.3 Show notes
+
+Every digest records the notes it was composed from, in digest order (`digestSourceNotes` in `lib`, the same sort and cut the digest prompt uses). A boost is recorded as the note it reposted. The list is stored as JSON in a nullable `digests.notes` column (older rows stay null and read as an empty list; the stored JSON is capped at 60,000 bytes by trimming note text, then dropping trailing notes).
+
+API (session required, both scoped to the caller):
+
+- `GET /digests?limit=` returns `{ "digests": [Digest] }`, newest first.
+- `GET /digests/:id` returns one `Digest`, or 404 if it is not the caller's.
+
+```json
+{
+  "id": 42,
+  "createdAt": 1800000000,
+  "text": "Good morning, nostrich! ...",
+  "audioUrl": "https://.../abc.mp3",
+  "notes": [
+    { "id": "<hex event id>", "pubkey": "<hex author>", "createdAt": 1799999000,
+      "content": "up to 1500 chars", "score": 9, "reason": "one-line justification", "kind": 1 }
+  ]
+}
+```
+
+`reason`, `kind` and `relay` are optional. `relay` is reserved for a relay hint and is not filled yet, because the fetcher does not keep which relay a note came from.
+
+The DM gets the notes after the spoken text: a blank line, `Notes:`, then up to 10 `nostr:nevent1...` lines (event id, author, relay hint when known). Audio is synthesized from the spoken text only. If the message would pass the 8,000 character DM limit, links are dropped from the end of the list; the spoken text is never cut.
+
 ### 8.3 Deliverability rules (from nostr-emanator; it is Rails, so we port decisions, not code)
 
 nostr-emanator is a Rails 8 scheduler with a NIP-17 messaging tab. It sends a single format per message via a fallback ladder, cannot send kind 15, has no audio DMs, and signs through NIP-46. Its value is the measured client-compatibility knowledge in `AGENTS.md` ("Cross-client reach"), `config/emanator.yml` comments and commits 6fa1d1b, 53bf35a, f44ef46. Port these:

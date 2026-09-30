@@ -451,3 +451,22 @@ test('HTTP: digests list is per user and newest first; digest/now needs a runner
     assert.deepEqual(asked, [npub], 'runs for the session npub, never one from the request')
   }, { runDigestNow: async (npub) => { asked.push(npub); return 'queued' } })
 })
+
+test('HTTP: digests carry their notes (empty for old rows); GET /digests/:id is per user', async () => {
+  await withApp(async ({ json, login, npub, db }) => {
+    const { body } = await login()
+    const notes = [{ id: 'c'.repeat(64), pubkey: 'd'.repeat(64), createdAt: T0 - 5, content: 'hi', score: 8, reason: 'because' }]
+    const insert = (who, at, text, n) => db.run('INSERT INTO digests (npub, created_at, body, audio_url, status, notes) VALUES (?, ?, ?, ?, ?, ?)', [who, at, text, null, 'ok', n])
+    const old = (await insert(npub, T0 - 100, 'old', null)).lastInsertId
+    const fresh = (await insert(npub, T0 - 10, 'new', JSON.stringify(notes))).lastInsertId
+    const theirs = (await insert('f'.repeat(64), T0, 'theirs', JSON.stringify(notes))).lastInsertId
+    const list = (await (await json('/digests', { token: body.token })).json()).digests
+    assert.deepEqual(list.map((d) => d.notes), [notes, []])
+    assert.deepEqual(await (await json(`/digests/${fresh}`, { token: body.token })).json(), { id: fresh, createdAt: T0 - 10, text: 'new', audioUrl: null, notes })
+    assert.deepEqual((await (await json(`/digests/${old}`, { token: body.token })).json()).notes, [])
+    assert.equal((await json(`/digests/${theirs}`, { token: body.token })).status, 404, 'not the caller\'s')
+    assert.equal((await json('/digests/999999', { token: body.token })).status, 404)
+    assert.equal((await json('/digests/abc', { token: body.token })).status, 404)
+    assert.equal((await json(`/digests/${fresh}`)).status, 401)
+  })
+})

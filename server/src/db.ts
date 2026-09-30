@@ -66,7 +66,8 @@ function schema(d: Dialect): string[] {
       created_at BIGINT NOT NULL,
       body TEXT NOT NULL,
       audio_url ${t(500)} NULL,
-      status ${t(24)} NOT NULL${d === 'sqlite' ? '' : ', KEY digests_npub (npub, created_at)'}
+      status ${t(24)} NOT NULL,
+      notes TEXT NULL${d === 'sqlite' ? '' : ', KEY digests_npub (npub, created_at)'}
     )${opts}`,
     d === 'sqlite' ? 'CREATE INDEX IF NOT EXISTS digests_npub ON digests (npub, created_at)' : '',
     `CREATE TABLE IF NOT EXISTS deliveries (
@@ -104,7 +105,23 @@ function schema(d: Dialect): string[] {
 export async function openDb(url: string): Promise<Db> {
   const db = await openDatabase(url)
   for (const statement of schema(db.dialect)) await db.exec(statement)
+  await migrate(db)
   return db
+}
+
+/** Add a column to a table created by an earlier version. No-op when it exists. */
+async function addColumn(db: Db, table: string, column: string, definition: string): Promise<void> {
+  if (db.dialect === 'mariadb') {
+    await db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${definition}`)
+    return
+  }
+  const columns = await db.all<{ name: string }>(`PRAGMA table_info(${table})`)
+  if (!columns.some((c) => c.name === column)) await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+}
+
+/** CREATE TABLE IF NOT EXISTS leaves old tables alone, so columns added later are added here. */
+async function migrate(db: Db): Promise<void> {
+  await addColumn(db, 'digests', 'notes', 'TEXT NULL')
 }
 
 const CHUNK = 500

@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto'
 import type { PipelineLogger, ProfileData } from 'nalgorithm'
-import { synthesizeSpeech as libSynthesize, writeDigest as libWriteDigest } from 'nalgorithm'
+import type { DigestSourceNote } from 'nalgorithm'
+import { digestSourceNotes, synthesizeSpeech as libSynthesize, writeDigest as libWriteDigest } from 'nalgorithm'
+import { notesSection, serializeNotes } from './digest-notes.js'
+import { MAX_TEXT_LENGTH } from './dm/send.js'
 import type { BillingClient } from './billing-client.js'
 import type { UploadedAudio } from './blossom.js'
 import { createStore } from './db.js'
@@ -74,10 +77,12 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * the digest. The date is built by hand, not with Intl, because its short month
  * names differ between Node/ICU versions ("Sep" vs "Sept").
  */
-export function composeMessage(text: string, audioUrl: string | null, nowSec: number): string {
+export function composeMessage(text: string, audioUrl: string | null, nowSec: number, notes: DigestSourceNote[] = []): string {
   const d = new Date(nowSec * 1000)
   const date = `${WEEKDAYS[d.getUTCDay()]}, ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`
-  return audioUrl ? `Your nalgorithm digest, ${date}\n${audioUrl}\n\n${text}` : `Your nalgorithm digest, ${date}\n\n${text}`
+  const body = audioUrl ? `Your nalgorithm digest, ${date}\n${audioUrl}\n\n${text}` : `Your nalgorithm digest, ${date}\n\n${text}`
+  // Show notes go after the spoken text and shrink first when the DM is too long.
+  return body + notesSection(notes, MAX_TEXT_LENGTH - body.length)
 }
 
 const all = (r: DmSendOutcome | DmSendOutcome[]): DmSendOutcome[] => (Array.isArray(r) ? r : [r])
@@ -119,18 +124,21 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   const schedule = await loadSchedule(db, npub)
   const store = createStore(db, npub, () => now)
   let text: string
+  let notes: DigestSourceNote[] = []
   let audioUrl: string | null = null
   try {
     const feed = await deps.feed(npub, settings, store)
     if (feed.posts.length === 0) return { status: 'no_posts' }
 
+    const top = feed.posts.slice(0, settings.topN)
+    notes = digestSourceNotes(top, settings.topN)
     const profiles = new Map<string, ProfileData>(Object.entries(feed.profiles))
     const llm = { apiBaseUrl: deps.models.apiBaseUrl, apiKey: deps.models.apiKey }
     text = await write({
       primary: { llm: { ...llm, model: deps.models.digestModel }, temperature: 0.7 },
       humanizer: { llm: { ...llm, model: deps.models.humanizerModel } },
       digest: {
-        posts: feed.posts.slice(0, settings.topN),
+        posts: top,
         profiles,
         userPrompt: settings.userPrompt,
         learnedPrompt: feed.learnedPrompt,
@@ -161,7 +169,7 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   }
 
   const digestId = (
-    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', [npub, now, text, audioUrl, 'ok'])
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status, notes) VALUES (?, ?, ?, ?, ?, ?)', [npub, now, text, audioUrl, 'ok', serializeNotes(notes)])
   ).lastInsertId
 
   const format = await effectiveFormat(db, npub, schedule)
@@ -169,7 +177,7 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   let tier: string | null = null
   let detail: string | null = null
   try {
-    const results = all(await deps.dm.send(npub, composeMessage(text, audioUrl, now), { format }))
+    const results = all(await deps.dm.send(npub, composeMessage(text, audioUrl, now, notes), { format }))
     delivered = results.length > 0 && results.every((r) => r.delivered)
     tier = results[0]?.tier ?? null
     detail = results.filter((r) => !r.delivered).map((r) => r.detail ?? 'not delivered').join('; ') || null
