@@ -7,6 +7,7 @@
  */
 
 export { createFetcher, pubkeyToHex, parseProfileEvents } from './fetcher.js'
+export { sanitizeRelayUrl, isAcceptableRelayUrl } from './relay-url.js'
 export { collectPostPubkeys, extractReferencedPubkeys, MAX_PROFILE_PUBKEYS } from './pubkeys.js'
 export {
   createRanker,

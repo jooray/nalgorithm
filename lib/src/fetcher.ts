@@ -13,6 +13,7 @@ import { SimplePool } from 'nostr-tools/pool'
 import * as nip19 from 'nostr-tools/nip19'
 import * as nip10 from 'nostr-tools/nip10'
 import type { Event as NostrEvent } from 'nostr-tools/pure'
+import { sanitizeRelayUrl } from './relay-url.js'
 
 import type {
   FetcherConfig,
@@ -34,6 +35,13 @@ const FILTER_AUTHOR_CHUNK = 200
 const QUERY_TIMEOUT = 30_000
 // Public relays that index kind 0 widely; asked only for pubkeys nobody else knew.
 const DEFAULT_PROFILE_RELAYS = ['wss://purplepag.es', 'wss://relay.damus.io']
+// Indexers are flaky with big author filters; small batches answer reliably.
+const PROFILE_RETRY_CHUNK = 25
+// Outbox pass: each author's own write relays, bounded so it cannot stall a run.
+const OUTBOX_MAX_RELAYS_PER_AUTHOR = 3
+const OUTBOX_MAX_RELAYS = 12
+const OUTBOX_BUDGET_MS = 15_000
+const OUTBOX_QUERY_TIMEOUT = 6_000
 
 /**
  * Turn kind 0 events into profiles, keeping the newest event per pubkey.
@@ -198,7 +206,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
  * Create a Fetcher instance.
  */
 export function createFetcher(config: FetcherConfig): Fetcher {
-  const pool = new SimplePool()
+  const pool = (config.pool ?? new SimplePool()) as SimplePool
   const { relays } = config
   const fallbackRelays = config.profileFallbackRelays ?? DEFAULT_PROFILE_RELAYS
 
@@ -413,10 +421,10 @@ export function createFetcher(config: FetcherConfig): Fetcher {
     const uniquePubkeys = [...new Set(pubkeys)]
 
     // One failed chunk must not lose the profiles the others found.
-    async function fetchInto(relayList: string[], wanted: string[]): Promise<void> {
-      for (const batch of chunk(wanted, FILTER_AUTHOR_CHUNK)) {
+    async function fetchInto(relayList: string[], wanted: string[], size = FILTER_AUTHOR_CHUNK, timeout = QUERY_TIMEOUT): Promise<void> {
+      for (const batch of chunk(wanted, size)) {
         try {
-          const events = await queryWithTimeout(pool, relayList, { kinds: [0], authors: batch })
+          const events = await queryWithTimeout(pool, relayList, { kinds: [0], authors: batch }, timeout)
           for (const [pubkey, profile] of parseProfileEvents(events)) profiles.set(pubkey, profile)
         } catch {
           // Relay error: leave these unresolved, the fallback pass may cover them.
@@ -424,12 +432,74 @@ export function createFetcher(config: FetcherConfig): Fetcher {
       }
     }
 
+    async function outboxPass(missing: string[], indexers: string[]): Promise<void> {
+      if (missing.length === 0 || indexers.length === 0) return
+      const deadline = Date.now() + OUTBOX_BUDGET_MS
+      const left = () => Math.max(0, deadline - Date.now())
+
+      // kind 10002 from the indexers, in small batches.
+      const newestList = new Map<string, NostrEvent>()
+      for (const batch of chunk(missing, PROFILE_RETRY_CHUNK)) {
+        if (left() === 0) return
+        try {
+          const events = await queryWithTimeout(pool, indexers, { kinds: [10002], authors: batch }, Math.min(OUTBOX_QUERY_TIMEOUT, left()))
+          for (const e of events) {
+            if (e.kind !== 10002 || !batch.includes(e.pubkey)) continue
+            const prev = newestList.get(e.pubkey)
+            if (!prev || e.created_at > prev.created_at) newestList.set(e.pubkey, e)
+          }
+        } catch {
+          // Try the next batch.
+        }
+      }
+
+      // Group authors by write relay, preferring relays many authors share.
+      const writeRelays = new Map<string, string[]>()
+      const popularity = new Map<string, number>()
+      for (const [pubkey, event] of newestList) {
+        const urls: string[] = []
+        for (const t of event.tags) {
+          if (t[0] !== 'r' || (t[2] !== undefined && t[2] !== 'write')) continue
+          const url = sanitizeRelayUrl(t[1])
+          if (url && !urls.includes(url)) urls.push(url)
+        }
+        writeRelays.set(pubkey, urls)
+        for (const u of urls) popularity.set(u, (popularity.get(u) ?? 0) + 1)
+      }
+      const byRelay = new Map<string, string[]>()
+      for (const [pubkey, urls] of writeRelays) {
+        const pick = [...urls].sort((a, b) => (popularity.get(b) ?? 0) - (popularity.get(a) ?? 0)).slice(0, OUTBOX_MAX_RELAYS_PER_AUTHOR)
+        for (const u of pick) byRelay.set(u, [...(byRelay.get(u) ?? []), pubkey])
+      }
+      const targets = [...byRelay.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, OUTBOX_MAX_RELAYS)
+
+      for (const [url, authors] of targets) {
+        for (const batch of chunk(authors.filter((pk) => !profiles.has(pk)), PROFILE_RETRY_CHUNK)) {
+          if (left() === 0) return
+          await fetchInto([url], batch, PROFILE_RETRY_CHUNK, Math.min(OUTBOX_QUERY_TIMEOUT, left()))
+        }
+      }
+    }
+
     await fetchInto(relays, uniquePubkeys)
 
     // The configured relays often lack kind 0 for people the follow list points at.
-    const missing = uniquePubkeys.filter((pk) => !profiles.has(pk))
+    const stillMissing = () => uniquePubkeys.filter((pk) => !profiles.has(pk))
     const extra = fallbackRelays.filter((r) => !relays.includes(r))
-    if (missing.length > 0 && extra.length > 0) await fetchInto(extra, missing)
+    // Big author filters get partial answers from indexers, so ask in small
+    // batches and ask twice: a second attempt picks up what the first skipped.
+    for (let attempt = 0; attempt < 2 && extra.length > 0; attempt++) {
+      const missing = stillMissing()
+      if (missing.length === 0) break
+      await fetchInto(extra, missing, PROFILE_RETRY_CHUNK)
+    }
+
+    // Outbox: ask each author's own write relays.
+    try {
+      await outboxPass(stillMissing(), extra.length > 0 ? extra : fallbackRelays)
+    } catch {
+      // Never throw from a best-effort pass; keep whatever resolved.
+    }
 
     return profiles
   }

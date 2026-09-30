@@ -27,6 +27,14 @@ export interface FetcherConfig {
    * nothing for a pubkey. Defaults to two widely used public profile relays.
    */
   profileFallbackRelays?: string[]
+  /**
+   * Replace the relay pool (for tests). Only these three methods are used.
+   */
+  pool?: {
+    querySync(relays: string[], filter: any, params?: any): Promise<any[]>
+    get(relays: string[], filter: any, params?: any): Promise<any | null>
+    close(relays: string[]): void
+  }
 }
 
 export interface RankerConfig {
