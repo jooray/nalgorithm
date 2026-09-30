@@ -37,7 +37,7 @@ test('profile cache: only uncached pubkeys are fetched, found or not', async () 
   assert.equal(got.get(B).name, 'Bob')
 })
 
-test('profile cache: a missing pubkey is not re-queried for an hour, then is', async () => {
+test('profile cache: a missing pubkey is not re-queried for ten minutes, then is', async () => {
   const db = await openDb(':memory:')
   const f = fetcherOf({})
   const first = await loadProfilesCached(db, f, [C], 1000)

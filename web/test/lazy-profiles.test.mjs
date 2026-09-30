@@ -23,3 +23,13 @@ test('postsToRedraw: only the cards that show a newly resolved person', () => {
   assert.deepEqual(postsToRedraw(posts, new Set([pk('a')])), [0])
   assert.deepEqual(postsToRedraw(posts, new Set()), [])
 })
+
+test('peopleOf: people mentioned in the text, in the original and in the quote, count too', async () => {
+  const { nip19 } = await import('nostr-tools')
+  const npub = nip19.npubEncode(pk('d'))
+  const nprofile = nip19.nprofileEncode({ pubkey: pk('e'), relays: [] })
+  const post = { author: pk('a'), content: `thanks nostr:${npub}`, originalPost: { author: pk('b'), content: `cc nostr:${nprofile}` } }
+  assert.deepEqual(peopleOf(post), [pk('a'), pk('b'), pk('d'), pk('e')])
+  assert.deepEqual(unresolvedPeople([post], new Map([[pk('a'), {}]])), [pk('b'), pk('d'), pk('e')])
+  assert.deepEqual(postsToRedraw([{ author: pk('x') }, post], new Set([pk('e')])), [1])
+})

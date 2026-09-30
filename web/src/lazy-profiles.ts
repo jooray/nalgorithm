@@ -7,16 +7,19 @@
  * that show them are redrawn when the answer arrives.
  */
 
+import { extractReferencedPubkeys } from 'nalgorithm'
+
 export interface PersonPost {
   author: string
+  content?: string
   boostedBy?: string[]
-  originalPost?: { author: string }
-  quotedPost?: { author: string }
+  originalPost?: { author: string; content?: string }
+  quotedPost?: { author: string; content?: string }
 }
 
 const HEX_64 = /^[0-9a-f]{64}$/
 
-/** The people a card names in its header: author, boosters, original and quoted authors. */
+/** The people a card names: its header (author, boosters, original and quoted authors) and every @mention in the text. */
 export function peopleOf(post: PersonPost): string[] {
   const out = new Set<string>()
   const add = (pk?: string): void => {
@@ -26,6 +29,9 @@ export function peopleOf(post: PersonPost): string[] {
   for (const pk of post.boostedBy ?? []) add(pk)
   add(post.originalPost?.author)
   add(post.quotedPost?.author)
+  for (const text of [post.content, post.originalPost?.content, post.quotedPost?.content]) {
+    if (text) for (const pk of extractReferencedPubkeys(text)) add(pk)
+  }
   return [...out]
 }
 

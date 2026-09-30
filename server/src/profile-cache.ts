@@ -5,7 +5,7 @@ import type { Db } from './db.js'
 /** A found profile is reused this long before it is asked for again. */
 export const PROFILE_TTL_SECONDS = 7 * 86_400
 /** A failed lookup is remembered this long, so dead pubkeys do not hit relays every run. */
-export const PROFILE_MISSING_TTL_SECONDS = 3_600
+export const PROFILE_MISSING_TTL_SECONDS = 600
 
 const CHUNK = 500
 
@@ -32,7 +32,7 @@ function rowToProfile(r: Row): ProfileData {
 /**
  * Profiles for `pubkeys`: fresh cache rows first, only the rest go to the
  * fetcher. Results are written back; pubkeys that still do not resolve are
- * remembered as missing for an hour. A stale row is returned when the refetch
+ * remembered as missing for ten minutes. A stale row is returned when the refetch
  * fails, so a flaky relay never makes a known name disappear.
  */
 export async function loadProfilesCached(
