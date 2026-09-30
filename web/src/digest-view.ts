@@ -139,9 +139,11 @@ export function stopPlayback(): void {
 }
 
 export function setMakeStatus(text: string, isError = false): void {
+  // One line, where the reader is looking: the empty hero has its own button, the list has its own.
+  const heroShown = $('hero-empty-status').offsetParent !== null
   for (const id of ['hero-empty-status', 'list-status']) {
     const el = $(id)
-    el.textContent = text
+    el.textContent = (id === 'hero-empty-status') === heroShown ? text : ''
     el.classList.toggle('is-error', isError)
   }
 }
