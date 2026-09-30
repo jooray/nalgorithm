@@ -94,10 +94,18 @@ interface DigestRow {
   body: string
   audio_url: string | null
   notes: string | null
+  duration_s: number | null
 }
 
 function publicDigest(r: DigestRow): Record<string, unknown> {
-  return { id: Number(r.id), createdAt: Number(r.created_at), text: r.body, audioUrl: r.audio_url, notes: parseNotes(r.notes) }
+  return {
+    id: Number(r.id),
+    createdAt: Number(r.created_at),
+    text: r.body,
+    audioUrl: r.audio_url,
+    notes: parseNotes(r.notes),
+    durationSeconds: r.duration_s === null || r.duration_s === undefined ? null : Number(r.duration_s),
+  }
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -254,7 +262,7 @@ export function createApp(deps: AppDeps) {
     if (method === 'GET' && path === '/digests') {
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 10) || 10, 1), 30)
       const rows = await db.all<DigestRow>(
-        'SELECT id, created_at, body, audio_url, notes FROM digests WHERE npub = ? ORDER BY created_at DESC LIMIT ?',
+        'SELECT id, created_at, body, audio_url, notes, duration_s FROM digests WHERE npub = ? ORDER BY created_at DESC LIMIT ?',
         [npub, limit],
       )
       return send(res, 200, { digests: rows.map(publicDigest) })
@@ -262,7 +270,7 @@ export function createApp(deps: AppDeps) {
 
     const digestMatch = method === 'GET' ? /^\/digests\/(\d{1,15})$/.exec(path) : null
     if (digestMatch) {
-      const row = await db.get<DigestRow>('SELECT id, created_at, body, audio_url, notes FROM digests WHERE id = ? AND npub = ?', [Number(digestMatch[1]), npub])
+      const row = await db.get<DigestRow>('SELECT id, created_at, body, audio_url, notes, duration_s FROM digests WHERE id = ? AND npub = ?', [Number(digestMatch[1]), npub])
       if (!row) throw new HttpError(404, 'digest not found')
       return send(res, 200, publicDigest(row))
     }

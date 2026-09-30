@@ -715,6 +715,17 @@ test('HTTP: digests list is per user and newest first; digest/now needs a runner
   }, { runDigestNow: async (npub) => { asked.push(npub); return 'queued' } })
 })
 
+test('HTTP: digests carry the exact audio length, null for older rows', async () => {
+  await withApp(async ({ json, login, npub, db }) => {
+    const { body } = await login()
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status, duration_s) VALUES (?, ?, ?, ?, ?, ?)', [npub, T0 - 100, 'old', 'https://x/a.mp3', 'ok', null])
+    const id = (await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status, duration_s) VALUES (?, ?, ?, ?, ?, ?)', [npub, T0 - 10, 'new', 'https://x/b.mp3', 'ok', 227.448])).lastInsertId
+    const list = (await (await json('/digests', { token: body.token })).json()).digests
+    assert.deepEqual(list.map((d) => d.durationSeconds), [227.448, null])
+    assert.equal((await (await json(`/digests/${id}`, { token: body.token })).json()).durationSeconds, 227.448)
+  })
+})
+
 test('HTTP: digests carry their notes (empty for old rows); GET /digests/:id is per user', async () => {
   await withApp(async ({ json, login, npub, db }) => {
     const { body } = await login()
@@ -725,7 +736,7 @@ test('HTTP: digests carry their notes (empty for old rows); GET /digests/:id is 
     const theirs = (await insert('f'.repeat(64), T0, 'theirs', JSON.stringify(notes))).lastInsertId
     const list = (await (await json('/digests', { token: body.token })).json()).digests
     assert.deepEqual(list.map((d) => d.notes), [notes, []])
-    assert.deepEqual(await (await json(`/digests/${fresh}`, { token: body.token })).json(), { id: fresh, createdAt: T0 - 10, text: 'new', audioUrl: null, notes })
+    assert.deepEqual(await (await json(`/digests/${fresh}`, { token: body.token })).json(), { id: fresh, createdAt: T0 - 10, text: 'new', audioUrl: null, notes, durationSeconds: null })
     assert.deepEqual((await (await json(`/digests/${old}`, { token: body.token })).json()).notes, [])
     assert.equal((await json(`/digests/${theirs}`, { token: body.token })).status, 404, 'not the caller\'s')
     assert.equal((await json('/digests/999999', { token: body.token })).status, 404)

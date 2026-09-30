@@ -67,7 +67,8 @@ function schema(d: Dialect): string[] {
       body TEXT NOT NULL,
       audio_url ${t(500)} NULL,
       status ${t(24)} NOT NULL,
-      notes TEXT NULL${d === 'sqlite' ? '' : ', KEY digests_npub (npub, created_at)'}
+      notes TEXT NULL,
+      duration_s ${ddl.real(d)} NULL${d === 'sqlite' ? '' : ', KEY digests_npub (npub, created_at)'}
     )${opts}`,
     d === 'sqlite' ? 'CREATE INDEX IF NOT EXISTS digests_npub ON digests (npub, created_at)' : '',
     `CREATE TABLE IF NOT EXISTS deliveries (
@@ -147,6 +148,8 @@ async function addColumn(db: Db, table: string, column: string, definition: stri
 /** CREATE TABLE IF NOT EXISTS leaves old tables alone, so columns added later are added here. */
 async function migrate(db: Db): Promise<void> {
   await addColumn(db, 'digests', 'notes', 'TEXT NULL')
+  // Exact length of the audio, measured from its frames. Older digests have none.
+  await addColumn(db, 'digests', 'duration_s', `${ddl.real(db.dialect)} NULL`)
 }
 
 const CHUNK = 500
