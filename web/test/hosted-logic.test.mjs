@@ -14,6 +14,16 @@ import {
   paymentConfirmed,
   validateHostedSettings,
   validateSats,
+  DIGEST_VOICES,
+  defaultTimeZone,
+  describeDigestNowError,
+  formatInZone,
+  isValidTime,
+  isValidTimeZone,
+  lastStatusText,
+  nextRunText,
+  safeAudioUrl,
+  validateScheduleForm,
 } from '../src/hosted/logic.ts'
 
 const ok = { userPrompt: 'bitcoin', hoursBack: 24, topN: 15 }
@@ -150,4 +160,79 @@ test('isHttpUrl only accepts http(s)', () => {
   assert.equal(isHttpUrl('javascript:alert(1)'), false)
   assert.equal(isHttpUrl('not a url'), false)
   assert.equal(isHttpUrl(undefined), false)
+})
+
+test('digest voices: 24 Kokoro voices with readable labels', () => {
+  assert.equal(DIGEST_VOICES.length, 24)
+  assert.deepEqual(DIGEST_VOICES[0], { id: 'af_bella', label: 'Bella (US, female)' })
+  assert.ok(DIGEST_VOICES.some((v) => v.id === 'bm_fable' && v.label === 'Fable (UK, male)'))
+  assert.ok(DIGEST_VOICES.some((v) => v.id === 'am_onyx' && v.label === 'Onyx (US, male)'))
+})
+
+test('time and zone validation', () => {
+  assert.ok(isValidTime('07:30') && isValidTime('23:59') && isValidTime('00:00'))
+  assert.ok(!isValidTime('24:00') && !isValidTime('7:30') && !isValidTime('') && !isValidTime(null))
+  assert.ok(isValidTimeZone('Europe/Bratislava') && isValidTimeZone('UTC'))
+  assert.ok(!isValidTimeZone('Mars/Base') && !isValidTimeZone('') && !isValidTimeZone(undefined))
+})
+
+test('validateScheduleForm reports the first problem', () => {
+  const good = { time: '07:30', tz: 'Europe/Bratislava', voice: null }
+  assert.equal(validateScheduleForm(good), null)
+  assert.equal(validateScheduleForm({ ...good, voice: 'af_bella' }), null)
+  assert.match(validateScheduleForm({ ...good, time: '' }), /time of day/)
+  assert.match(validateScheduleForm({ ...good, tz: 'Nowhere/City' }), /time zone/)
+  assert.match(validateScheduleForm({ ...good, voice: 'nope' }), /voice/)
+})
+
+test('defaultTimeZone only replaces a never-set schedule', () => {
+  assert.equal(defaultTimeZone({ tz: 'UTC', enabled: false }, 'Europe/Bratislava'), 'Europe/Bratislava')
+  assert.equal(defaultTimeZone({ tz: 'UTC', enabled: true }, 'Europe/Bratislava'), 'UTC')
+  assert.equal(defaultTimeZone({ tz: 'Asia/Tokyo', enabled: false }, 'Europe/Bratislava'), 'Asia/Tokyo')
+  assert.equal(defaultTimeZone({ tz: 'UTC', enabled: false }, 'garbage'), 'UTC')
+  assert.equal(defaultTimeZone({ tz: 'UTC', enabled: false }, undefined), 'UTC')
+})
+
+test('formatInZone shows the wall clock of the chosen zone', () => {
+  const sec = Date.UTC(2026, 9, 1, 5, 30) / 1000
+  assert.equal(formatInZone(sec, 'Europe/Bratislava'), 'Thu 1 Oct, 07:30')
+  assert.equal(formatInZone(sec, 'UTC'), 'Thu 1 Oct, 05:30')
+  assert.equal(formatInZone(Date.UTC(2026, 9, 1, 0, 5) / 1000, 'UTC'), 'Thu 1 Oct, 00:05')
+  assert.equal(formatInZone(sec, 'Pacific/Auckland'), 'Thu 1 Oct, 18:30')
+})
+
+test('nextRunText', () => {
+  const sec = Date.UTC(2026, 9, 1, 5, 30) / 1000
+  assert.equal(nextRunText({ enabled: true, nextRunAt: sec, tz: 'Europe/Bratislava' }), 'Next digest: Thu 1 Oct, 07:30')
+  assert.match(nextRunText({ enabled: false, nextRunAt: null, tz: 'UTC' }), /off/)
+  assert.equal(nextRunText({ enabled: true, nextRunAt: null, tz: 'UTC' }), '')
+})
+
+test('lastStatusText covers every server status', () => {
+  for (const s of ['sent', 'no_prompt', 'not_entitled', 'billing_unavailable', 'capped', 'no_posts', 'failed']) {
+    assert.ok(lastStatusText(s).startsWith('Last digest'), s)
+  }
+  assert.match(lastStatusText('no_prompt'), /prompt/)
+  assert.match(lastStatusText('not_entitled'), /subscription has ended/)
+  assert.match(lastStatusText('no_posts'), /nothing new/)
+  assert.match(lastStatusText('failed'), /retry/)
+  assert.equal(lastStatusText(null), '')
+  assert.equal(lastStatusText('something_new'), '')
+})
+
+test('describeDigestNowError', () => {
+  assert.equal(
+    describeDigestNowError({ status: 503, code: 'digests_unavailable' }).message,
+    'Digest delivery is not switched on for this server yet.'
+  )
+  assert.match(describeDigestNowError({ status: 429, code: 'daily_cap' }).message, /digests/)
+  assert.equal(describeDigestNowError({ status: 402 }).action, 'pay')
+  assert.equal(describeDigestNowError({ status: 401 }).action, 'login')
+})
+
+test('safeAudioUrl only lets http(s) through', () => {
+  assert.equal(safeAudioUrl('https://cdn.example/a.mp3'), 'https://cdn.example/a.mp3')
+  assert.equal(safeAudioUrl('javascript:alert(1)'), null)
+  assert.equal(safeAudioUrl('data:audio/mpeg;base64,AAAA'), null)
+  assert.equal(safeAudioUrl(null), null)
 })

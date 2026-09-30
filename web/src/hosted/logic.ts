@@ -282,3 +282,170 @@ export function describeError(e: { status: number; code?: string; message?: stri
   }
   return { message: e.message || 'Something went wrong.', action: 'retry' }
 }
+
+// ─── Daily digest ────────────────────────────────────────────────────────────
+
+export type DmFormat = 'nip17' | 'nip04'
+
+export interface Schedule {
+  enabled: boolean
+  /** 24-hour "HH:MM" in `tz`. */
+  time: string
+  tz: string
+  voice: string | null
+  dmFormat: DmFormat | null
+  /** Unix seconds. */
+  nextRunAt: number | null
+  lastRunAt: number | null
+  lastStatus: string | null
+}
+
+export interface Digest {
+  id: number
+  /** Unix seconds. */
+  createdAt: number
+  text: string
+  audioUrl: string | null
+}
+
+/** The service's public Nostr account, which sends the digests. */
+export const DIGEST_BOT_NPUB = 'npub1dka50zsfvru0tsv2sqd40ktnwyd3236c3hzx62hhlxw9un408tcqz6wkt0'
+
+export const DIGEST_LIST_LIMIT = 5
+
+const VOICE_GROUPS: Array<[string, string, string[]]> = [
+  ['US, female', 'af_', ['bella', 'heart', 'nicole', 'sarah', 'sky', 'jessica', 'nova', 'river', 'kore', 'aoede', 'alloy', 'jadzia']],
+  ['UK, female', 'bf_', ['emma', 'alice', 'lily']],
+  ['US, male', 'am_', ['adam', 'michael', 'eric', 'liam', 'onyx']],
+  ['UK, male', 'bm_', ['george', 'daniel', 'lewis', 'fable']],
+]
+
+/** Kokoro voices the server accepts, with a label for the select. */
+export const DIGEST_VOICES: ReadonlyArray<{ id: string; label: string }> = VOICE_GROUPS.flatMap(
+  ([kind, prefix, names]) =>
+    names.map((n) => ({ id: prefix + n, label: `${n[0].toUpperCase()}${n.slice(1)} (${kind})` }))
+)
+
+export const DM_FORMATS: ReadonlyArray<{ value: DmFormat | ''; label: string }> = [
+  { value: '', label: 'Follow my last message' },
+  { value: 'nip17', label: 'Modern (NIP-17)' },
+  { value: 'nip04', label: 'Legacy (kind 4)' },
+]
+
+/** Whether the browser knows this IANA time zone. */
+export function isValidTimeZone(tz: unknown): tz is string {
+  if (typeof tz !== 'string' || !tz.trim()) return false
+  try {
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz.trim() })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** "07:30" style 24-hour time, or false. */
+export function isValidTime(time: unknown): time is string {
+  return typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time)
+}
+
+export function isKnownVoice(voice: unknown): boolean {
+  return typeof voice === 'string' && DIGEST_VOICES.some((v) => v.id === voice)
+}
+
+/** The first problem with the schedule form, or null. */
+export function validateScheduleForm(f: { time: string; tz: string; voice: string | null }): string | null {
+  if (!isValidTime(f.time)) return 'Pick a time of day.'
+  if (!isValidTimeZone(f.tz)) return 'That time zone is not recognised. Use a name such as Europe/Bratislava.'
+  if (f.voice !== null && !isKnownVoice(f.voice)) return 'Pick a voice from the list.'
+  return null
+}
+
+/**
+ * A schedule that was never saved comes back as UTC and off; suggest the
+ * browser's zone then, so the person does not have to look it up.
+ */
+export function defaultTimeZone(s: Pick<Schedule, 'tz' | 'enabled'>, browserTz: string | undefined): string {
+  if (s.tz === 'UTC' && !s.enabled && isValidTimeZone(browserTz)) return browserTz
+  return s.tz
+}
+
+/** "Thu 1 Oct, 07:30" in the given zone (English, so the text is the same everywhere). */
+export function formatInZone(sec: number, tz: string): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(sec * 1000))
+  const get = (t: string): string => parts.find((p) => p.type === t)?.value ?? ''
+  return `${get('weekday')} ${get('day')} ${get('month')}, ${get('hour')}:${get('minute')}`
+}
+
+/** "Next digest: Thu 1 Oct, 07:30", or a line saying nothing is planned. */
+export function nextRunText(s: Pick<Schedule, 'enabled' | 'nextRunAt' | 'tz'>): string {
+  if (!s.enabled) return 'The daily digest is off.'
+  if (s.nextRunAt === null || !isValidTimeZone(s.tz)) return ''
+  return `Next digest: ${formatInZone(s.nextRunAt, s.tz)}`
+}
+
+/** The last run in plain words, or '' when nothing is known. */
+export function lastStatusText(status: string | null | undefined): string {
+  switch (status) {
+    case 'sent':
+      return 'Last digest: sent.'
+    case 'no_prompt':
+      return 'Last digest: not made, because you have not written a prompt yet. Add one in the Prompt section.'
+    case 'not_entitled':
+      return 'Last digest: not made, because your subscription has ended.'
+    case 'billing_unavailable':
+      return 'Last digest: not made, because billing could not be checked. It will try again.'
+    case 'capped':
+      return 'Last digest: not made, because you reached the daily limit.'
+    case 'no_posts':
+      return 'Last digest: nothing new to report.'
+    case 'failed':
+      return 'Last digest: failed. It will retry.'
+    default:
+      return ''
+  }
+}
+
+/** What to say after asking for a digest right now. */
+export function describeDigestNowError(e: { status: number; code?: string; message?: string }): DescribedError {
+  if (e.status === 503 && e.code === 'digests_unavailable') {
+    return { message: 'Digest delivery is not switched on for this server yet.', action: 'retry' }
+  }
+  if (e.status === 429 && e.code === 'daily_cap') {
+    return { message: 'You have reached the daily limit for digests. Try again tomorrow.', action: 'retry' }
+  }
+  return describeError(e)
+}
+
+export const DIGEST_ON_ITS_WAY = 'On its way. It usually arrives in a few minutes by DM.'
+
+export const DIGEST_DM_NOTE =
+  'Digests arrive as Nostr direct messages from the service account, so your Nostr client must be able to receive DMs.'
+
+/** Audio only ever plays from an http(s) address; anything else is dropped. */
+export function safeAudioUrl(value: unknown): string | null {
+  return isHttpUrl(value) ? value : null
+}
+
+/** Digest date for the list, in the viewer's own locale and zone. */
+export function formatDigestDate(sec: number, tz?: string): string {
+  try {
+    return new Date(sec * 1000).toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: tz && isValidTimeZone(tz) ? tz : undefined,
+    })
+  } catch {
+    return ''
+  }
+}

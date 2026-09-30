@@ -1196,3 +1196,57 @@ body:not([data-signed-in="true"]) .needs-auth {
     flex-wrap: wrap;
   }
 }
+
+/* ─── Daily digest ─────────────────────────────────────────────────────────── */
+
+#digest-bot-npub {
+  display: block;
+  margin: 4px 0 6px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.digest-subtitle {
+  margin: 16px 0 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.digest-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.digest-item {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  font-size: 0.82rem;
+}
+
+.digest-date {
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.digest-item audio {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.digest-item summary {
+  color: var(--accent-light);
+  cursor: pointer;
+}
+
+.digest-text {
+  margin-top: 6px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

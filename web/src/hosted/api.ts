@@ -11,9 +11,11 @@ import type { SignFn } from '../nostr-login.js'
 import type { ScoredPost } from 'nalgorithm'
 import {
   buildLoginTemplate,
+  type Digest,
   type Entitlement,
   type HostedSettings,
   type PlanId,
+  type Schedule,
 } from './logic.js'
 
 /** Every failed call, whatever the cause. `status` is 0 when the network failed. */
@@ -153,4 +155,27 @@ export function getFeed(limit = 100): Promise<FeedResponse> {
 
 export function createCheckout(plan: PlanId, sats?: number): Promise<Charge> {
   return request<Charge>('POST', 'billing/checkout', sats === undefined ? { plan } : { plan, sats })
+}
+
+// ─── Daily digest ────────────────────────────────────────────────────────────
+
+export function getSchedule(): Promise<Schedule> {
+  return request<Schedule>('GET', 'schedule')
+}
+
+/** `voice` and `dmFormat` may be null: the default voice, and the format of the person's last message. */
+export function putSchedule(
+  patch: Partial<Pick<Schedule, 'enabled' | 'time' | 'tz' | 'voice' | 'dmFormat'>>
+): Promise<Schedule> {
+  return request<Schedule>('PUT', 'schedule', patch)
+}
+
+export async function getDigests(limit: number): Promise<Digest[]> {
+  const res = await request<{ digests: Digest[] }>('GET', `digests?limit=${limit}`)
+  return Array.isArray(res.digests) ? res.digests : []
+}
+
+/** The digest is made in the background and arrives by DM. */
+export function digestNow(): Promise<{ message: string }> {
+  return request<{ message: string }>('POST', 'digest/now')
 }

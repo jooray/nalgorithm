@@ -20,33 +20,52 @@ import { setUpdateBlocked } from '../version-check.js'
 import {
   ApiError,
   createCheckout,
+  digestNow,
+  getDigests,
   getFeed,
   getMe,
+  getSchedule,
   getSettings,
   loginWithSigner,
   logout,
+  putSchedule,
   putSettings,
   type FeedResponse,
 } from './api.js'
 import {
+  DIGEST_BOT_NPUB,
+  DIGEST_DM_NOTE,
+  DIGEST_LIST_LIMIT,
+  DIGEST_ON_ITS_WAY,
+  DIGEST_VOICES,
+  DM_FORMATS,
   MAX_PROMPT_CHARS,
   PLANS,
   daysForSats,
+  defaultTimeZone,
+  describeDigestNowError,
   describeError,
   entitlementView,
   formatDays,
+  formatDigestDate,
   formatSats,
   isHttpUrl,
+  lastStatusText,
+  nextRunText,
   parseWholeNumber,
   paymentConfirmed,
+  safeAudioUrl,
   validateHostedSettings,
   validateSats,
+  validateScheduleForm,
+  type Digest,
+  type DmFormat,
   type Entitlement,
   type PlanId,
+  type Schedule,
 } from './logic.js'
 import { switchMode } from './mode.js'
 
-const DIGEST_SOON = 'Coming soon: daily voice digest by Nostr DM'
 const POLL_INTERVAL_MS = 4000
 const POLL_MAX_MS = 10 * 60 * 1000
 
@@ -99,7 +118,14 @@ export function initHosted(): void {
 
   // Header
   $('#btn-hosted-refresh').addEventListener('click', () => void runFeed())
-  $('#btn-hosted-digest').addEventListener('click', () => setStatus(DIGEST_SOON))
+  $('#btn-hosted-digest').addEventListener('click', () => {
+    openSettings()
+    const section = $('#hosted-digest-section')
+    section.scrollIntoView({ block: 'start' })
+    $('#digest-enabled').focus({ preventScroll: true })
+  })
+
+  initDigestForm(closeSettings)
 
   // Paywall
   for (const radio of document.querySelectorAll<HTMLInputElement>('input[name="hosted-plan"]')) {
@@ -204,6 +230,7 @@ async function onSignedIn(npub: string, ent: Entitlement): Promise<void> {
   $<HTMLInputElement>('#hosted-topn').value = String(s.topN)
   $<HTMLInputElement>('#hosted-learn').checked = s.learnFromLikes
   updatePromptCount()
+  void loadDigestSection()
 
   if (!s.userPrompt) {
     showEmpty('Describe what you want to see in Settings, then click Refresh.')
@@ -485,4 +512,183 @@ async function waitForPayment(before: Entitlement | null): Promise<boolean> {
     }
   }
   return false
+}
+
+// ─── Daily digest ────────────────────────────────────────────────────────────
+
+let digestTz = ''
+let closeSettingsPanel: () => void = () => {}
+
+function setText(selector: string, text: string, isError = false): void {
+  const el = $(selector)
+  el.textContent = text
+  el.classList.toggle('is-error', isError)
+}
+
+function initDigestForm(closeSettings: () => void): void {
+  closeSettingsPanel = closeSettings
+  $('#digest-dm-note').textContent = DIGEST_DM_NOTE
+  $('#digest-bot-npub').textContent = DIGEST_BOT_NPUB
+  $<HTMLAnchorElement>('#digest-bot-link').href = `nostr:${DIGEST_BOT_NPUB}`
+  $('#btn-digest-copy').addEventListener('click', () => {
+    const button = $('#btn-digest-copy')
+    navigator.clipboard.writeText(DIGEST_BOT_NPUB).then(
+      () => {
+        button.textContent = 'Copied'
+      },
+      () => {
+        button.textContent = 'Select the npub to copy'
+      }
+    )
+    setTimeout(() => {
+      button.textContent = 'Copy npub'
+    }, 2000)
+  })
+
+  const voice = $<HTMLSelectElement>('#digest-voice')
+  voice.append(new Option('Default', ''))
+  for (const v of DIGEST_VOICES) voice.append(new Option(v.label, v.id))
+  const format = $<HTMLSelectElement>('#digest-format')
+  for (const f of DM_FORMATS) format.append(new Option(f.label, f.value))
+
+  try {
+    const zones = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone') ?? []
+    for (const z of zones) $('#digest-tz-list').append(new Option(z))
+  } catch {
+    // The zone can still be typed.
+  }
+
+  $('#btn-digest-save').addEventListener('click', () => void saveDigestSchedule())
+  $('#btn-digest-now').addEventListener('click', () => void sendDigestNow())
+}
+
+function showScheduleInfo(s: Schedule): void {
+  setText('#digest-last-status', lastStatusText(s.lastStatus))
+  setText('#digest-schedule-status', nextRunText(s))
+}
+
+async function loadDigestSection(): Promise<void> {
+  setText('#digest-schedule-status', '')
+  setText('#digest-now-status', '')
+  try {
+    const s = await getSchedule()
+    let browserTz: string | undefined
+    try {
+      browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    } catch {
+      browserTz = undefined
+    }
+    digestTz = defaultTimeZone(s, browserTz)
+    $<HTMLInputElement>('#digest-enabled').checked = s.enabled
+    $<HTMLInputElement>('#digest-time').value = s.time
+    $<HTMLInputElement>('#digest-tz').value = digestTz
+    $<HTMLSelectElement>('#digest-voice').value = s.voice ?? ''
+    $<HTMLSelectElement>('#digest-format').value = s.dmFormat ?? ''
+    showScheduleInfo({ ...s, tz: digestTz })
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return showLogin(describeError(err).message)
+    setText('#digest-schedule-status', 'The digest schedule could not be loaded.', true)
+  }
+  await loadDigests()
+}
+
+async function loadDigests(): Promise<void> {
+  try {
+    renderDigests(await getDigests(DIGEST_LIST_LIMIT))
+  } catch {
+    // The list is a convenience; the schedule form works without it.
+  }
+}
+
+function renderDigests(digests: Digest[]): void {
+  const list = $('#digest-list')
+  list.replaceChildren()
+  show('#digest-list-empty', digests.length === 0)
+  for (const d of digests) {
+    const item = document.createElement('li')
+    item.className = 'digest-item'
+
+    const date = document.createElement('div')
+    date.className = 'digest-date'
+    date.textContent = formatDigestDate(d.createdAt)
+    item.append(date)
+
+    const url = safeAudioUrl(d.audioUrl)
+    if (url) {
+      const audio = document.createElement('audio')
+      audio.controls = true
+      audio.preload = 'none'
+      audio.src = url
+      audio.setAttribute('aria-label', `Voice digest from ${date.textContent}`)
+      item.append(audio)
+    }
+
+    const details = document.createElement('details')
+    const summary = document.createElement('summary')
+    summary.textContent = 'Text'
+    const text = document.createElement('div')
+    text.className = 'digest-text'
+    text.textContent = String(d.text ?? '')
+    details.append(summary, text)
+    item.append(details)
+    list.append(item)
+  }
+}
+
+async function saveDigestSchedule(): Promise<void> {
+  const voiceValue = $<HTMLSelectElement>('#digest-voice').value
+  const formatValue = $<HTMLSelectElement>('#digest-format').value
+  const form = {
+    enabled: $<HTMLInputElement>('#digest-enabled').checked,
+    time: $<HTMLInputElement>('#digest-time').value,
+    tz: $<HTMLInputElement>('#digest-tz').value.trim(),
+    voice: voiceValue || null,
+    dmFormat: (formatValue || null) as DmFormat | null,
+  }
+  const problem = validateScheduleForm(form)
+  if (problem) return setText('#digest-schedule-status', problem, true)
+
+  const button = $<HTMLButtonElement>('#btn-digest-save')
+  button.disabled = true
+  setText('#digest-schedule-status', 'Saving…')
+  try {
+    const saved = await putSchedule(form)
+    digestTz = saved.tz
+    showScheduleInfo(saved)
+    const next = nextRunText(saved)
+    setText('#digest-schedule-status', next ? `Saved. ${next}` : 'Saved.')
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      closeSettingsPanel()
+      return showLogin(describeError(err).message)
+    }
+    setText('#digest-schedule-status', err instanceof ApiError ? describeError(err).message : (err as Error).message, true)
+  } finally {
+    button.disabled = false
+  }
+}
+
+async function sendDigestNow(): Promise<void> {
+  const button = $<HTMLButtonElement>('#btn-digest-now')
+  button.disabled = true
+  setText('#digest-now-status', 'Asking for a digest…')
+  try {
+    await digestNow()
+    setText('#digest-now-status', DIGEST_ON_ITS_WAY)
+  } catch (err) {
+    const api = err instanceof ApiError ? err : new ApiError(0, (err as Error).message, 'network')
+    const d = describeDigestNowError(api)
+    if (d.action === 'login') {
+      closeSettingsPanel()
+      return showLogin(d.message)
+    }
+    if (d.action === 'pay') {
+      setEntitlement({ state: 'expired' })
+      closeSettingsPanel()
+      return showPaywall(d.message)
+    }
+    setText('#digest-now-status', d.message, true)
+  } finally {
+    button.disabled = false
+  }
 }

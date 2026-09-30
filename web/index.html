@@ -28,7 +28,7 @@
         <button id="btn-digest" class="btn btn-secondary byok-only" disabled title="Summarize the top posts into a narrative">Digest</button>
         <button id="btn-settings" class="btn btn-secondary byok-only">Settings</button>
         <button id="btn-hosted-refresh" class="btn btn-primary hosted-only needs-auth" type="button">Refresh</button>
-        <button id="btn-hosted-digest" class="btn btn-secondary hosted-only needs-auth" type="button" aria-disabled="true" title="Coming soon: daily voice digest by Nostr DM">Digest</button>
+        <button id="btn-hosted-digest" class="btn btn-secondary hosted-only needs-auth" type="button" title="Daily voice digest by Nostr DM">Digest</button>
         <button id="btn-hosted-settings" class="btn btn-secondary hosted-only needs-auth" type="button">Settings</button>
         <a href="https://github.com/jooray/nalgorithm" target="_blank" rel="noopener" class="btn-icon github-link" title="Source on GitHub">
           <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -229,6 +229,38 @@
             <input type="checkbox" id="hosted-learn" checked>
             Learn from my likes
           </label>
+        </section>
+
+        <section class="settings-section" id="hosted-digest-section" aria-labelledby="digest-title">
+          <h3 id="digest-title">Daily voice digest</h3>
+          <p class="field-hint" id="digest-dm-note"></p>
+          <p class="field-hint">
+            Sent by <a id="digest-bot-link" href="#">the digest account</a>. Follow it so your client shows the messages:
+            <code id="digest-bot-npub" class="identity-npub"></code>
+            <button id="btn-digest-copy" class="btn btn-small" type="button">Copy npub</button>
+          </p>
+          <label class="checkbox-label">
+            <input type="checkbox" id="digest-enabled">
+            Send me a digest every day
+          </label>
+          <label for="digest-time">Time of day</label>
+          <input type="time" id="digest-time" value="07:30">
+          <label for="digest-tz">Time zone</label>
+          <input type="text" id="digest-tz" list="digest-tz-list" spellcheck="false" autocomplete="off" placeholder="Europe/Bratislava">
+          <datalist id="digest-tz-list"></datalist>
+          <label for="digest-voice">Voice</label>
+          <select id="digest-voice"></select>
+          <label for="digest-format">Delivery format</label>
+          <select id="digest-format"></select>
+          <p class="field-hint">Choose legacy for clients such as Primal or Damus that cannot read modern DMs.</p>
+          <button id="btn-digest-save" class="btn btn-primary btn-full" type="button">Save digest schedule</button>
+          <p id="digest-schedule-status" class="hosted-status" role="status"></p>
+          <p id="digest-last-status" class="field-hint" role="status"></p>
+          <button id="btn-digest-now" class="btn btn-small btn-full" type="button">Send a digest now</button>
+          <p id="digest-now-status" class="hosted-status" role="status"></p>
+          <h4 class="digest-subtitle">Recent digests</h4>
+          <p id="digest-list-empty" class="field-hint">No digests yet.</p>
+          <ul id="digest-list" class="digest-list" aria-label="Recent digests"></ul>
         </section>
 
         <section class="settings-section">
