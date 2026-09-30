@@ -27,3 +27,4 @@ lib/src/humanizer-skill.generated.ts
 
 # Deploy scripts carry host details and stay out of the public repo.
 deploy-*.sh
+server/dist/
