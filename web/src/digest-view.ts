@@ -12,7 +12,7 @@ import {
   digestKey,
   firstLines,
   formatLength,
-  estimateSeconds,
+  digestLengthLabel,
   newestFirst,
   toScoredPost,
   notePubkeys,
@@ -250,6 +250,7 @@ function sourceFor(d: DigestRecord) {
     subtitle: `${dayLabel(d.createdAt)}, ${clockLabel(d.createdAt)}`,
     audioUrl: playableUrl(d),
     text: d.text,
+    durationSeconds: exactSeconds(d),
   }
 }
 
@@ -292,10 +293,13 @@ function renderAll(): void {
   paint(player.current)
 }
 
+/** The server's exact length, when this digest has audio to go with it. */
+function exactSeconds(d: DigestRecord): number | undefined {
+  return d.durationSeconds && safeAudioUrl(d.audioUrl) ? d.durationSeconds : undefined
+}
+
 function entryLength(d: DigestRecord): string {
-  const known = resume.durationOf(keyOf(d))
-  // A streamed MP3's length is only a bitrate guess until it has played to the end once.
-  return known > 0 ? formatLength(known, !resume.isPlayed(keyOf(d))) : formatLength(estimateSeconds(d.text), true)
+  return digestLengthLabel({ knownSeconds: resume.durationOf(keyOf(d)), played: resume.isPlayed(keyOf(d)), serverSeconds: exactSeconds(d), text: d.text })
 }
 
 function renderList(): void {
@@ -378,7 +382,7 @@ function paint(s: PlayerState): void {
   const shell = `${d.id}|${Math.round(s.dur)}|${s.durApprox}|${s.mode}|${madeAudio.has(d.id)}|${notesOpen}|${d.notes?.length ?? -1}`
   if (shell !== lastShell) {
     lastShell = shell
-    $('hero-line2').textContent = formatLength(s.dur, s.durApprox || (s.mode === 'audio' && !s.played))
+    $('hero-line2').textContent = formatLength(s.dur, s.durApprox || (s.mode === 'audio' && !s.played && !exactSeconds(d)))
     $('hero-sub').textContent = `${dayLabel(d.createdAt)}, ${clockLabel(d.createdAt)}${s.mode === 'speech' ? ' · read aloud by your browser' : ''}`
     const count = d.notes?.length
     const btn = $('btn-shownotes')

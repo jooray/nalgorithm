@@ -39,6 +39,8 @@ export interface DigestRecord {
   createdAt: number
   text: string
   audioUrl: string | null
+  /** Exact length of the audio in seconds, measured by the server. Absent for older digests. */
+  durationSeconds?: number
   /** Undefined means "not loaded / not known", distinct from an empty list. */
   notes?: DigestSourceNote[]
   profiles?: Record<string, ProfileSnapshot>
@@ -97,6 +99,9 @@ export function readDigest(value: unknown): DigestRecord | null {
     createdAt: v.createdAt,
     text: typeof v.text === 'string' ? v.text.slice(0, MAX_TEXT_CHARS) : '',
     audioUrl: typeof v.audioUrl === 'string' ? v.audioUrl : null,
+  }
+  if (typeof v.durationSeconds === 'number' && Number.isFinite(v.durationSeconds) && v.durationSeconds > 0) {
+    rec.durationSeconds = v.durationSeconds
   }
   if (Array.isArray(v.notes)) {
     rec.notes = v.notes.map(readSourceNote).filter((n): n is DigestSourceNote => n !== null)
@@ -207,6 +212,18 @@ export function formatLength(seconds: number, approx = false): string {
   const r = s % 60
   if (m === 0) return `${r} s`
   return r === 0 ? `${m} min` : `${m} min ${r} s`
+}
+
+/**
+ * The length a digest shows, most trustworthy first: the server's exact figure (measured from the
+ * MP3's frames, so it is right before anything plays), then what the player measured (still "about"
+ * until the audio has played through once, since a streamed MP3 only guesses), then a guess from
+ * the word count.
+ */
+export function digestLengthLabel(i: { knownSeconds: number; played: boolean; serverSeconds?: number; text: string }): string {
+  if (i.serverSeconds !== undefined && i.serverSeconds > 0) return formatLength(i.serverSeconds)
+  if (i.knownSeconds > 0) return formatLength(i.knownSeconds, !i.played)
+  return formatLength(estimateSeconds(i.text), true)
 }
 
 /** The first `n` non-empty lines of a digest, for a list entry. */

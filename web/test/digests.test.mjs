@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   readSourceNote, readDigest, digestSourceNotes, toScoredPost, makeLocalDigest, notePubkeys,
-  estimateSeconds, formatLength, firstLines, newestFirst,
+  estimateSeconds, formatLength, firstLines, newestFirst, digestLengthLabel,
 } from '../src/digest-model.ts'
 import { HISTORY_CAP, loadHistory, withDigest, saveHistory, addToHistory } from '../src/digest-history.ts'
 
@@ -135,4 +135,32 @@ test('lengths and lines', () => {
   assert.equal(estimateSeconds(Array(260).fill('word').join(' ')), 100)
   assert.equal(firstLines('\n Good morning.\n\nSecond.\nThird.', 2), 'Good morning. Second.')
   assert.deepEqual(newestFirst([{ createdAt: 1, n: 'a' }, { createdAt: 3, n: 'b' }, { createdAt: 3, n: 'c' }]).map((x) => x.n), ['b', 'c', 'a'])
+})
+
+test('readDigest: the exact audio length is kept when it is a positive number, dropped otherwise', () => {
+  const base = { id: 1, createdAt: 100, text: 't', audioUrl: 'https://x/a.mp3' }
+  assert.equal(readDigest({ ...base, durationSeconds: 227.448 }).durationSeconds, 227.448)
+  assert.equal('durationSeconds' in readDigest({ ...base, durationSeconds: null }), false, 'older digests have none')
+  assert.equal('durationSeconds' in readDigest(base), false)
+  for (const bad of [0, -5, '227', NaN, Infinity]) assert.equal('durationSeconds' in readDigest({ ...base, durationSeconds: bad }), false, String(bad))
+})
+
+test('history: the exact length survives storage', () => {
+  const s = memory()
+  addToHistory(s, readDigest, { id: '5', createdAt: 50, text: 't', audioUrl: 'https://x/a.mp3', durationSeconds: 227.448 })
+  assert.equal(loadHistory(s, readDigest)[0].durationSeconds, 227.448)
+})
+
+test('digestLengthLabel: server length from the first render, the player figure after, a guess last', () => {
+  const text = 'word '.repeat(300)
+  // Before any playback, with the server figure: exact, no "about".
+  assert.equal(digestLengthLabel({ knownSeconds: 0, played: false, serverSeconds: 227.448, text }), '3 min 47 s')
+  // The player measured a streamed guess (3 min 25 s); the exact server figure is the one shown.
+  assert.equal(digestLengthLabel({ knownSeconds: 205, played: false, serverSeconds: 227.448, text }), '3 min 47 s')
+  // Without a server figure the player's number stays "about" until played through once.
+  assert.match(digestLengthLabel({ knownSeconds: 205, played: false, text }), /^about \d+ min$/)
+  assert.equal(digestLengthLabel({ knownSeconds: 227, played: true, text }), '3 min 47 s')
+  // Nothing measured: a word-count guess.
+  assert.match(digestLengthLabel({ knownSeconds: 0, played: false, text }), /^about \d+ min$/)
+  assert.match(digestLengthLabel({ knownSeconds: 0, played: false, serverSeconds: 0, text }), /^about/)
 })
