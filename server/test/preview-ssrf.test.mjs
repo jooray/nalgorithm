@@ -199,3 +199,42 @@ test('the real transport connects to the pinned address and sends the hostname a
     server.close()
   }
 })
+
+// Regression: a host that lists IPv6 addresses this machine cannot route to (a common
+// situation) used to fail, because only the first resolved address was tried. Found
+// against a real site whose DNS answer contained both families.
+test('addresses are tried IPv4 first, and the next one is used only when the connection fails', async () => {
+  const resolver = publicResolver({ 'dual.example': ['2606:4700:3037::6815:5dc9', '104.21.93.201', '172.67.214.92', '2606:4700:3037::ac43:d65c'] })
+  const vetted = await vetUrl('https://dual.example/', { resolver })
+  assert.deepEqual(vetted.candidates.map((c) => c.ip), ['104.21.93.201', '172.67.214.92', '2606:4700:3037::6815:5dc9', '2606:4700:3037::ac43:d65c'], 'IPv4 first, order kept within a family')
+  assert.equal(vetted.ip, '104.21.93.201')
+
+  // IPv4 unreachable here, IPv6 works: the fetch falls through to it.
+  const tried = []
+  const transport = async (req) => {
+    tried.push(req.ip)
+    if (req.family === 4) throw new PreviewFetchError('network', 'request failed')
+    return response({ body: page('<title>ok</title>') }, req.signal)
+  }
+  const r = await safeFetch('https://dual.example/', { ...html, transport, resolver })
+  assert.match(r.body.toString(), /ok/)
+  assert.deepEqual(tried, ['104.21.93.201', '172.67.214.92', '2606:4700:3037::6815:5dc9'], 'stops at the first address that connects')
+})
+
+test('failover never hides a refusal: a response is final, and all-failed reports the failure', async () => {
+  const resolver = publicResolver({ 'dual.example': ['104.21.93.201', '2606:4700:3037::6815:5dc9'] })
+  // A 403 from the first address is an answer, not a connection failure: no second attempt.
+  const seen = []
+  await refuses(safeFetch('https://dual.example/', { ...html, resolver, transport: async (req) => { seen.push(req.ip); return response({ status: 403 }, req.signal) } }), 'status')
+  assert.equal(seen.length, 1)
+  // Every address fails to connect: the caller sees a network error, not a hang.
+  const failing = async () => { throw new PreviewFetchError('network', 'request failed') }
+  await refuses(safeFetch('https://dual.example/', { ...html, resolver, transport: failing }), 'network')
+})
+
+test('every address must still be public: one private answer refuses the host even if it is not the first', async () => {
+  const resolver = publicResolver({ 'mixed.example': ['93.184.216.34', '10.0.0.5'] })
+  const transport = fakeTransport({})
+  await refuses(safeFetch('https://mixed.example/', { ...html, transport, resolver }), 'blocked')
+  assert.equal(transport.calls.length, 0)
+})

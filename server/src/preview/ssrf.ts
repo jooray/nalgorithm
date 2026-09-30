@@ -130,8 +130,16 @@ export const defaultResolver: Resolver = async (hostname) => (await dnsLookup(ho
 
 export interface Vetted {
   url: URL
+  /** The preferred address (IPv4 first). Same as `candidates[0]`. */
   ip: string
   family: 4 | 6
+  /**
+   * Every vetted address, IPv4 first. A host often lists IPv6 addresses this
+   * machine cannot route to, so connecting to only the first one would fail
+   * where any browser succeeds; the fetch falls back through these in order.
+   * All of them passed the same public-address check.
+   */
+  candidates: Array<{ ip: string; family: 4 | 6 }>
 }
 
 export interface GuardOptions {
@@ -173,8 +181,10 @@ export async function vetUrl(raw: string | URL, opts: GuardOptions = {}): Promis
   for (const a of addresses) {
     if (isBlockedAddress(a, allowLoopback)) throw new PreviewFetchError('blocked', 'address is not public')
   }
-  const ip = addresses[0]
-  return { url, ip, family: isIP(ip) === 6 ? 6 : 4 }
+  const candidates = [...new Set(addresses)]
+    .map((ip) => ({ ip, family: (isIP(ip) === 6 ? 6 : 4) as 4 | 6 }))
+    .sort((a, b) => a.family - b.family) // IPv4 first; the sort is stable within a family
+  return { url, ip: candidates[0].ip, family: candidates[0].family, candidates }
 }
 
 // ─── Transport ───────────────────────────────────────────────────────────────
@@ -280,16 +290,22 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions): Promise
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const vetted = await raceAbort(vetUrl(current, opts), signal)
       // Cookies are never sent, and compression is off so the byte cap is on real bytes.
-      const res = await raceAbort(
-        transport({
-          url: vetted.url,
-          ip: vetted.ip,
-          family: vetted.family,
-          signal,
-          headers: { 'User-Agent': USER_AGENT, Accept: opts.accept, 'Accept-Encoding': 'identity' },
-        }),
-        signal,
-      )
+      const headers = { 'User-Agent': USER_AGENT, Accept: opts.accept, 'Accept-Encoding': 'identity' }
+      let res: TransportResponse | undefined
+      let lastError: unknown
+      for (const c of vetted.candidates) {
+        try {
+          res = await raceAbort(transport({ url: vetted.url, ip: c.ip, family: c.family, signal, headers }), signal)
+          break
+        } catch (err) {
+          lastError = err
+          // Only a failed connection moves on to the next address. A refusal, a
+          // timeout of the whole fetch or anything after a response must not.
+          if (!(err instanceof PreviewFetchError) || err.code !== 'network' || signal.aborted) throw err
+        }
+      }
+      if (!res) throw lastError
+
       try {
         if ([301, 302, 303, 307, 308].includes(res.status)) {
           const location = res.headers.location
