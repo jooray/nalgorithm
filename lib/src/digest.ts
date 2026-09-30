@@ -64,7 +64,8 @@ export function buildDigestSystemPrompt(custom?: string, forSpeech = false): str
 function resolveAuthorName(pubkey: string, profiles?: Map<string, ProfileData>): string {
   const profile = profiles?.get(pubkey)
   if (profile?.name) return profile.name
-  return pubkey.slice(0, 8) + '...'
+  // Never a key: a speech engine would read it out character by character.
+  return 'someone you follow'
 }
 
 /**
@@ -107,7 +108,7 @@ export function formatPostForDigest(
 export interface DigestOptions {
   /** Scored posts. Sorted and trimmed to `topN` internally. */
   posts: ScoredPost[]
-  /** Profile metadata, for author names instead of hex prefixes. */
+  /** Profile metadata, for author names. */
   profiles?: Map<string, ProfileData>
   /** The user's own interest description. */
   userPrompt: string

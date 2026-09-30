@@ -22,6 +22,11 @@ export interface NalgorithmConfig {
 export interface FetcherConfig {
   /** Relay WebSocket URLs */
   relays: string[]
+  /**
+   * Relays asked for profiles (kind 0) only when the main relays returned
+   * nothing for a pubkey. Defaults to two widely used public profile relays.
+   */
+  profileFallbackRelays?: string[]
 }
 
 export interface RankerConfig {

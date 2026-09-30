@@ -6,7 +6,8 @@
  * @module nalgorithm
  */
 
-export { createFetcher, pubkeyToHex } from './fetcher.js'
+export { createFetcher, pubkeyToHex, parseProfileEvents } from './fetcher.js'
+export { collectPostPubkeys, extractReferencedPubkeys, MAX_PROFILE_PUBKEYS } from './pubkeys.js'
 export {
   createRanker,
   sortByRelevance,

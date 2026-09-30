@@ -32,6 +32,36 @@ const DEFAULT_LIKES_LIMIT = 200
 const FILTER_AUTHOR_CHUNK = 200
 // Timeout for relay queries (ms)
 const QUERY_TIMEOUT = 30_000
+// Public relays that index kind 0 widely; asked only for pubkeys nobody else knew.
+const DEFAULT_PROFILE_RELAYS = ['wss://purplepag.es', 'wss://relay.damus.io']
+
+/**
+ * Turn kind 0 events into profiles, keeping the newest event per pubkey.
+ * The name is display_name, else name. Events with unparseable content are skipped.
+ */
+export function parseProfileEvents(events: Array<Pick<NostrEvent, 'pubkey' | 'created_at' | 'content'>>): Map<string, ProfileData> {
+  const latest = new Map<string, Pick<NostrEvent, 'pubkey' | 'created_at' | 'content'>>()
+  for (const event of events) {
+    const existing = latest.get(event.pubkey)
+    if (!existing || event.created_at > existing.created_at) latest.set(event.pubkey, event)
+  }
+  const out = new Map<string, ProfileData>()
+  for (const [pubkey, event] of latest) {
+    try {
+      const meta = JSON.parse(event.content) as Record<string, unknown>
+      const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+      out.set(pubkey, {
+        pubkey,
+        name: str(meta.display_name) ?? str(meta.name),
+        picture: str(meta.picture),
+        nip05: str(meta.nip05),
+      })
+    } catch {
+      // Invalid JSON in kind 0 content: skip.
+    }
+  }
+  return out
+}
 
 /**
  * Decode an npub or hex pubkey to hex. Passes through hex strings unchanged.
@@ -170,6 +200,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 export function createFetcher(config: FetcherConfig): Fetcher {
   const pool = new SimplePool()
   const { relays } = config
+  const fallbackRelays = config.profileFallbackRelays ?? DEFAULT_PROFILE_RELAYS
 
   async function getFollows(pubkey: string): Promise<string[]> {
     const hex = pubkeyToHex(pubkey)
@@ -380,37 +411,25 @@ export function createFetcher(config: FetcherConfig): Fetcher {
     if (pubkeys.length === 0) return profiles
 
     const uniquePubkeys = [...new Set(pubkeys)]
-    const pubkeyChunks = chunk(uniquePubkeys, FILTER_AUTHOR_CHUNK)
 
-    for (const batch of pubkeyChunks) {
-      const events = await queryWithTimeout(pool, relays, {
-        kinds: [0],
-        authors: batch,
-      })
-
-      // Kind 0 can have multiple events per pubkey; use the most recent
-      const latestByPubkey = new Map<string, NostrEvent>()
-      for (const event of events) {
-        const existing = latestByPubkey.get(event.pubkey)
-        if (!existing || event.created_at > existing.created_at) {
-          latestByPubkey.set(event.pubkey, event)
-        }
-      }
-
-      for (const [pubkey, event] of latestByPubkey) {
+    // One failed chunk must not lose the profiles the others found.
+    async function fetchInto(relayList: string[], wanted: string[]): Promise<void> {
+      for (const batch of chunk(wanted, FILTER_AUTHOR_CHUNK)) {
         try {
-          const meta = JSON.parse(event.content) as Record<string, unknown>
-          profiles.set(pubkey, {
-            pubkey,
-            name: (meta.display_name as string) || (meta.name as string) || undefined,
-            picture: (meta.picture as string) || undefined,
-            nip05: (meta.nip05 as string) || undefined,
-          })
+          const events = await queryWithTimeout(pool, relayList, { kinds: [0], authors: batch })
+          for (const [pubkey, profile] of parseProfileEvents(events)) profiles.set(pubkey, profile)
         } catch {
-          // Invalid JSON in kind 0 content — skip
+          // Relay error: leave these unresolved, the fallback pass may cover them.
         }
       }
     }
+
+    await fetchInto(relays, uniquePubkeys)
+
+    // The configured relays often lack kind 0 for people the follow list points at.
+    const missing = uniquePubkeys.filter((pk) => !profiles.has(pk))
+    const extra = fallbackRelays.filter((r) => !relays.includes(r))
+    if (missing.length > 0 && extra.length > 0) await fetchInto(extra, missing)
 
     return profiles
   }

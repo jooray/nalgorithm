@@ -60,7 +60,7 @@ export function sortByRelevance(posts: ScoredPost[]): ScoredPost[] {
 }
 
 /**
- * Resolve a pubkey to a short display name using profiles, or a short hex fallback.
+ * Resolve a pubkey to a short display name using profiles, or a neutral placeholder (a key prefix would end up in the justifications shown to the reader).
  */
 function resolveAuthorName(
   pubkey: string,
@@ -68,7 +68,7 @@ function resolveAuthorName(
 ): string {
   const profile = profiles?.get(pubkey)
   if (profile?.name) return profile.name
-  return pubkey.slice(0, 8)
+  return 'an unknown author'
 }
 
 /**
