@@ -168,15 +168,17 @@
           <input type="number" id="input-concurrency" min="1" value="1">
           <p class="field-hint">How many scoring calls run at once. 1 is sequential; 5 is roughly five times faster on a cold cache. Keep it within what your provider's rate limits allow.</p>
 
-          <label for="select-client">Open posts in</label>
+          <label for="select-client">Open posts and profiles in</label>
           <select id="select-client">
             <option value="njump">njump</option>
             <option value="primal">Primal</option>
             <option value="yakihonne">Yakihonne</option>
+            <option value="app">My Nostr app (nostr: link)</option>
             <option value="custom">Custom</option>
           </select>
-          <input type="text" id="input-client-custom" class="hidden" placeholder="https://example.com/e/{e}" spellcheck="false">
-          <p class="field-hint" id="client-hint">Use <code>{e}</code> where the event id goes, or just give the prefix — both work.</p>
+          <input type="text" id="input-client-custom" class="hidden" placeholder="https://example.com/e/{e}" spellcheck="false" aria-label="Custom post link template">
+          <input type="text" id="input-client-custom-profile" class="hidden" placeholder="https://example.com/p/{npub}" spellcheck="false" aria-label="Custom profile link template">
+          <p class="field-hint" id="client-hint">Post links use <code>{e}</code> for the nevent; profile links use <code>{npub}</code>, <code>{nprofile}</code> or <code>{pubkey}</code>. Or give just a prefix. Only http, https and nostr: links are accepted.</p>
 
           <label class="checkbox-label">
             <input type="checkbox" id="input-auto-refresh" checked>

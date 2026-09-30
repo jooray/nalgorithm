@@ -282,6 +282,7 @@ export function readFieldsToSettings(): AppSettings {
     concurrency: Math.max(1, parseInt($<HTMLInputElement>('#input-concurrency').value, 10) || 1),
     clientPreset: $<HTMLSelectElement>('#select-client').value as AppSettings['clientPreset'],
     clientCustomUrl: $<HTMLInputElement>('#input-client-custom').value.trim(),
+    clientCustomProfileUrl: $<HTMLInputElement>('#input-client-custom-profile').value.trim(),
     autoRefresh: $<HTMLInputElement>('#input-auto-refresh').checked,
     ttsModel: $<HTMLInputElement>('#input-tts-model').value.trim(),
     ttsVoice: $<HTMLInputElement>('#input-tts-voice').value.trim(),
@@ -323,6 +324,7 @@ function toggleDecisionFields(scorer: string): void {
 
 function toggleCustomClientField(preset: string): void {
   $('#input-client-custom').classList.toggle('hidden', preset !== 'custom')
+  $('#input-client-custom-profile').classList.toggle('hidden', preset !== 'custom')
   $('#client-hint').classList.toggle('hidden', preset !== 'custom')
 }
 
@@ -370,6 +372,7 @@ function populateFields(settings: AppSettings): void {
   $<HTMLInputElement>('#input-concurrency').value = String(settings.concurrency)
   $<HTMLSelectElement>('#select-client').value = settings.clientPreset
   $<HTMLInputElement>('#input-client-custom').value = settings.clientCustomUrl
+  $<HTMLInputElement>('#input-client-custom-profile').value = settings.clientCustomProfileUrl
   $<HTMLInputElement>('#input-auto-refresh').checked = settings.autoRefresh
   $<HTMLInputElement>('#input-tts-model').value = settings.ttsModel
   $<HTMLInputElement>('#input-tts-voice').value = settings.ttsVoice

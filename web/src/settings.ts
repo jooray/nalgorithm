@@ -3,7 +3,7 @@
  */
 
 import { DEFAULT_SIGNER_RELAYS } from './nostr-login.js'
-import { presetFromUrl, type ClientPreset } from './client-url.js'
+import { isClientPreset, presetFromUrl, validateTemplate, type ClientPreset } from './client-url.js'
 
 const STORAGE_PREFIX = 'nalgorithm_'
 
@@ -48,6 +48,8 @@ export interface AppSettings {
   clientPreset: ClientPreset
   /** Custom URL template, used when clientPreset is 'custom'. */
   clientCustomUrl: string
+  /** Custom profile URL template ({npub}, {nprofile}, {pubkey}), used when clientPreset is 'custom'. */
+  clientCustomProfileUrl: string
   /** Automatically load the feed on page open when settings are complete. */
   autoRefresh: boolean
   /** TTS model for downloadable audio (e.g. tts-kokoro). Blank disables download. */
@@ -116,6 +118,7 @@ const DEFAULTS: AppSettings = {
   concurrency: 1,
   clientPreset: 'njump',
   clientCustomUrl: '',
+  clientCustomProfileUrl: '',
   autoRefresh: true,
   ttsModel: '',
   ttsVoice: '',
@@ -154,6 +157,7 @@ export function loadSettings(): AppSettings {
     concurrency: parseInt(getItem('concurrency') ?? '', 10) || DEFAULTS.concurrency,
     clientPreset: readClientPreset(),
     clientCustomUrl: getItem('clientCustomUrl') ?? readLegacyCustomUrl(),
+    clientCustomProfileUrl: getItem('clientCustomProfileUrl') ?? DEFAULTS.clientCustomProfileUrl,
     autoRefresh: (getItem('autoRefresh') ?? String(DEFAULTS.autoRefresh)) === 'true',
     ttsModel: getItem('ttsModel') ?? DEFAULTS.ttsModel,
     ttsVoice: getItem('ttsVoice') ?? DEFAULTS.ttsVoice,
@@ -168,7 +172,7 @@ export function loadSettings(): AppSettings {
  */
 function readClientPreset(): ClientPreset {
   const stored = getItem('clientPreset')
-  if (stored) return stored as ClientPreset
+  if (isClientPreset(stored)) return stored
   const legacy = getItem('njumpBaseUrl')
   return legacy ? presetFromUrl(legacy) : DEFAULTS.clientPreset
 }
@@ -202,6 +206,7 @@ export function saveSettings(settings: AppSettings): void {
   setItem('concurrency', String(settings.concurrency))
   setItem('clientPreset', settings.clientPreset)
   setItem('clientCustomUrl', settings.clientCustomUrl)
+  setItem('clientCustomProfileUrl', settings.clientCustomProfileUrl)
   setItem('autoRefresh', String(settings.autoRefresh))
   setItem('ttsModel', settings.ttsModel)
   setItem('ttsVoice', settings.ttsVoice)
@@ -316,6 +321,10 @@ export function validateSettings(settings: AppSettings): string | null {
   if (!settings.model.trim()) return 'Model name is required'
   if (settings.scorer === 'decision' && !settings.decisionModel.trim()) return 'Decision model name is required'
   if (!settings.userPrompt.trim()) return 'User prompt is required — describe your interests'
+  if (settings.clientPreset === 'custom') {
+    const bad = validateTemplate(settings.clientCustomUrl) ?? validateTemplate(settings.clientCustomProfileUrl)
+    if (bad) return `Custom client links: ${bad}`
+  }
   return null
 }
 

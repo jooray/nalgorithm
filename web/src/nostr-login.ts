@@ -238,12 +238,12 @@ export function startRemoteSignerLogin(
   }
 }
 
-/** Format a hex pubkey as an npub for display. Falls back to the hex on error. */
+/** Format a hex pubkey as an npub for display. Empty on error, never the hex. */
 export function toNpub(pubkeyHex: string): string {
   try {
     return npubEncode(pubkeyHex)
   } catch {
-    return pubkeyHex
+    return ''
   }
 }
 
