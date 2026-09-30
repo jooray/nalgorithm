@@ -98,6 +98,15 @@ function schema(d: Dialect): string[] {
       data TEXT NULL,
       fetched_at BIGINT NOT NULL
     )${opts}`,
+    // Public kind 0 metadata, shared by everyone. `missing` rows remember a failed lookup.
+    `CREATE TABLE IF NOT EXISTS profiles (
+      pubkey ${t(64)} PRIMARY KEY,
+      name TEXT NULL,
+      picture TEXT NULL,
+      nip05 TEXT NULL,
+      missing INTEGER NOT NULL DEFAULT 0,
+      fetched_at BIGINT NOT NULL
+    )${opts}`,
   ].filter(Boolean)
 }
 

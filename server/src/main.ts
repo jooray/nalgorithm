@@ -23,7 +23,7 @@ configureWebSocket()
 const config = loadConfig()
 const db = await openDb(config.databaseUrl)
 const billing = createBillingClient({ url: config.billing.url, token: config.billing.token, product: 'nalgorithm' })
-const feed = createFeedRunner(config, log)
+const feed = createFeedRunner(config, log, db)
 
 let runDigestNow: ((npub: string) => Promise<string>) | undefined
 let stopBot = async (): Promise<void> => {}

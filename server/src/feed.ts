@@ -1,5 +1,7 @@
 import { collectPostPubkeys, createFetcher, createRanker, refreshLearnedPrompt, scorePostsCached, sortByRelevance } from 'nalgorithm'
 import type { PipelineLogger, PipelineStore, ProfileData, ScoredPost } from 'nalgorithm'
+import type { Db } from './db.js'
+import { loadProfilesCached } from './profile-cache.js'
 import type { ServerConfig } from './config.js'
 import type { UserSettings } from './settings.js'
 
@@ -25,12 +27,14 @@ export const MAX_POSTS = 500
 export async function loadFeedProfiles(
   fetcher: { getProfiles(pubkeys: string[]): Promise<Map<string, ProfileData>> },
   posts: Parameters<typeof collectPostPubkeys>[0],
-  cap?: number
+  cap?: number,
+  db?: Db
 ): Promise<Map<string, ProfileData>> {
-  return fetcher.getProfiles(collectPostPubkeys(posts, cap))
+  const pubkeys = collectPostPubkeys(posts, cap)
+  return db ? loadProfilesCached(db, fetcher, pubkeys) : fetcher.getProfiles(pubkeys)
 }
 
-export function createFeedRunner(config: ServerConfig, log: PipelineLogger): FeedRunner {
+export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?: Db): FeedRunner {
   return async (npub, settings, store) => {
     const fetcher = createFetcher({ relays: config.relays })
     try {
@@ -40,7 +44,7 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger): Fee
       const posts = await fetcher.getPosts(follows, { hoursBack: settings.hoursBack, maxPosts: MAX_POSTS })
       if (posts.length === 0) return { posts: [], profiles: {}, fetched: 0 }
 
-      const profiles = await loadFeedProfiles(fetcher, posts)
+      const profiles = await loadFeedProfiles(fetcher, posts, undefined, db)
 
       let learnedPrompt: string | undefined
       if (settings.learnFromLikes) {
