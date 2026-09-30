@@ -9,7 +9,7 @@
 
 import { chatCompletionWithRetry, chatCompletionStream } from './llm.js'
 import { sortByRelevance } from './ranker.js'
-import type { ChatMessage, LLMConfig, ProfileData, ScoredPost } from './types.js'
+import type { ChatMessage, DigestSourceNote, LLMConfig, ProfileData, ScoredPost } from './types.js'
 
 export const DEFAULT_DIGEST_SYSTEM_PROMPT = `You are a witty, knowledgeable radio host delivering a spoken-word digest of what happened on Nostr in the last 24 hours. Always open with "Good morning, nostrich!" Your style is conversational, warm, and engaging — like a smart friend catching you up over coffee. You weave posts together into a narrative rather than reading them one by one. Add context, make connections between topics, and keep the energy up. Aim for 5-10 minutes of spoken content (roughly 1000-2000 words).`
 
@@ -133,6 +133,32 @@ export interface DigestOptions {
    * has already emitted text, so silently restarting it would duplicate output.
    */
   onDelta?: (text: string) => void
+}
+
+export const DIGEST_NOTE_MAX_CHARS = 1500
+
+/**
+ * The notes a digest is composed from, in the order the digest prompt lists
+ * them: the same sort and cut as buildDigestMessages (`topN` defaults to 15).
+ * A boost is represented by the note it reposted, since that is what a reader
+ * wants to open; a quote by the quoting note itself.
+ */
+export function digestSourceNotes(posts: ScoredPost[], topN = 15): DigestSourceNote[] {
+  return sortByRelevance(posts)
+    .slice(0, topN)
+    .map((post) => {
+      const boost = post.type === 'boost' && post.originalPost ? post.originalPost : null
+      const note: DigestSourceNote = {
+        id: boost ? boost.id : post.id,
+        pubkey: boost ? boost.author : post.author,
+        createdAt: post.createdAt,
+        content: (boost ? boost.content : post.content).slice(0, DIGEST_NOTE_MAX_CHARS),
+        score: post.score,
+      }
+      if (post.justification) note.reason = post.justification
+      if (!boost && typeof post.rawEvent?.kind === 'number') note.kind = post.rawEvent.kind
+      return note
+    })
 }
 
 /** Build the chat messages for a digest run, without sending them. */

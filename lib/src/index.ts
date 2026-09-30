@@ -30,6 +30,8 @@ export type { HumanizeOptions } from './humanizer.js'
 export {
   generateDigest,
   buildDigestMessages,
+  digestSourceNotes,
+  DIGEST_NOTE_MAX_CHARS,
   buildDigestSystemPrompt,
   formatPostForDigest,
   DEFAULT_DIGEST_SYSTEM_PROMPT,
@@ -78,6 +80,7 @@ export type {
   // Ranker
   Ranker,
   ScoredPost,
+  DigestSourceNote,
   ScoreOptions,
   DebugEntry,
   ScorerKind,

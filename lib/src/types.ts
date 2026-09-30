@@ -176,6 +176,28 @@ export interface ScoredPost extends FetchedPost {
   defaultScore?: boolean
 }
 
+/**
+ * One note a digest was composed from ("show notes"), in digest order.
+ * Stored with the digest so a UI can render note cards next to the audio.
+ */
+export interface DigestSourceNote {
+  /** Event id (hex). For a boost, the id of the original note. */
+  id: string
+  /** Author (hex). For a boost, the original author. */
+  pubkey: string
+  /** Unix seconds */
+  createdAt: number
+  /** Note text, truncated to 1500 characters */
+  content: string
+  /** Relevance score (0-10) */
+  score: number
+  /** The one-line justification for the score */
+  reason?: string
+  kind?: number
+  /** Relay hint, when known */
+  relay?: string
+}
+
 export interface ScoreOptions {
   /** User-supplied prompt describing interests */
   userPrompt: string
