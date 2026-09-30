@@ -47,6 +47,7 @@ import {
 import {
   IDLE_STATUS,
   findArrived,
+  deliveredDuringRun,
   firstDigestKey,
   nextJobStep,
   progressText,
@@ -1032,7 +1033,13 @@ function paintJob(): void {
 async function refreshDigestStatus(): Promise<void> {
   if (!userNpub) return
   try {
-    applyDigestStatus(await getDigestStatus())
+    let status = await getDigestStatus()
+    if (status.running) {
+      // The list can have the new digest before the job is marked finished (the DM is sent in between).
+      const list = await loadDigests(true)
+      if (list && deliveredDuringRun(status, list)) status = { ...status, running: false, lastStatus: 'sent', finishedAt: nowSec() }
+    }
+    applyDigestStatus(status)
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) return showLogin(describeError(err).message)
     // A blip is not news; the next poll or visit looks again.

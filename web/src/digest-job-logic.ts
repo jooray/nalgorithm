@@ -128,3 +128,12 @@ export function findArrived<T extends { id: string }>(knownIds: Iterable<string>
   const known = new Set(knownIds)
   return list.find((d) => !known.has(d.id)) ?? null
 }
+
+/**
+ * The digest row is saved before its DM goes out, so the list can show the new digest
+ * while the job still says "running". Once a digest made after the run began is in the
+ * list, the reader has it, and the progress display has nothing left to say.
+ */
+export function deliveredDuringRun(status: DigestStatus, list: readonly { createdAt: number }[]): boolean {
+  return status.running && status.startedAt !== null && list.some((d) => d.createdAt >= (status.startedAt as number))
+}

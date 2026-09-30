@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ANOTHER_DIGEST_HINT,
+  deliveredDuringRun,
   IDLE_STATUS,
   clock,
   estimateText,
@@ -135,4 +136,12 @@ test('empty list, digest requested: polling the status announces it once and fin
     if (step.kind === 'arrived') announced.push(findArrived(known, serverList)?.id)
   }
   assert.deepEqual(announced, ['1'])
+})
+
+test('a digest made after the run began ends the progress display, even before the job is marked finished', () => {
+  const running = { running: true, startedAt: 1000, lastDurationSeconds: null, lastStatus: null, finishedAt: null }
+  assert.equal(deliveredDuringRun(running, [{ createdAt: 1200 }]), true)
+  assert.equal(deliveredDuringRun(running, [{ createdAt: 900 }]), false, 'an older digest does not count')
+  assert.equal(deliveredDuringRun(running, []), false)
+  assert.equal(deliveredDuringRun({ ...running, running: false }, [{ createdAt: 1200 }]), false)
 })
