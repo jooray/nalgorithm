@@ -8,7 +8,7 @@
  * `mariadb://user:password@host:3306/database`.
  */
 
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 
 export type Dialect = 'sqlite' | 'mariadb'
 export type Param = string | number | bigint | null
@@ -70,8 +70,11 @@ function sqliteStatements(db: DatabaseSync): Omit<Database, 'transaction' | 'clo
   }
 }
 
-function openSqlite(path: string): Database {
-  const db = new DatabaseSync(path)
+async function openSqlite(path: string): Promise<Database> {
+  // Loaded on demand, so a MariaDB-only deployment never touches node:sqlite
+  // (which is still flagged experimental on some Node versions).
+  const { DatabaseSync: Sqlite } = await import('node:sqlite')
+  const db = new Sqlite(path)
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
   const mutex = new Mutex()
   const inner = sqliteStatements(db)
