@@ -45,6 +45,51 @@ function schema(d: Dialect): string[] {
       PRIMARY KEY (npub, cache_key)${d === 'sqlite' ? '' : ', KEY scores_created (npub, post_created_at)'}
     )${opts}`,
     d === 'sqlite' ? 'CREATE INDEX IF NOT EXISTS scores_created ON scores (npub, post_created_at)' : '',
+    `CREATE TABLE IF NOT EXISTS schedules (
+      npub ${t(64)} PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      hour INTEGER NOT NULL DEFAULT 7,
+      minute INTEGER NOT NULL DEFAULT 0,
+      tz ${t(64)} NOT NULL DEFAULT 'UTC',
+      voice ${t(32)} NULL,
+      dm_format ${t(8)} NULL,
+      next_run_at BIGINT NULL,
+      last_run_at BIGINT NULL,
+      last_status ${t(24)} NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      expired_notice_at BIGINT NULL${d === 'sqlite' ? '' : ', KEY schedules_due (enabled, next_run_at)'}
+    )${opts}`,
+    d === 'sqlite' ? 'CREATE INDEX IF NOT EXISTS schedules_due ON schedules (enabled, next_run_at)' : '',
+    `CREATE TABLE IF NOT EXISTS digests (
+      id ${ddl.pk(d)},
+      npub ${t(64)} NOT NULL,
+      created_at BIGINT NOT NULL,
+      body TEXT NOT NULL,
+      audio_url ${t(500)} NULL,
+      status ${t(24)} NOT NULL${d === 'sqlite' ? '' : ', KEY digests_npub (npub, created_at)'}
+    )${opts}`,
+    d === 'sqlite' ? 'CREATE INDEX IF NOT EXISTS digests_npub ON digests (npub, created_at)' : '',
+    `CREATE TABLE IF NOT EXISTS deliveries (
+      id ${ddl.pk(d)},
+      npub ${t(64)} NOT NULL,
+      digest_id BIGINT NULL,
+      created_at BIGINT NOT NULL,
+      protocol ${t(8)} NOT NULL,
+      delivered INTEGER NOT NULL,
+      tier ${t(12)} NULL,
+      detail TEXT NULL${d === 'sqlite' ? '' : ', KEY deliveries_npub (npub, created_at)'}
+    )${opts}`,
+    d === 'sqlite' ? 'CREATE INDEX IF NOT EXISTS deliveries_npub ON deliveries (npub, created_at)' : '',
+    `CREATE TABLE IF NOT EXISTS seen_wraps (
+      id ${t(64)} PRIMARY KEY,
+      seen_at BIGINT NOT NULL
+    )${opts}`,
+    `CREATE TABLE IF NOT EXISTS peers (
+      npub ${t(64)} PRIMARY KEY,
+      dm_kind ${t(8)} NOT NULL,
+      last_seen_at BIGINT NOT NULL,
+      relays TEXT NULL
+    )${opts}`,
   ].filter(Boolean)
 }
 

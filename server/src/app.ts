@@ -6,6 +6,8 @@ import { BillingUnavailable } from './billing-client.js'
 import { createStore } from './db.js'
 import type { Db } from './db.js'
 import type { FeedRunner } from './feed.js'
+import { ScheduleError, applySchedulePatch, loadSchedule, saveSchedule } from './schedule.js'
+import type { Schedule } from './schedule.js'
 import { SettingsError, applySettings, loadSettings, saveSettings } from './settings.js'
 
 export interface AppDeps {
@@ -17,6 +19,8 @@ export interface AppDeps {
   secureCookie: boolean
   log: PipelineLogger
   now?: () => number
+  /** Queue a digest for the npub right now. Absent means the endpoint answers 503. */
+  runDigestNow?: (npub: string) => Promise<string>
 }
 
 const COOKIE = 'nalgorithm_session'
@@ -55,6 +59,20 @@ function send(res: ServerResponse, status: number, body: unknown, headers: Recor
   const text = JSON.stringify(body)
   res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text), 'Cache-Control': 'no-store', ...headers })
   res.end(text)
+}
+
+/** The schedule as the API shows it: the time as one HH:MM string, no internal bookkeeping. */
+function publicSchedule(s: Schedule): Record<string, unknown> {
+  return {
+    enabled: s.enabled,
+    time: `${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}`,
+    tz: s.tz,
+    voice: s.voice,
+    dmFormat: s.dmFormat,
+    nextRunAt: s.nextRunAt,
+    lastRunAt: s.lastRunAt,
+    lastStatus: s.lastStatus,
+  }
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -163,6 +181,43 @@ export function createApp(deps: AppDeps) {
         if (err instanceof SettingsError) throw new HttpError(400, err.message)
         throw err
       }
+    }
+
+    if (method === 'GET' && path === '/schedule') return send(res, 200, publicSchedule(await loadSchedule(db, npub)))
+
+    if (method === 'PUT' && path === '/schedule') {
+      const body = await readJson(req)
+      const allowed = new Set(['enabled', 'time', 'tz', 'voice', 'dmFormat'])
+      for (const key of Object.keys(body)) if (!allowed.has(key)) throw new HttpError(400, `unknown setting: ${key}`)
+      if (body.enabled !== undefined && typeof body.enabled !== 'boolean') throw new HttpError(400, 'enabled must be a boolean')
+      if (body.time !== undefined && typeof body.time !== 'string') throw new HttpError(400, 'time must be a string like 07:30')
+      if (body.tz !== undefined && typeof body.tz !== 'string') throw new HttpError(400, 'tz must be a string')
+      if (body.voice !== undefined && body.voice !== null && typeof body.voice !== 'string') throw new HttpError(400, 'voice must be a string or null')
+      if (body.dmFormat !== undefined && body.dmFormat !== null && body.dmFormat !== 'nip17' && body.dmFormat !== 'nip04') {
+        throw new HttpError(400, 'dmFormat must be nip17, nip04 or null')
+      }
+      try {
+        const next = applySchedulePatch(await loadSchedule(db, npub), body as never, nowSec())
+        await saveSchedule(db, next)
+        return send(res, 200, publicSchedule(next))
+      } catch (err) {
+        if (err instanceof ScheduleError) throw new HttpError(400, err.message)
+        throw err
+      }
+    }
+
+    if (method === 'GET' && path === '/digests') {
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 10) || 10, 1), 30)
+      const rows = await db.all<{ id: number; created_at: number; body: string; audio_url: string | null }>(
+        'SELECT id, created_at, body, audio_url FROM digests WHERE npub = ? ORDER BY created_at DESC LIMIT ?',
+        [npub, limit],
+      )
+      return send(res, 200, { digests: rows.map((r) => ({ id: Number(r.id), createdAt: Number(r.created_at), text: r.body, audioUrl: r.audio_url })) })
+    }
+
+    if (method === 'POST' && path === '/digest/now') {
+      if (!deps.runDigestNow) throw new HttpError(503, 'digests are not available on this server', { code: 'digests_unavailable' })
+      return send(res, 202, { message: await deps.runDigestNow(npub) })
     }
 
     if (method === 'POST' && path === '/billing/checkout') {

@@ -24,7 +24,7 @@ async function freshDb() {
   const url = process.env.TEST_DATABASE_URL
   if (!url) return openDb(':memory:')
   shared ??= await openDb(url)
-  for (const t of ['scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
+  for (const t of ['peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
   return shared
 }
 
@@ -206,7 +206,7 @@ function fakeBilling(initial = { state: 'active', until: T0 + 86400 }) {
   return b
 }
 
-async function withApp(fn, { billing = fakeBilling(), feed } = {}) {
+async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow } = {}) {
   const db = await freshDb()
   const feedCalls = []
   const runner = feed ?? (async (npub, settings) => {
@@ -220,7 +220,7 @@ async function withApp(fn, { billing = fakeBilling(), feed } = {}) {
       ],
     }
   })
-  const server = createServer(createApp({ db, billing, feed: runner, publicUrl: PUBLIC, secureCookie: false, log: silent, now: () => T0 }))
+  const server = createServer(createApp({ db, billing, feed: runner, publicUrl: PUBLIC, secureCookie: false, log: silent, now: () => T0, runDigestNow }))
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${server.address().port}`
   const sk = generateSecretKey()
@@ -382,4 +382,39 @@ test('HTTP: checkout uses the session npub, allowlists plans, and never takes an
     assert.equal((await json('/billing/checkout', { method: 'POST', body: { plan: 'lievik' }, token: body.token })).status, 400)
     assert.equal((await json('/billing/checkout', { method: 'POST', body: { plan: 'nalgorithm', sats: 1.5 }, token: body.token })).status, 400)
   })
+})
+
+test('HTTP: schedule read, validated update, and the next run is computed', async () => {
+  await withApp(async ({ json, login }) => {
+    const { body } = await login()
+    const before = await (await json('/schedule', { token: body.token })).json()
+    assert.equal(before.enabled, false); assert.equal(before.tz, 'UTC')
+    const ok = await (await json('/schedule', { method: 'PUT', body: { time: '07:30', tz: 'Europe/Bratislava', enabled: true, voice: 'af_bella' }, token: body.token })).json()
+    assert.equal(ok.time, '07:30'); assert.equal(ok.enabled, true); assert.equal(ok.voice, 'af_bella'); assert.ok(ok.nextRunAt > T0)
+    for (const bad of [{ time: '25:00' }, { tz: 'Mars/Base' }, { voice: 'BAD!' }, { dmFormat: 'nip99' }, { enabled: 'yes' }, { apiKey: 'x' }]) {
+      assert.equal((await json('/schedule', { method: 'PUT', body: bad, token: body.token })).status, 400, JSON.stringify(bad))
+    }
+    assert.equal((await (await json('/schedule', { token: body.token })).json()).time, '07:30', 'a rejected update changes nothing')
+    assert.equal((await json('/schedule')).status, 401)
+  })
+})
+
+test('HTTP: digests list is per user and newest first; digest/now needs a runner', async () => {
+  await withApp(async ({ json, login, npub, db }) => {
+    const { body } = await login()
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', [npub, T0 - 100, 'old', null, 'ok'])
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', [npub, T0 - 10, 'new', 'https://x/y.mp3', 'ok'])
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', ['f'.repeat(64), T0, 'someone else', null, 'ok'])
+    const list = (await (await json('/digests', { token: body.token })).json()).digests
+    assert.deepEqual(list.map((d) => d.text), ['new', 'old']); assert.equal(list[0].audioUrl, 'https://x/y.mp3')
+    assert.equal((await json('/digest/now', { method: 'POST', body: {}, token: body.token })).status, 503)
+  })
+  const asked = []
+  await withApp(async ({ json, login, npub }) => {
+    const { body } = await login()
+    const res = await json('/digest/now', { method: 'POST', body: {}, token: body.token })
+    assert.equal(res.status, 202)
+    assert.deepEqual(await res.json(), { message: 'queued' })
+    assert.deepEqual(asked, [npub], 'runs for the session npub, never one from the request')
+  }, { runDigestNow: async (npub) => { asked.push(npub); return 'queued' } })
 })
