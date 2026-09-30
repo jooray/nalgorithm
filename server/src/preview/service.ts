@@ -23,6 +23,8 @@ import type { GuardOptions, Transport } from './ssrf.js'
 
 export const PREVIEW_TTL_SECONDS = 7 * 86_400
 export const NEGATIVE_TTL_SECONDS = 3600
+/** A failure that may pass on its own (network, timeout, server error) is remembered only briefly. */
+export const TRANSIENT_TTL_SECONDS = 120
 export const PREVIEWS_PER_MINUTE = 60
 export const IMAGES_PER_MINUTE = 240
 export const CONCURRENCY = 4
@@ -178,7 +180,8 @@ export function createPreviewService(opts: PreviewOptions) {
     return skipHosts.some((h) => host === h || host.endsWith(`.${h}`))
   }
 
-  async function fetchCard(url: string): Promise<StoredCard | null> {
+  /** A card, or null. `transient` marks a null that may pass on its own, so it is not remembered for long. */
+  async function fetchCard(url: string): Promise<{ card: StoredCard | null; transient: boolean }> {
     try {
       const res = await safeFetch(url, {
         ...opts.fetch,
@@ -188,21 +191,27 @@ export function createPreviewService(opts: PreviewOptions) {
         truncate: true,
       })
       const p = parsePreview(res.body.toString('utf8'), res.finalUrl)
-      if (!p.title && !p.description) return null
+      if (!p.title && !p.description) return { card: null, transient: false }
       const host = new URL(res.finalUrl).hostname.replace(/^www\./, '')
-      return { url, finalUrl: res.finalUrl, title: p.title, description: p.description, siteName: p.siteName || host, imageUrl: p.image, type: p.type }
+      return { card: { url, finalUrl: res.finalUrl, title: p.title, description: p.description, siteName: p.siteName || host, imageUrl: p.image, type: p.type }, transient: false }
     } catch (err) {
-      if (err instanceof PreviewFetchError) return null
+      if (err instanceof PreviewFetchError) {
+        const transient = err.code === 'network' || err.code === 'timeout' || (err.code === 'status' && /status (5\d\d|429)/.test(err.message))
+        return { card: null, transient }
+      }
       throw err
     }
   }
 
-  async function store(hash: string, card: StoredCard | null): Promise<void> {
+  async function store(hash: string, card: StoredCard | null, transient = false): Promise<void> {
+    // Backdating fetched_at makes the ordinary age check expire a transient miss
+    // after TRANSIENT_TTL_SECONDS without a schema change.
+    const stamp = transient ? nowSec() - (NEGATIVE_TTL_SECONDS - TRANSIENT_TTL_SECONDS) : nowSec()
     await db.run(upsert(db, 'link_previews', ['url_hash', 'found', 'data', 'fetched_at'], ['url_hash'], ['found', 'data', 'fetched_at']), [
       hash,
       card ? 1 : 0,
       card ? JSON.stringify(card) : null,
-      nowSec(),
+      stamp,
     ])
   }
 
@@ -235,8 +244,8 @@ export function createPreviewService(opts: PreviewOptions) {
       if (!pending) {
         pending = gate
           .run(async () => {
-            const card = await fetchCard(url)
-            await store(hash, card)
+            const { card, transient } = await fetchCard(url)
+            await store(hash, card, transient)
             return card
           })
           .finally(() => inflight.delete(hash))

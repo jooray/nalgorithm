@@ -305,3 +305,43 @@ test('HTTP: the 61st preview in a minute is a 429; unavailable is a plain 200', 
 test('the link preview setting defaults to on', () => {
   assert.equal(DEFAULT_SETTINGS.linkPreviews, true)
 })
+
+// Regression: one network blip used to hide a link's preview for a full hour.
+test('a transient failure is retried after two minutes, a definitive miss is remembered for an hour', async () => {
+  const { PreviewFetchError } = await import('../dist/preview/ssrf.js')
+  let up = false
+  const routes = {
+    'https://flaky.example/a': () => { if (!up) throw new PreviewFetchError('network', 'request failed'); return { body: ARTICLE } },
+    'https://plain.example/a': { body: page('<title></title>') },
+  }
+  const { svc, clock, transport } = await setup(routes)
+  const calls = (host) => transport.calls.filter((c) => c.url.includes(host)).length
+
+  assert.deepEqual(await svc.preview('u', 'https://flaky.example/a'), { unavailable: true })
+  assert.deepEqual(await svc.preview('u', 'https://flaky.example/a'), { unavailable: true })
+  assert.equal(calls('flaky'), 1, 'inside two minutes the failure is remembered, so a dead site is not hammered')
+  up = true
+  clock.ms += 121_000
+  assert.equal((await svc.preview('u', 'https://flaky.example/a')).title, 'Hello', 'after two minutes it is tried again and now works')
+
+  assert.deepEqual(await svc.preview('u', 'https://plain.example/a'), { unavailable: true })
+  clock.ms += 59 * 60_000
+  await svc.preview('u', 'https://plain.example/a')
+  assert.equal(calls('plain'), 1, 'a page with no preview data stays cached for the hour')
+  clock.ms += 2 * 60_000
+  await svc.preview('u', 'https://plain.example/a')
+  assert.equal(calls('plain'), 2, 'and is looked at again after it')
+})
+
+test('server errors and rate limiting count as transient too, a 404 does not', async () => {
+  const { svc, clock, transport } = await setup({
+    'https://five.example/a': { status: 503 },
+    'https://gone.example/a': { status: 404 },
+  })
+  await svc.preview('u', 'https://five.example/a'); await svc.preview('u', 'https://gone.example/a')
+  clock.ms += 121_000
+  await svc.preview('u', 'https://five.example/a'); await svc.preview('u', 'https://gone.example/a')
+  const calls = (host) => transport.calls.filter((c) => c.url.includes(host)).length
+  assert.equal(calls('five'), 2, '503 is retried after two minutes')
+  assert.equal(calls('gone'), 1, '404 is definitive')
+})
