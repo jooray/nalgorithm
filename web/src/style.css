@@ -1209,6 +1209,20 @@ select:focus {
   border-radius: var(--radius);
 }
 
+/* "New since last refresh" and "The rest of your feed", when a run brought new notes. */
+.feed-section {
+  margin: 14px 4px 0;
+  color: var(--text-3);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.feed-section:first-child {
+  margin-top: 4px;
+  color: var(--accent-ink);
+}
+
 /* The top-ranked note: a lime edge, inset from the corners. */
 .note-top::before {
   content: '';

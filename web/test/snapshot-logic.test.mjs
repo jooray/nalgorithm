@@ -7,12 +7,14 @@ import {
   clearLocalSnapshot,
   countNew,
   decideMerge,
+  freshIds,
   isStale,
   loadLocalSnapshot,
   pillLabel,
   quietNotice,
   saveLocalSnapshot,
   shouldAutoRun,
+  splitFresh,
   trimLocalSnapshot,
 } from '../src/snapshot-logic.ts'
 
@@ -179,4 +181,45 @@ test('storage: oversize snapshots lose the lowest-ranked posts and the profiles 
   assert.deepEqual(out.posts.map((p) => p.id), big.posts.slice(0, out.posts.length).map((p) => p.id))
   assert.deepEqual(Object.keys(out.profiles), ['a'])
   assert.equal(trimLocalSnapshot(snap(300), 1e9, 200).posts.length, 200, 'a post count cap applies too')
+})
+
+// ─── new since last refresh ──────────────────────────────────────────────────
+
+test('freshIds: the notes a run added, in rank order', () => {
+  assert.deepEqual(freshIds(['a', 'b', 'c'], ['x', 'a', 'y', 'b']), ['x', 'y'])
+})
+
+test('freshIds: nothing to set apart on a first draw or when everything is new', () => {
+  assert.deepEqual(freshIds([], ['a', 'b']), [])
+  assert.deepEqual(freshIds(['a'], ['x', 'y'], ['a']), [])
+})
+
+test('freshIds: a run with nothing new keeps what was new before, if still there', () => {
+  assert.deepEqual(freshIds(['a', 'x', 'y'], ['y', 'a', 'x'], ['x', 'y', 'gone']), ['y', 'x'])
+  assert.deepEqual(freshIds(['a', 'b'], ['b', 'a'], []), [])
+})
+
+test('freshIds: new notes replace the earlier new set', () => {
+  assert.deepEqual(freshIds(['a', 'x'], ['z', 'x', 'a'], ['x']), ['z'])
+})
+
+test('splitFresh: fresh first, the rest after, both in rank order', () => {
+  const posts = ['a', 'x', 'b', 'y'].map((id) => ({ id }))
+  const r = splitFresh(posts, new Set(['y', 'x']))
+  assert.deepEqual(r.fresh.map((p) => p.id), ['x', 'y'])
+  assert.deepEqual(r.rest.map((p) => p.id), ['a', 'b'])
+})
+
+test('splitFresh: no split when nothing or everything is fresh', () => {
+  const posts = [{ id: 'a' }, { id: 'b' }]
+  assert.deepEqual(splitFresh(posts, new Set()), { fresh: [], rest: posts })
+  assert.deepEqual(splitFresh(posts, new Set(['a', 'b'])), { fresh: [], rest: posts })
+  assert.deepEqual(splitFresh(posts, new Set(['gone'])), { fresh: [], rest: posts })
+})
+
+test('a stored snapshot keeps its fresh ids', () => {
+  const mem = new Map()
+  const store = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v), removeItem: (k) => mem.delete(k) }
+  saveLocalSnapshot(store, 'k', { v: 1, createdAt: NOW, fresh: ['x'], posts: [{ id: 'x' }, { id: 'a' }], profiles: {} })
+  assert.deepEqual(loadLocalSnapshot(store, 'k').fresh, ['x'])
 })

@@ -38,6 +38,7 @@ import { noteActions, renderActionRow, type NoteLinks } from './actions.js'
 import { icon, type IconName } from './icons.js'
 import type { NoteTarget } from './note-ui.js'
 import { directReplies, parentOf } from './note-logic.js'
+import { splitFresh } from './snapshot-logic.js'
 import { fetchEvent, queryEvents, readRelaysFor } from './relays.js'
 import { knownProfiles, loadProfiles } from './profiles.js'
 import { postsToRedraw, unresolvedPeople } from './lazy-profiles.js'
@@ -64,6 +65,11 @@ export interface RenderOptions {
    * profile after the first render. Their cards update in place. Off when unset.
    */
   lazyProfileRelays?: string[]
+  /**
+   * Notes that came with the latest run (folded ids). They go first under
+   * "New since last refresh", and the rest follow under their own heading.
+   */
+  fresh?: ReadonlySet<string>
 }
 
 /** Link options derived from the reader's settings; shared by both modes. */
@@ -104,15 +110,26 @@ export function renderFeed(
     return
   }
 
+  const split = splitFresh(posts, options.fresh ?? new Set())
+  const ordered = [...split.fresh, ...split.rest]
   const cards: HTMLElement[] = []
-  posts.forEach((post, i) => {
-    // The feed is ranked best first, so the first note is the top-ranked one.
+  ordered.forEach((post, i) => {
+    if (split.fresh.length > 0 && (i === 0 || i === split.fresh.length)) {
+      container.appendChild(sectionHeading(i === 0 ? `New since last refresh · ${split.fresh.length}` : 'The rest of your feed'))
+    }
+    // Ranked best first, so the first note is the top-ranked one (of the new ones, when split).
     const card = renderPostCard(post, options, i === 0)
     cards.push(card)
     container.appendChild(card)
   })
-  feedState.set(container, { posts, cards, options })
+  feedState.set(container, { posts: ordered, cards, options })
   void lazyResolveProfiles(container)
+}
+
+function sectionHeading(text: string): HTMLElement {
+  const h = el('h2', 'feed-section')
+  h.textContent = text
+  return h
 }
 
 interface FeedState {

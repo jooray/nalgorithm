@@ -14,7 +14,7 @@
  */
 
 import { collectPostPubkeys, pubkeyToHex, type ProfileData, type ScoredPost } from 'nalgorithm'
-import { setActorProvider } from '../signer.js'
+import { adoptSigner, forgetSigner, setActorProvider } from '../signer.js'
 import { renderFeed, aggregateBoosts, clientRenderOptions } from '../render.js'
 import { attachLinkPreviews } from './previews.js'
 import { previewsEnabled } from './previews-logic.js'
@@ -38,6 +38,7 @@ import {
   ageLabel,
   clearLocalSnapshot,
   decideMerge,
+  freshIds,
   loadLocalSnapshot,
   quietNotice,
   saveLocalSnapshot,
@@ -133,7 +134,10 @@ let stopPaying = false
 let shownIds: string[] = []
 let shownAt: number | null = null
 let fetchedAt: number | null = null
-let pending: { feed: FeedResponse; at: number } | null = null
+let pending: { feed: FeedResponse; at: number; fresh: string[] } | null = null
+// The ranking on screen as folded ids, and the notes it set apart as new. The next ranking is compared with these.
+let baseKeys: string[] = []
+let baseFresh: string[] = []
 /** No automatic run before this time (unix seconds): after a daily cap or an outage. */
 let pausedUntil = 0
 /** An automatic run failed in a way that needs the reader; wait for a press. */
@@ -264,7 +268,10 @@ function paintRemembered(): void {
   if (!snap || snap.posts.length === 0) return
   document.body.dataset.signedIn = 'true'
   userNpub = ''
-  drawFeed({ posts: snap.posts as unknown as FeedResponse['posts'], profiles: snap.profiles as FeedResponse['profiles'], hoursBack: snap.hoursBack ?? 24 })
+  drawFeed(
+    { posts: snap.posts as unknown as FeedResponse['posts'], profiles: snap.profiles as FeedResponse['profiles'], hoursBack: snap.hoursBack ?? 24 },
+    Array.isArray(snap.fresh) ? snap.fresh : []
+  )
   shownAt = fetchedAt = snap.createdAt
   paintAge()
 }
@@ -291,7 +298,7 @@ function showLogin(message = ''): void {
 function resetFeedState(): void {
   stopLive?.()
   stopLive = undefined
-  shownIds = []
+  shownIds = baseKeys = baseFresh = []
   shownAt = fetchedAt = null
   pending = null
   pausedUntil = 0
@@ -327,6 +334,8 @@ async function signIn(): Promise<void> {
     setLoginStatus('Waiting for your signer to sign the login…')
     await loginWithSigner(result.sign, result.pubkey)
     const me = await getMe()
+    // A remote signer that was granted the action kinds stays for replies and the next page load.
+    if (adoptSigner(result)) closeSigner = undefined
     await onSignedIn(me.npub, me.entitlement)
   } catch (err) {
     setLoginStatus(err instanceof ApiError ? describeError(err).message : (err as Error).message, true)
@@ -342,6 +351,7 @@ async function signIn(): Promise<void> {
 }
 
 async function signOut(closeSettings: () => void): Promise<void> {
+  forgetSigner()
   try {
     await logout()
   } catch {
@@ -412,7 +422,7 @@ function rememberNpub(npub: string): void {
 
 function resetShown(): void {
   $('#hosted-feed').innerHTML = ''
-  shownIds = []
+  shownIds = baseKeys = baseFresh = []
   shownAt = fetchedAt = null
   pending = null
   hideNewPill()
@@ -509,10 +519,11 @@ function applyFeed(feed: FeedResponse, opts: { manual: boolean }): void {
   const incoming = feed.posts.map((p) => p.id)
   const d = decideMerge({ shownIds, incomingIds: incoming, scrollY: scrollY(), feedVisible: feedVisible(), manual: opts.manual })
   fetchedAt = Math.max(fetchedAt ?? 0, at)
-  rememberFeed(feed, at)
+  const fresh = freshIds(baseKeys, aggregateBoosts(feed.posts as unknown as ScoredPost[]).map((p) => p.id), baseFresh)
+  rememberFeed(feed, at, fresh)
   setQuietNotice(null)
   if (d.action === 'pill') {
-    pending = { feed, at }
+    pending = { feed, at, fresh }
     showNewPill(d.newCount, mergePending)
     return
   }
@@ -523,27 +534,28 @@ function applyFeed(feed: FeedResponse, opts: { manual: boolean }): void {
   }
   pending = null
   hideNewPill()
-  drawFeed(feed)
+  drawFeed(feed, fresh)
   shownAt = at
   paintAge()
 }
 
 function mergePending(): void {
   if (!pending) return
-  const { feed, at } = pending
+  const { feed, at, fresh } = pending
   pending = null
-  drawFeed(feed)
+  drawFeed(feed, fresh)
   shownAt = at
   paintAge()
 }
 
-function rememberFeed(feed: FeedResponse, at: number): void {
+function rememberFeed(feed: FeedResponse, at: number, fresh: string[]): void {
   if (!userNpub) return
   const snap: LocalSnapshot = {
     v: 1,
     createdAt: at,
     hoursBack: feed.hoursBack,
     fetched: feed.fetched,
+    fresh,
     posts: feed.posts as unknown as LocalSnapshot['posts'],
     profiles: feed.profiles,
   }
@@ -625,8 +637,8 @@ function onRunFailed(err: unknown, hadFeed: boolean): void {
   showFailure(err, () => runFeed({ manual: true }))
 }
 
-/** Draw a ranking. Also the only place that knows which posts are on screen. */
-function drawFeed(feed: ShownFeed): void {
+/** Draw a ranking, `fresh` notes first. Also the only place that knows which posts are on screen. */
+function drawFeed(feed: ShownFeed, fresh: string[]): void {
   const profiles = new Map<string, ProfileData>()
   for (const [pubkey, p] of Object.entries(feed.profiles)) {
     profiles.set(pubkey, { ...p, pubkey })
@@ -638,14 +650,18 @@ function drawFeed(feed: ShownFeed): void {
 
   if (posts.length === 0) {
     $('#hosted-feed').innerHTML = ''
-    shownIds = []
+    shownIds = baseKeys = baseFresh = []
     showEmpty(`No posts from the people you follow in the last ${feed.hoursBack} hours. Try a longer window in Tune.`)
     setStatus('No posts found')
     return
   }
   show('#hosted-empty', false)
   const display = aggregateBoosts(posts)
+  const set = new Set(fresh)
+  baseKeys = display.map((p) => p.id)
+  baseFresh = baseKeys.filter((id) => set.has(id))
   renderFeed(display, $('#hosted-feed'), {
+    fresh: set,
     profiles,
     ...clientRenderOptions(settings),
     lazyProfileRelays: loadSettings().relays,

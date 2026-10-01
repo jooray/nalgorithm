@@ -12,13 +12,16 @@
  * connect a signer. The signer's key must be the actor's key: a signature from
  * another key is refused rather than published under the wrong name.
  *
- * A remote signer connection is held in memory only. Nothing that could sign
- * is written to storage, so a reload asks again.
+ * A remote signer connection is remembered on this device (signer-store.ts),
+ * so a reload signs again without a new scan. What is stored is this app's
+ * NIP-46 client key, which can only ask the signer; it is forgotten on sign-out
+ * and when the signer stops answering.
  */
 
 import { verifyEvent, type Event as NostrEvent, type EventTemplate } from 'nostr-tools/pure'
-import { hasNip07, loginWithExtension, signWithExtension, toNpub, type SignFn } from './nostr-login.js'
-import { openActionSignerDialog } from './login-ui.js'
+import { hasNip07, loginWithExtension, resumeRemoteSigner, signWithExtension, toNpub, type SignFn } from './nostr-login.js'
+import { openActionSignerDialog, type LoginResult } from './login-ui.js'
+import { clearSavedSigner, keepAfterSignError, loadSavedSigner, saveSavedSigner, type SavedRemoteSigner } from './signer-store.js'
 import { loadSettings } from './settings.js'
 
 export interface ActiveSigner {
@@ -44,9 +47,63 @@ export function getActor(): string | null {
   }
 }
 
+function signerStore(): Storage | null {
+  try {
+    return localStorage
+  } catch {
+    return null
+  }
+}
+
+/** Hold a connection, and remember it on this device when it can be resumed. */
+function keepRemote(pubkey: string, sign: SignFn, close?: () => void, saved?: SavedRemoteSigner): void {
+  remote?.close?.()
+  remote = { pubkey, sign, close }
+  if (saved && saved.user === pubkey) saveSavedSigner(signerStore(), saved)
+}
+
+/** Drop the connection on this device (sign-out). */
+export function forgetSigner(): void {
+  remote?.close?.()
+  remote = null
+  clearSavedSigner(signerStore())
+}
+
+/** The connection a previous page load made, ready to sign again. */
+function resumeSaved(actor: string): boolean {
+  const saved = loadSavedSigner(signerStore(), actor)
+  if (!saved) return false
+  const r = resumeRemoteSigner(saved)
+  const sign: SignFn = async (template) => {
+    try {
+      return await r.sign(template)
+    } catch (err) {
+      // Revoked in the signer, or it never answered: the next tap offers a fresh connection.
+      if (!keepAfterSignError(err instanceof Error ? err.message : String(err))) forgetSigner()
+      throw err
+    }
+  }
+  remote = { pubkey: actor, sign, close: r.close }
+  return true
+}
+
+/**
+ * A finished sign-in whose signer can stay (hosted mode). True when it was kept,
+ * so the caller must not close it.
+ */
+export function adoptSigner(result: LoginResult): boolean {
+  if (!result.sign || !result.saved || result.saved.user !== result.pubkey) return false
+  keepRemote(result.pubkey, result.sign, result.close, result.saved)
+  return true
+}
+
 /** A signer that is already available for `actor`, without asking the reader anything new. */
 async function existingSigner(actor: string): Promise<ActiveSigner | null> {
-  if (remote && remote.pubkey === actor) return { pubkey: actor, method: 'remote', sign: remote.sign }
+  if (remote && remote.pubkey !== actor) {
+    remote.close?.()
+    remote = null
+  }
+  if (remote || resumeSaved(actor)) return { pubkey: actor, method: 'remote', sign: remote!.sign }
   if (hasNip07() && typeof window.nostr?.signEvent === 'function') {
     try {
       // May show the extension's own permission prompt; the reader just tapped an action.
@@ -78,8 +135,7 @@ export async function connectSigner(): Promise<SignerOutcome> {
     result.close?.()
     return { signer: null, reason: 'other-key', otherNpub: toNpub(result.pubkey) }
   }
-  remote?.close?.()
-  remote = { pubkey: result.pubkey, sign: result.sign, close: result.close }
+  keepRemote(result.pubkey, result.sign, result.close, result.saved)
   return { signer: { pubkey: result.pubkey, method: 'remote', sign: result.sign } }
 }
 

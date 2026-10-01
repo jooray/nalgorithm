@@ -30,6 +30,8 @@ export interface LocalSnapshot {
   fetched?: number
   /** Fingerprint of the settings the ranking used (bring your own key); a mismatch means the ranking is out of date. */
   sig?: string
+  /** Notes (folded ids) that came with this run and were not in the one before; drawn above the rest. */
+  fresh?: string[]
   posts: StoredPost[]
   profiles: Record<string, unknown>
 }
@@ -128,6 +130,33 @@ export function decideMerge(i: MergeInput): MergeDecision {
   if (!i.feedVisible || i.scrollY <= TOP_SCROLL_PX) return { action: 'merge', newCount, same: false }
   // A reader mid-scroll keeps their list. New notes are offered; a pure re-rank waits for the next open.
   return newCount > 0 ? { action: 'pill', newCount, same: false } : { action: 'keep', newCount: 0, same: false }
+}
+
+// ─── what came with the latest run ───────────────────────────────────────────
+
+/**
+ * The notes to put above the rest of the feed: those in `incoming` that were not
+ * on screen before. A run that brings nothing new keeps the earlier set, so a
+ * quiet re-rank does not bury what the reader has not seen yet. No split on a
+ * first draw, or when everything is new: there is no "rest" to set it apart from.
+ * All ids are folded (display) ids, in rank order.
+ */
+export function freshIds(shown: readonly string[], incoming: readonly string[], carried: readonly string[] = []): string[] {
+  if (shown.length === 0) return []
+  const before = new Set(shown)
+  const added = incoming.filter((id) => !before.has(id))
+  if (added.length === incoming.length) return []
+  if (added.length > 0) return added
+  const keep = new Set(carried)
+  const still = incoming.filter((id) => keep.has(id))
+  return still.length === incoming.length ? [] : still
+}
+
+/** Fresh notes first, then the rest, each in rank order. `fresh` is empty when there is nothing to set apart. */
+export function splitFresh<T extends { id: string }>(posts: readonly T[], fresh: ReadonlySet<string>): { fresh: T[]; rest: T[] } {
+  const top = posts.filter((p) => fresh.has(p.id))
+  if (top.length === 0 || top.length === posts.length) return { fresh: [], rest: [...posts] }
+  return { fresh: top, rest: posts.filter((p) => !fresh.has(p.id)) }
 }
 
 export function pillLabel(n: number): string {

@@ -16,8 +16,10 @@
  *           By default we ask for **no permissions at all**, then call
  *           `get_public_key` and immediately close the connection. No signing
  *           key material, and no signing capability, ever reaches this app.
- *           With `sign: true` we additionally request `sign_event:27235` and
- *           keep the connection open until the caller has signed and closed.
+ *           With `sign: true` we additionally request `sign_event` for the
+ *           kinds the caller names and keep the connection open. Its client key
+ *           can be saved (`saved()`) and used again after a reload with
+ *           `resumeRemoteSigner`, so the reader scans once.
  *
  * On the NIP-46 pubkey specifically: the `pubkey` on the signer's kind-24133
  * response is a per-connection *routing* key, not the user's identity. Newer
@@ -30,6 +32,8 @@
 import { generateSecretKey, getPublicKey, type EventTemplate, type Event as NostrEvent } from 'nostr-tools/pure'
 import { BunkerSigner, createNostrConnectURI } from 'nostr-tools/nip46'
 import { npubEncode } from 'nostr-tools/nip19'
+import { bytesToHex, hexToBytes } from 'nostr-tools/utils'
+import type { SavedRemoteSigner } from './signer-store.js'
 
 /**
  * Relays used for the NIP-46 handshake. Multiple, because relays go down.
@@ -76,6 +80,8 @@ export interface RemoteSignerSession {
   sign: SignFn
   /** With `sign: true`: close the signer connection kept open for signing. */
   close: () => void
+  /** With `sign: true`, once connected: what a later page load needs to sign again without a new scan. */
+  saved: () => SavedRemoteSigner | null
 }
 
 declare global {
@@ -163,6 +169,7 @@ export function startRemoteSignerLogin(
   const controller = new AbortController()
   // The connected signer, once the handshake completes. Kept for `sign`/`close`.
   let signerRef: BunkerSigner | undefined
+  let userRef: string | undefined
 
   // Own the cancellation rather than relying on the library's abort handling:
   // its signal only takes effect once the relay subscription is established,
@@ -196,7 +203,8 @@ export function startRemoteSignerLogin(
         throw new Error('Signer returned an invalid public key')
       }
       succeeded = true
-      return userPubkey.toLowerCase()
+      userRef = userPubkey.toLowerCase()
+      return userRef
     } finally {
       clearTimeout(timer)
       // We are done the moment we know the pubkey — nothing else to ask for —
@@ -233,6 +241,11 @@ export function startRemoteSignerLogin(
     return Promise.race([signerRef.signEvent(template), timeout])
   }
 
+  const saved = (): SavedRemoteSigner | null => {
+    if (!keepOpen || !signerRef || !userRef) return null
+    return { v: 1, user: userRef, client: bytesToHex(clientSecret), remote: signerRef.bp.pubkey, relays: signerRef.bp.relays }
+  }
+
   return {
     uri,
     pubkey,
@@ -242,7 +255,30 @@ export function startRemoteSignerLogin(
     },
     sign,
     close,
+    saved,
   }
+}
+
+/**
+ * Sign again over a connection made on an earlier page load. No handshake: the
+ * signer already knows this client key and what it may sign. The relay
+ * subscription opens on the first request, not before.
+ */
+export function resumeRemoteSigner(saved: SavedRemoteSigner): { sign: SignFn; close: () => void } {
+  let signer: BunkerSigner | undefined
+  const sign: SignFn = async (template) => {
+    signer ??= BunkerSigner.fromBunker(hexToBytes(saved.client), { pubkey: saved.remote, relays: saved.relays, secret: null })
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('The signer did not answer the sign request in time.')), SIGN_TIMEOUT_MS)
+    )
+    return Promise.race([signer.signEvent(template), timeout])
+  }
+  const close = (): void => {
+    const s = signer
+    signer = undefined
+    void s?.close().catch(() => {})
+  }
+  return { sign, close }
 }
 
 /** Format a hex pubkey as an npub for display. Empty on error, never the hex. */

@@ -20,9 +20,11 @@ import {
   signWithExtension,
   startRemoteSignerLogin,
   toNpub,
+  LOGIN_EVENT_KIND,
   type RemoteSignerSession,
   type SignFn,
 } from './nostr-login.js'
+import type { SavedRemoteSigner } from './signer-store.js'
 
 /** A completed login. `sign`/`close` are present only for hosted logins. */
 export interface LoginResult {
@@ -30,6 +32,8 @@ export interface LoginResult {
   sign?: SignFn
   /** Release the signer connection once the signature has been used. */
   close?: () => void
+  /** A remote signer connection that can be kept for later page loads. */
+  saved?: SavedRemoteSigner
 }
 
 const READONLY_NOTICE = `
@@ -38,15 +42,15 @@ const READONLY_NOTICE = `
   or reacts on your behalf, and it asks your signer for no permission to do so.`
 
 const HOSTED_NOTICE = `
-  <strong>One signature, nothing posted.</strong> Signing in to the hosted service
-  asks your signer to sign a single one-time login event for this site. It is
-  never published to a relay and cannot post or spend anything for you. No API
-  key is involved.`
+  <strong>Nothing is posted on its own.</strong> Signing in asks your signer to
+  sign a one-time login event for this site, which is never published. A remote
+  signer is also asked to allow replies, boosts, likes and zaps, which Nalgorithm
+  signs only when you tap them, so you connect once. No API key is involved.`
 
 const ACTIONS_NOTICE = `
   <strong>You choose every post.</strong> Nalgorithm asks your signer to sign a
-  reply, boost, like or zap only when you tap it. Nothing is sent on its own,
-  and the connection lives only while this tab is open.`
+  reply, boost, like or zap only when you tap it. Nothing is sent on its own.
+  A remote signer stays connected on this device until you sign out.`
 
 /** The event kinds the note actions sign: reply, boost, like, generic boost, zap request. */
 export const ACTION_SIGN_KINDS = [1, 6, 7, 16, 9734]
@@ -210,7 +214,9 @@ function beginRemoteSigner(
   try {
     session = startRemoteSignerLogin(relays?.length ? relays : undefined, {
       sign: hosted,
-      ...(actions ? { signKinds: ACTION_SIGN_KINDS } : {}),
+      // Signing in to hosted mode also asks for the action kinds, so the reader
+      // approves once instead of scanning again at their first reply.
+      ...(hosted ? { signKinds: actions ? ACTION_SIGN_KINDS : [LOGIN_EVENT_KIND, ...ACTION_SIGN_KINDS] } : {}),
     })
   } catch (err) {
     setStatus(status, (err as Error).message, true)
@@ -230,7 +236,7 @@ function beginRemoteSigner(
   caption.textContent = actions
     ? 'Scan with Amber, or open the link below if your signer is on this device. Approve the connection and the kinds of post it lists.'
     : hosted
-    ? 'Scan with Amber, or open the link below if your signer is on this device. Approve the connection and the login signature.'
+    ? 'Scan with Amber, or open the link below if your signer is on this device. Approve the connection, the login signature, and the kinds of post it lists.'
     : 'Scan with Amber, or open the link below if your signer is on this device.'
   wrap.appendChild(caption)
 
@@ -259,7 +265,7 @@ function beginRemoteSigner(
   session.pubkey.then(
     (pubkey) => {
       setStatus(status, `Connected as ${toNpub(pubkey).slice(0, 20)}…`)
-      finish(hosted ? { pubkey, sign: session.sign, close: session.close } : { pubkey })
+      finish(hosted ? { pubkey, sign: session.sign, close: session.close, saved: session.saved() ?? undefined } : { pubkey })
     },
     (err: Error) => {
       setStatus(status, err.message, true)

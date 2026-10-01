@@ -59,6 +59,7 @@ import {
 import {
   ageLabel,
   decideMerge,
+  freshIds,
   loadLocalSnapshot,
   saveLocalSnapshot,
   shouldAutoRun,
@@ -90,10 +91,16 @@ let pending: { posts: ScoredPost[]; at: number } | null = null
 let pausedUntil = 0
 /** The settings the ranking on screen was made with; a different current value means it is out of date. */
 let rankedSig: string | null = null
+// The last finished ranking on screen, as folded ids, and the notes it set apart as new.
+// A run in progress is drawn against these, so its new notes go on top as they are scored.
+let baseKeys: string[] = []
+let baseFresh: string[] = []
+let shownFresh: string[] = []
 
 const FEED_KEY_PREFIX = 'nalgorithm_byok_feed_'
 const nowSec = (): number => Math.floor(Date.now() / 1000)
 const sigOf = (s: ReturnType<typeof loadSettings>): string => `${s.npub.trim()}|${s.hoursBack}|${s.userPrompt}`
+const keysOf = (posts: ScoredPost[]): string[] => aggregateBoosts(posts).map((p) => p.id)
 
 function feedStore(): Storage | null {
   try {
@@ -108,7 +115,7 @@ function paintAge(): void {
 }
 
 /** Keep the newest ranking on this device, and drop the copies of other identities. */
-function saveByokFeed(posts: ScoredPost[], at: number, settings: ReturnType<typeof loadSettings>): void {
+function saveByokFeed(posts: ScoredPost[], at: number, settings: ReturnType<typeof loadSettings>, fresh: string[]): void {
   const store = feedStore()
   if (!store) return
   try {
@@ -124,6 +131,7 @@ function saveByokFeed(posts: ScoredPost[], at: number, settings: ReturnType<type
     createdAt: at,
     hoursBack: settings.hoursBack,
     sig: sigOf(settings),
+    fresh,
     posts: posts as unknown as LocalSnapshot['posts'],
     profiles: Object.fromEntries(currentProfiles),
   }
@@ -138,6 +146,8 @@ function showStoredFeed(settings: ReturnType<typeof loadSettings>): boolean {
   currentPosts = snap.posts as unknown as ScoredPost[]
   currentProfiles = new Map(Object.entries(snap.profiles).map(([k, v]) => [k, v as ProfileData]))
   rememberProfiles(currentProfiles)
+  baseKeys = keysOf(currentPosts)
+  baseFresh = Array.isArray(snap.fresh) ? snap.fresh : []
   renderCurrent(settings)
   shownAt = fetchedAt = snap.createdAt
   rankedSig = snap.sig ?? null
@@ -153,8 +163,10 @@ function showStoredFeed(settings: ReturnType<typeof loadSettings>): boolean {
 function applyRanking(posts: ScoredPost[], settings: ReturnType<typeof loadSettings>, manual: boolean): void {
   const at = nowSec()
   fetchedAt = at
+  // A new prompt or window is a different feed, not a newer one: nothing to set apart.
+  if (rankedSig !== null && rankedSig !== sigOf(settings)) baseKeys = baseFresh = []
   rankedSig = sigOf(settings)
-  saveByokFeed(posts, at, settings)
+  saveByokFeed(posts, at, settings, freshIds(baseKeys, keysOf(posts), baseFresh))
   const d = decideMerge({ shownIds, incomingIds: posts.map((p) => p.id), scrollY: scrollY(), feedVisible: feedVisible(), manual })
   if (d.action === 'pill') {
     pending = { posts, at }
@@ -170,6 +182,7 @@ function applyRanking(posts: ScoredPost[], settings: ReturnType<typeof loadSetti
   hideNewPill()
   currentPosts = posts
   renderCurrent(settings)
+  commitShown()
   shownAt = at
   paintAge()
   const shown = aggregateBoosts(posts).length
@@ -182,6 +195,7 @@ function mergePending(settings: ReturnType<typeof loadSettings>): void {
   pending = null
   currentPosts = posts
   renderCurrent(settings)
+  commitShown()
   shownAt = at
   paintAge()
   setStatus(`Showing ${aggregateBoosts(posts).length} posts, ranked by relevance`)
@@ -284,12 +298,21 @@ async function scorePosts(
  */
 function renderCurrent(settings: ReturnType<typeof loadSettings>): void {
   shownIds = currentPosts.map((p) => p.id)
+  const display = aggregateBoosts(currentPosts)
+  shownFresh = freshIds(baseKeys, display.map((p) => p.id), baseFresh)
   showEmptyState(false)
-  renderFeed(aggregateBoosts(currentPosts), getFeedContainer(), {
+  renderFeed(display, getFeedContainer(), {
+    fresh: new Set(shownFresh),
     profiles: currentProfiles,
     ...clientRenderOptions(settings, settings.relays),
     lazyProfileRelays: settings.relays,
   })
+}
+
+/** What is on screen is now a finished ranking: the next one is compared with it. */
+function commitShown(): void {
+  baseKeys = keysOf(currentPosts)
+  baseFresh = shownFresh
 }
 
 // ─── Main flow ───────────────────────────────────────────────────────────────
