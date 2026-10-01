@@ -173,7 +173,12 @@ export interface EntitlementView {
   canRank: boolean
   /** Label for the banner button, or null for none. */
   actionLabel: string | null
+  /** Whether the banner above the feed shows. Tune always shows the status. */
+  banner: boolean
 }
+
+/** A subscription further out than this keeps the banner above the feed hidden. */
+export const BANNER_BEFORE_EXPIRY_SECONDS = 90 * DAY_SECONDS
 
 /** Whole days left, counting a started day as a day. Never negative. */
 export function daysLeft(until: number | undefined, now: number): number {
@@ -199,6 +204,7 @@ export function entitlementView(
         text: `Free trial: ${n} ${n === 1 ? 'day' : 'days'} left`,
         canRank: true,
         actionLabel: 'Subscribe',
+        banner: true,
       }
     }
     case 'active':
@@ -207,6 +213,7 @@ export function entitlementView(
         text: ent.until ? `Subscribed until ${formatDate(ent.until)}` : 'Subscribed',
         canRank: true,
         actionLabel: 'Add time',
+        banner: ent.until === undefined || ent.until - now < BANNER_BEFORE_EXPIRY_SECONDS,
       }
     case 'expired':
       return {
@@ -214,6 +221,7 @@ export function entitlementView(
         text: 'Your access has ended. Subscribe to keep ranking your feed.',
         canRank: false,
         actionLabel: 'Subscribe',
+        banner: true,
       }
     case 'none':
       return {
@@ -221,6 +229,7 @@ export function entitlementView(
         text: 'Your free 3-day trial starts when you first load your feed.',
         canRank: true,
         actionLabel: null,
+        banner: true,
       }
     default:
       return {
@@ -228,6 +237,7 @@ export function entitlementView(
         text: 'Subscription status is unavailable right now.',
         canRank: true,
         actionLabel: null,
+        banner: true,
       }
   }
 }

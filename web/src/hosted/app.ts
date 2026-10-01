@@ -454,7 +454,8 @@ function setEntitlement(ent: Entitlement): void {
   entitlement = ent
   const view = entitlementView(ent, nowSec())
   const banner = $('#hosted-banner')
-  banner.classList.remove('hidden', 'is-warning', 'is-danger')
+  banner.classList.remove('is-warning', 'is-danger')
+  banner.classList.toggle('hidden', !view.banner)
   if (view.kind === 'expired') banner.classList.add('is-danger')
   else if (view.kind === 'unknown') banner.classList.add('is-warning')
   $('#hosted-banner-text').textContent = view.text

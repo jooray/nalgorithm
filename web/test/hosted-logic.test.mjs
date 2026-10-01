@@ -116,6 +116,7 @@ test('entitlementView per state', () => {
   const active = entitlementView({ state: 'active', until: 5000 }, now, fmt)
   assert.equal(active.text, 'Subscribed until D5000')
   assert.equal(active.actionLabel, 'Add time')
+  assert.equal(active.banner, true)
 
   const expired = entitlementView({ state: 'expired' }, now, fmt)
   assert.equal(expired.canRank, false)
@@ -126,6 +127,16 @@ test('entitlementView per state', () => {
   assert.match(none.text, /3-day trial/)
 
   assert.equal(entitlementView({ state: 'unknown' }, now, fmt).kind, 'unknown')
+})
+
+test('entitlementView: the banner hides while a subscription has more than 90 days left', () => {
+  const now = 1000
+  const day = 86400
+  assert.equal(entitlementView({ state: 'active', until: now + 91 * day }, now, fmt).banner, false)
+  assert.equal(entitlementView({ state: 'active', until: now + 89 * day }, now, fmt).banner, true)
+  assert.equal(entitlementView({ state: 'active' }, now, fmt).banner, true)
+  assert.equal(entitlementView({ state: 'trial', until: now + 2 * day }, now, fmt).banner, true)
+  assert.equal(entitlementView({ state: 'expired' }, now, fmt).banner, true)
 })
 
 test('paymentConfirmed', () => {
