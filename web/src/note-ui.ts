@@ -17,6 +17,8 @@ import { connectSigner, findSigner, getActor, signChecked, type ActiveSigner } f
 import { fetchEvent, getRelayList, publishEvent, publishRelaysFor, readRelaysFor } from './relays.js'
 import { clearMark, markOf, setMark } from './note-state.js'
 import { toNpub } from './nostr-login.js'
+import { deviceStorage } from './storage.js'
+import { beginActivity } from './activity.js'
 import {
   describePublish,
   likeTemplate,
@@ -137,6 +139,7 @@ export async function likeNote(t: NoteTarget): Promise<void> {
   const key = `like:${t.id}`
   if (inFlight.has(key)) return
   inFlight.add(key)
+  const finishActivity = beginActivity('publishing a like')
   try {
     const signer = await requireSigner()
     if (!signer) return
@@ -156,6 +159,7 @@ export async function likeNote(t: NoteTarget): Promise<void> {
     }
   } finally {
     inFlight.delete(key)
+    finishActivity()
   }
 }
 
@@ -172,6 +176,7 @@ export async function boostNote(t: NoteTarget): Promise<void> {
   if (!signer) return
   if (!(await confirmBoost(t))) return
   inFlight.add(key)
+  const finishActivity = beginActivity('publishing a boost')
   setMark(signer.pubkey, 'boosted', t.id)
   try {
     const original = await originalOf(t)
@@ -188,6 +193,7 @@ export async function boostNote(t: NoteTarget): Promise<void> {
     })
   } finally {
     inFlight.delete(key)
+    finishActivity()
   }
 }
 
@@ -228,14 +234,15 @@ const drafts = new Map<string, string>()
 export async function replyToNote(t: NoteTarget): Promise<void> {
   const signer = await requireSigner()
   if (!signer) return
-
-  const sheet = openSheet({ title: `Reply to ${t.authorName}` })
+  const draftKey = `nalgorithm_reply_${signer.pubkey}_${t.id}`
+  const finishActivity = beginActivity('writing a reply')
+  const sheet = openSheet({ title: `Reply to ${t.authorName}`, onClose: finishActivity })
   const parent = quote(t)
   const input = h('textarea', 'compose-input')
   input.rows = 5
   input.placeholder = 'Write your reply'
   input.setAttribute('aria-label', `Your reply to ${t.authorName}`)
-  input.value = drafts.get(t.id) ?? ''
+  input.value = deviceStorage.getItem(draftKey) ?? drafts.get(t.id) ?? ''
   const count = h('p', 'compose-count')
   const status = h('p', 'compose-status')
   status.setAttribute('role', 'status')
@@ -256,6 +263,7 @@ export async function replyToNote(t: NoteTarget): Promise<void> {
     count.textContent = `${n} ${n === 1 ? 'character' : 'characters'}`
     send.disabled = busy || input.value.trim() === ''
     drafts.set(t.id, input.value)
+    deviceStorage.setItem(draftKey, input.value)
   }
   input.addEventListener('input', () => {
     signed = null // an edit makes the signed event stale
@@ -305,6 +313,7 @@ export async function replyToNote(t: NoteTarget): Promise<void> {
       if (all.some((r) => r.ok) && !shownSent) {
         shownSent = true
         drafts.delete(t.id)
+        deviceStorage.removeItem(draftKey)
         showSent(sheet, all, relays.length)
       } else if (shownSent) {
         showSent(sheet, all, relays.length)

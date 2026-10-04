@@ -25,6 +25,7 @@ import { signChecked, type ActiveSigner } from './signer.js'
 import { fetchMetadata, getRelayList, INDEXER_RELAYS, readRelaysFor, defaultRelays, watchEvents } from './relays.js'
 import { setMark } from './note-state.js'
 import { requireSigner, type NoteTarget } from './note-ui.js'
+import { beginActivity } from './activity.js'
 import {
   buildInvoiceUrl,
   checkAmount,
@@ -114,7 +115,8 @@ async function fetchJson(url: string): Promise<unknown> {
 export async function zapNote(t: NoteTarget): Promise<void> {
   const signer = await requireSigner()
   if (!signer) return
-  const sheet = openSheet({ title: `Zap ${t.authorName}` })
+  const finishActivity = beginActivity('zap payment')
+  const sheet = openSheet({ title: `Zap ${t.authorName}`, onClose: finishActivity })
   await run(sheet, t, signer)
 }
 

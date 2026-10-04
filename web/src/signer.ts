@@ -23,6 +23,7 @@ import { hasNip07, loginWithExtension, resumeRemoteSigner, signWithExtension, to
 import { openActionSignerDialog, type LoginResult } from './login-ui.js'
 import { clearSavedSigner, keepAfterSignError, loadSavedSigner, saveSavedSigner, type SavedRemoteSigner } from './signer-store.js'
 import { loadSettings } from './settings.js'
+import { beginActivity } from './activity.js'
 
 export interface ActiveSigner {
   pubkey: string
@@ -144,12 +145,15 @@ export async function connectSigner(): Promise<SignerOutcome> {
  * a valid signature by the actor's key. Throws a readable error otherwise.
  */
 export async function signChecked(signer: ActiveSigner, template: EventTemplate): Promise<NostrEvent> {
+  const finishActivity = beginActivity('signing a note action')
   let event: NostrEvent
   try {
     event = await signer.sign(template)
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err)
     throw new Error(/reject|denied|declin|cancel/i.test(text) ? 'Your signer declined the request.' : `Your signer could not sign: ${text}`)
+  } finally {
+    finishActivity()
   }
   if (event.pubkey !== signer.pubkey) throw new Error('Your signer signed with a different key than the one you are signed in as.')
   if (!verifyEvent(event)) throw new Error('Your signer returned an event with an invalid signature.')

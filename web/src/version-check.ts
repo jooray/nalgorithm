@@ -11,6 +11,7 @@
  */
 
 declare const __APP_VERSION__: string
+import { activities, beginActivity } from './activity.js'
 
 /** How often to re-check while the tab is visible. */
 const POLL_INTERVAL_MS = 5 * 60_000
@@ -19,7 +20,7 @@ const RELOAD_DELAY_MS = 8_000
 
 let reloadScheduled = false
 /** Set while a feed refresh is running, so we never reload mid-scoring. */
-let busy = false
+const legacyBlocks: Array<() => void> = []
 
 export const APP_VERSION = __APP_VERSION__
 
@@ -28,7 +29,8 @@ export const APP_VERSION = __APP_VERSION__
  * update never throws away scoring the user has already paid for.
  */
 export function setUpdateBlocked(value: boolean): void {
-  busy = value
+  if (value) legacyBlocks.push(beginActivity('ranking or payment'))
+  else legacyBlocks.pop()?.()
 }
 
 /** Register the service worker and start polling for new versions. */
@@ -36,7 +38,7 @@ export function initVersionCheck(): void {
   registerServiceWorker()
 
   const check = (): void => {
-    void checkForUpdate()
+    if (document.visibilityState === 'visible') void checkForUpdate()
   }
 
   // On load, whenever the tab regains focus, and on a slow poll.
@@ -45,6 +47,7 @@ export function initVersionCheck(): void {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') check()
   })
+  window.addEventListener('online', check)
 }
 
 async function checkForUpdate(): Promise<void> {
@@ -75,9 +78,9 @@ function scheduleReload(newVersion: string): void {
     const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
     const counter = banner.querySelector('.update-count')
     if (counter) {
-      counter.textContent = busy ? 'waiting for the current refresh to finish' : `reloading in ${remaining}s`
+      counter.textContent = activities.blocked ? `updating after ${activities.reasons.join(', ')}` : `reloading in ${remaining}s`
     }
-    if (!busy && remaining <= 0) {
+    if (!activities.blocked && remaining <= 0) {
       doReload()
       return
     }
@@ -87,6 +90,8 @@ function scheduleReload(newVersion: string): void {
 }
 
 async function doReload(): Promise<void> {
+  if (activities.blocked) return
+  window.dispatchEvent(new Event('nalgorithm:checkpoint'))
   // Ask a waiting worker to take over first, so the reload lands on the new
   // build rather than triggering a second update cycle.
   try {
@@ -104,8 +109,9 @@ function showBanner(newVersion: string): HTMLElement {
 
   const el = document.createElement('div')
   el.className = 'update-banner'
+  el.setAttribute('role', 'status')
   el.innerHTML = `
-    <span>New version ${escapeHtml(newVersion)} available — <span class="update-count"></span></span>
+    <span>Version ${escapeHtml(newVersion.split('+')[0])} ready — <span class="update-count"></span></span>
     <button class="btn btn-small update-now">Reload now</button>
   `
   el.querySelector<HTMLButtonElement>('.update-now')!.addEventListener('click', () => {
@@ -130,7 +136,7 @@ function registerServiceWorker(): void {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (refreshing) return
     refreshing = true
-    if (reloadScheduled) location.reload()
+    if (reloadScheduled && !activities.blocked) location.reload()
   })
 }
 

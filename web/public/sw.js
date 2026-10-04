@@ -14,6 +14,7 @@
 // Replaced at build time so each release gets its own cache bucket.
 const VERSION = '__APP_VERSION__'
 const CACHE = `nalgorithm-${VERSION}`
+const SHELL_ASSETS = __SHELL_ASSETS__
 
 // Resolved from the worker's own location so a subdirectory deploy works.
 const SCOPE = new URL(self.registration ? self.registration.scope : './', self.location).pathname
@@ -23,9 +24,8 @@ self.addEventListener('install', (event) => {
     (async () => {
       const cache = await caches.open(CACHE)
       // Best-effort: a failed precache must not block activation.
-      await cache.addAll([SCOPE]).catch(() => {})
-      // Take over immediately; the page decides when to reload.
-      await self.skipWaiting()
+      await cache.addAll([SCOPE, ...SHELL_ASSETS.map((p) => SCOPE + p)]).catch(() => {})
+      // Existing clients decide when it is safe to activate and reload.
     })()
   )
 })
@@ -34,9 +34,8 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const names = await caches.keys()
-      await Promise.all(
-        names.filter((n) => n.startsWith('nalgorithm-') && n !== CACHE).map((n) => caches.delete(n))
-      )
+      const old = names.filter((n) => n.startsWith('nalgorithm-') && n !== CACHE)
+      await Promise.all(old.slice(0, -1).map((n) => caches.delete(n)))
       await self.clients.claim()
     })()
   )

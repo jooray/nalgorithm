@@ -28,6 +28,7 @@ import { safeAudioUrl } from './hosted/logic.js'
 import { ANOTHER_DIGEST_HINT, makeButtonView } from './digest-job-logic.js'
 import { miniView, scrollAfterInsert } from './mini-player-logic.js'
 import { showTab } from './shell.js'
+import { beginActivity } from './activity.js'
 
 export interface DigestBackend {
   mode: 'hosted' | 'byok'
@@ -125,7 +126,9 @@ export function initDigestView(b: DigestBackend): void {
 export function setDigests(list: DigestRecord[], options: { select?: string } = {}): void {
   digests = newestFirst(list)
   for (const d of digests) rememberSnapshots(d.profiles)
-  const want = options.select ?? selectedId
+  const routeId = location.hash.startsWith('#digest/') ? location.hash.split('/')[1] : null
+  const saved = safeStorage()?.getItem(selectionKey())
+  const want = options.select ?? selectedId ?? routeId ?? saved
   const keep = want && digests.some((d) => d.id === want) ? want : (digests[0]?.id ?? null)
   setListError(null)
   selectInternal(keep, false)
@@ -243,6 +246,11 @@ export function setListLoading(loading: boolean): void {
 function selected(): DigestRecord | null {
   return digests.find((d) => d.id === selectedId) ?? null
 }
+function selectionKey(): string {
+  const store = safeStorage()
+  const identity = store?.getItem(document.body.dataset.mode === 'hosted' ? 'nalgorithm_hosted_npub' : 'nalgorithm_npub') ?? 'setup'
+  return `nalgorithm_selected_digest_${backend.mode}_${identity}`
+}
 
 function playableUrl(d: DigestRecord): string | null {
   return madeAudio.get(d.id)?.url ?? safeAudioUrl(d.audioUrl)
@@ -267,6 +275,10 @@ function sourceFor(d: DigestRecord) {
 function selectInternal(id: string | null, openNotes: boolean): void {
   const changed = id !== selectedId
   selectedId = id
+  if (id) {
+    safeStorage()?.setItem(selectionKey(), id)
+    if (location.hash.split('/')[0] === '#digest' && !document.querySelector('dialog[open]')) history.replaceState(history.state, '', `#digest/${encodeURIComponent(id)}`)
+  }
   if (changed) notesTab = 'notes'
   if (openNotes) notesOpen = true
   if (changed && !openNotes) notesOpen = false
@@ -724,6 +736,7 @@ async function fetchFull(d: DigestRecord): Promise<void> {
 
 async function runMake(): Promise<void> {
   if (makeBusy) return
+  const finishActivity = beginActivity('digest generation')
   setMakeBusy(true)
   setMakeStatus('')
   try {
@@ -731,6 +744,7 @@ async function runMake(): Promise<void> {
   } catch (err) {
     setMakeStatus((err as Error).message, true)
   } finally {
+    finishActivity()
     setMakeBusy(false)
   }
 }
@@ -748,6 +762,7 @@ async function onAudioButton(): Promise<void> {
     return
   }
   if (!backend.makeAudio) return
+  const finishActivity = beginActivity('audio generation')
   btn.disabled = true
   const label = btn.textContent
   btn.textContent = 'Making audio…'
@@ -763,6 +778,7 @@ async function onAudioButton(): Promise<void> {
     $('player-hint').classList.add('is-error')
     btn.textContent = label
   } finally {
+    finishActivity()
     btn.disabled = false
   }
 }

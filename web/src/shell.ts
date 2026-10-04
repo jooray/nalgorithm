@@ -8,6 +8,7 @@
 
 import { icon, type IconName } from './icons.js'
 import { showToast } from './toast.js'
+import { deviceStorage } from './storage.js'
 
 export type TabName = 'digest' | 'feed' | 'tune'
 
@@ -34,9 +35,11 @@ export function onTabShown(listener: (tab: TabName) => void): void {
   tabListeners.push(listener)
 }
 
-export function showTab(name: TabName): void {
+export function showTab(name: TabName, history = true): void {
   scrollAt[active] = window.scrollY
   active = name
+  if (history && location.hash.split('/')[0] !== `#${name}`) window.history.pushState(null, '', `#${name}`)
+  deviceStorage.setItem('nalgorithm_last_tab', name)
   for (const view of document.querySelectorAll<HTMLElement>('.view')) {
     view.classList.toggle('hidden', view.dataset.view !== name)
   }
@@ -45,6 +48,8 @@ export function showTab(name: TabName): void {
     else btn.removeAttribute('aria-current')
   }
   window.scrollTo({ top: scrollAt[name] })
+  const heading = document.querySelector<HTMLElement>(`.view[data-view="${name}"] h1`)
+  if (history && heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }) }
   setChromeColor()
   for (const l of tabListeners) l(name)
 }
@@ -70,7 +75,14 @@ export function initShell(): void {
       else showTab(tab.name)
     })
   }
-  showTab('feed')
+  const restore = (): void => {
+    const hash = location.hash.slice(1).split('/')[0]
+    const stored = deviceStorage.getItem('nalgorithm_last_tab')
+    const tab = hash || stored
+    showTab(tab === 'tune' || tab === 'digest' ? tab : 'feed', false)
+  }
+  restore()
+  window.addEventListener('popstate', restore)
 
   // Offline notice.
   const banner = document.getElementById('offline-banner')!

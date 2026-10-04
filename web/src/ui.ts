@@ -21,6 +21,7 @@ import { safeStorage } from './player.js'
 import { toNpub } from './nostr-login.js'
 import { setupProblem } from './settings-validation.js'
 import { chatCompletion } from 'nalgorithm'
+import { initTuneDrafts } from './drafts.js'
 import {
   fetchModels,
   loadCachedModels,
@@ -235,6 +236,7 @@ export function initUI(
 
   // First run: nothing is set up, so start where the setup is.
   if (!settings.npub.trim()) showTab('tune')
+  initTuneDrafts(() => loadSettings().npub || 'setup')
 
   return settings
 }

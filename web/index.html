@@ -15,6 +15,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
+  <a href="#views" class="skip-link">Skip to main content</a>
   <div id="app">
     <div id="offline-banner" class="offline-banner hidden" role="status">
       <span class="offline-icon" id="offline-icon"></span>
@@ -277,7 +278,7 @@
             </div>
             <datalist id="model-list"></datalist>
             <p class="field-hint">The connection test makes one small request; your provider may charge for it.</p>
-            <label class="check"><input type="checkbox" id="input-remember-key" checked><span>Remember my API key on this device<small>Off keeps the key only while this page is open. Use this on shared devices.</small></span></label>
+            <label class="check"><input type="checkbox" id="input-remember-key" checked><span>Remember my API key on this device<small>Off keeps the key in this tab's session, including safe app updates, until the tab closes. Use this on shared devices.</small></span></label>
             <label for="input-model">Model (scoring)</label>
             <input type="text" id="input-model" list="model-list" placeholder="deepseek-v4-flash-0731" spellcheck="false" autocomplete="off">
             <p class="field-hint">Does the bulk of the work. Keep it cheap and fast.</p>

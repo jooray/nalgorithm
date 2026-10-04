@@ -1,6 +1,8 @@
 import { defineConfig, type Plugin } from 'vite'
 import { resolve } from 'path'
 import { readFileSync, writeFileSync } from 'fs'
+import { readdirSync } from 'fs'
+import { createHash } from 'node:crypto'
 
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')) as {
   version: string
@@ -13,7 +15,7 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')
  * with different content) still has to look like a new build to clients, or
  * they will never reload.
  */
-const APP_VERSION = `${pkg.version}+${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12)}`
+const APP_VERSION = `${pkg.version}+${Date.now().toString(36)}-${createHash('sha256').update(readFileSync(resolve(__dirname, 'src/app.ts'))).digest('hex').slice(0, 8)}`
 
 /**
  * Emits `version.json` for the running app to poll, and substitutes the
@@ -34,7 +36,9 @@ function versionPlugin(): Plugin {
 
       const swPath = resolve(outDir, 'sw.js')
       try {
+        const files = readdirSync(resolve(outDir, 'assets')).filter((f) => /\.(js|css)$/.test(f) || /^inter-latin-wght.*\.woff2$/.test(f))
         const sw = readFileSync(swPath, 'utf-8').replace(/__APP_VERSION__/g, APP_VERSION)
+          .replace('__SHELL_ASSETS__', JSON.stringify(files.map((f) => `assets/${f}`).concat(['icon-192.png', 'icon-512.png'])))
         writeFileSync(swPath, sw)
       } catch {
         // No service worker in this build — nothing to stamp.

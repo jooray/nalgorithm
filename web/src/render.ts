@@ -123,6 +123,11 @@ export function renderFeed(
     container.appendChild(card)
   })
   feedState.set(container, { posts: ordered, cards, options })
+  const linkedId = /\/note\/([0-9a-f]{64})$/i.exec(location.hash)?.[1]
+  const linked = linkedId ? ordered.find((p) => p.id === linkedId) : null
+  if (linked && !document.querySelector('dialog[open]')) queueMicrotask(() => {
+    if (!document.querySelector('dialog[open]')) openNoteSheet(linked, options)
+  })
   void lazyResolveProfiles(container)
 }
 
@@ -456,7 +461,8 @@ function renderPostCard(post: DisplayPost, options: RenderOptions, top = false):
  */
 export function openNoteSheet(post: DisplayPost, options: RenderOptions): void {
   const links = linksFor(post, options)
-  const sheet = openSheet({ title: 'Note' })
+  const tab = location.hash.slice(1).split('/')[0] || 'feed'
+  const sheet = openSheet({ title: 'Note', route: `#${tab}/note/${post.id}` })
   const body = sheet.body
 
   const note = el('article', 'note note-detail')

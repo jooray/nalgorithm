@@ -1,6 +1,7 @@
 import { pubkeyToHex, refreshLearnedPrompt, type Fetcher, type LearnedState, type PipelineStore } from 'nalgorithm'
 import { deviceStorage } from './storage.js'
 import { loadSettings, type AppSettings } from './settings.js'
+import { beginActivity } from './activity.js'
 
 const running = new Map<string, Promise<string | undefined>>()
 export function learnedKey(identity: string): string {
@@ -10,6 +11,7 @@ export function learnIncrementally(fetcher: Fetcher, settings: AppSettings, forc
   const key = learnedKey(settings.npub)
   const existing = running.get(key)
   if (existing) { fetcher.destroy(); return existing }
+  const finishActivity = beginActivity('learning preferences')
   const work = (async () => {
     let state: LearnedState | null = null
     try { state = JSON.parse(deviceStorage.getItem(key) ?? 'null') } catch { /* corrupt state */ }
@@ -21,7 +23,7 @@ export function learnIncrementally(fetcher: Fetcher, settings: AppSettings, forc
     }
     return refreshLearnedPrompt({ fetcher, store, pubkeyHex: pubkeyToHex(settings.npub),
       llm: { apiBaseUrl: settings.apiBaseUrl, apiKey: settings.apiKey, model: settings.learnerModel || settings.model }, pauseMs: 0 })
-  })().finally(() => { fetcher.destroy(); running.delete(key) })
+  })().finally(() => { finishActivity(); fetcher.destroy(); running.delete(key) })
   running.set(key, work)
   return work
 }

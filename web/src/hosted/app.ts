@@ -119,6 +119,8 @@ import {
   type Schedule,
 } from './logic.js'
 import { switchMode } from './mode.js'
+import { initTuneDrafts } from '../drafts.js'
+import { beginActivity } from '../activity.js'
 
 const POLL_INTERVAL_MS = 4000
 const POLL_MAX_MS = 10 * 60 * 1000
@@ -330,6 +332,7 @@ function setLoginStatus(text: string, isError = false): void {
 }
 
 async function signIn(): Promise<void> {
+  const finishActivity = beginActivity('account login')
   const button = $<HTMLButtonElement>('#btn-hosted-login')
   button.disabled = true
   setLoginStatus('')
@@ -354,6 +357,7 @@ async function signIn(): Promise<void> {
       // best-effort
     }
     button.disabled = false
+    finishActivity()
   }
 }
 
@@ -402,7 +406,8 @@ async function onSignedIn(npub: string, ent: Entitlement): Promise<void> {
   loadedPrompt = s.userPrompt
   loadedHours = s.hoursBack
   updatePromptCount()
-  void loadDigestSection()
+  await loadDigestSection()
+  if (switched) initTuneDrafts(() => userNpub)
   // The list first, then the job status: a running digest's "what was there before" comes from the list.
   digestBoot = (async () => {
     await loadDigests()
@@ -733,7 +738,7 @@ async function saveSettingsForm(closeSettings: () => void): Promise<void> {
   }
   const problem = validateHostedSettings(draft)
   if (problem) return setMsg(problem, true)
-  const clientProblem = saveClientPreference()
+  const clientProblem = saveClientPreference(false)
   if (clientProblem) return setMsg(clientProblem, true)
 
   const button = $<HTMLButtonElement>('#btn-hosted-save')
@@ -741,10 +746,12 @@ async function saveSettingsForm(closeSettings: () => void): Promise<void> {
   setMsg('Saving…')
   try {
     const saved = await putSettings({ ...draft, userPrompt: draft.userPrompt.trim() })
+    saveClientPreference()
     $<HTMLTextAreaElement>('#hosted-prompt').value = saved.userPrompt
     linkPreviewsOn = previewsEnabled(saved)
     updatePromptCount()
-    setMsg('')
+      setMsg('')
+      document.dispatchEvent(new Event('nalgorithm:settings-saved'))
     setStatus('Settings saved')
     show('#hosted-notice', false)
     closeSettings()
@@ -1237,7 +1244,7 @@ function initClientPicker(): void {
 }
 
 /** Save the client preference. Returns a problem to show, or null. */
-function saveClientPreference(): string | null {
+function saveClientPreference(persist = true): string | null {
   const preset = $<HTMLSelectElement>('#select-client').value as ReturnType<typeof loadSettings>['clientPreset']
   const custom = $<HTMLInputElement>('#input-client-custom').value.trim()
   const customProfile = $<HTMLInputElement>('#input-client-custom-profile').value.trim()
@@ -1245,7 +1252,7 @@ function saveClientPreference(): string | null {
     const problem = validateTemplate(custom) ?? validateTemplate(customProfile)
     if (problem) return problem
   }
-  saveSettings({ ...loadSettings(), clientPreset: preset, clientCustomUrl: custom, clientCustomProfileUrl: customProfile,
+  if (persist) saveSettings({ ...loadSettings(), clientPreset: preset, clientCustomUrl: custom, clientCustomProfileUrl: customProfile,
     feedOrder: $<HTMLSelectElement>('#select-feed-order').value === 'best' ? 'best' : 'new',
     dataSaver: $<HTMLInputElement>('#input-data-saver').checked,
     digestMinutes: Number($<HTMLSelectElement>('#select-digest-minutes').value),
@@ -1271,6 +1278,7 @@ async function saveDigestSchedule(): Promise<void> {
   setText('#digest-schedule-status', 'Saving…')
   try {
     const saved = await putSchedule(form)
+    document.dispatchEvent(new CustomEvent('nalgorithm:settings-saved', { detail: { section: 'schedule' } }))
     digestTz = saved.tz
     showScheduleInfo(saved)
     const next = nextRunText(saved)

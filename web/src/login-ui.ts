@@ -25,6 +25,7 @@ import {
   type SignFn,
 } from './nostr-login.js'
 import type { SavedRemoteSigner } from './signer-store.js'
+import { beginActivity } from './activity.js'
 
 /** A completed login. `sign`/`close` are present only for hosted logins. */
 export interface LoginResult {
@@ -86,6 +87,7 @@ export function openActionSignerDialog(signerRelays?: string[]): Promise<LoginRe
 
 function openDialog(signerRelays: string[] | undefined, hosted: boolean, actions = false): Promise<LoginResult | null> {
   return new Promise((resolve) => {
+    const finishActivity = beginActivity('signer approval')
     const el = ensureDialog()
     el.querySelector<HTMLElement>('.login-readonly')!.innerHTML = actions
       ? ACTIONS_NOTICE
@@ -104,6 +106,7 @@ function openDialog(signerRelays: string[] | undefined, hosted: boolean, actions
     const finish = (result: LoginResult | null): void => {
       if (settled) return
       settled = true
+      finishActivity()
       // A finished hosted login keeps its signer open for the caller; anything
       // else (closed dialog, failure) tears the handshake down.
       if (!result?.close) activeSession?.cancel()

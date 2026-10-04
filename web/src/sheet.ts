@@ -20,6 +20,7 @@ export interface SheetHandle {
 
 export interface SheetOptions {
   title: string
+  route?: string
   onClose?: () => void
 }
 
@@ -122,5 +123,17 @@ export function openSheet(options: SheetOptions): SheetHandle {
 
   dialog.showModal()
   open = handle
+  const token = `sheet-${Date.now()}-${Math.random()}`
+  if (options.route === location.hash && !history.state?.nalgorithmSheet) history.replaceState(null, '', location.hash.split('/')[0])
+  const previous = history.state?.nalgorithmSheet
+  const state = { ...history.state, nalgorithmSheet: token }
+  if (previous) history.replaceState(state, '', options.route ?? location.href)
+  else history.pushState(state, '', options.route ?? location.href)
+  const onBack = (): void => { if (history.state?.nalgorithmSheet !== token && dialog.open) dialog.close() }
+  window.addEventListener('popstate', onBack)
+  dialog.addEventListener('close', () => {
+    window.removeEventListener('popstate', onBack)
+    if (history.state?.nalgorithmSheet === token) history.back()
+  }, { once: true })
   return handle
 }

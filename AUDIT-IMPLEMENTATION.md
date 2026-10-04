@@ -20,7 +20,7 @@ Source audit: `AUDIT-GPT61.md`. Started 2026-10-05. No intermediate deployments.
 | Visible recovery, truthful scores, permissions and accessibility | F04, F05, F06, F08, F18, F32, F39 | Implemented; automated checks pass, live rendering pending |
 | Incremental learning, bounded fetching and cleanup | F09, F10, F11 | Implemented; resource and incremental-learning regressions pass |
 | Shared pipeline/provider budget and durable jobs/delivery | F12, F14, F15, F41 | Core jobs/outbox implemented; retention and diagnostics continue |
-| Safe updates, drafts and navigation | F16, F33, F37 | Pending |
+| Safe updates, drafts and navigation | F16, F33, F37 | Implemented; atomic deployment integration remains for release |
 | Offline/download audio and efficient playback | F19, F23, F24 | Pending |
 | Stable rendering, storage and payloads | F20, F21, F22 | Pending |
 | Activation, schedule, ordering and private feedback | F25, F27, F28, F29 | Pending |
@@ -82,3 +82,11 @@ Each group will record changes, tests, limitations and commit references. A find
 - Saved delivery-pending artifacts are retried without regeneration or another billing consumption. The durable DM outbox persists signed encrypted events before publication and retries the same IDs; accepted parts are skipped.
 - No-upload servers do not synthesize unusable audio. Humanizer remains on by default and is configurable via `HUMANIZER_ENABLED=false`; vendored prompt untouched.
 - Verification: full workspace build, 205 combined library/web tests, and 226 disposable-SQLite/mock-relay server tests pass, including race, lease and durable retry regressions.
+
+### Safe updates, drafts and navigation
+
+- Named idempotent activity gates protect overlapping ranking/payment, writer/TTS/learning, playback, signing/publication and open reply/zap tasks. Reload-now and worker-controller changes respect blockers.
+- Public Tune/reply drafts persist per context without API keys; separate schedule/general saves clear only their own draft scope. Session-only API keys survive safe reloads in tab-scoped sessionStorage.
+- Tab/digest/note routes restore meaningful navigation without autoplay; browser Back closes native sheets. Skip link and intentional view focus added.
+- Release identity is no longer minute-resolution. Worker precaches actual shell dependencies, waits for safe activation and preserves the preceding cache for other active clients; version polling pauses hidden and rechecks online.
+- Web production build and 168 tests pass. Actual browser history/focus/offline/update flows still require the unavailable live-browser pass.

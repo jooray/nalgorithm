@@ -165,7 +165,7 @@ export function loadSettings(): AppSettings {
     relays: parseJsonArray(getItem('relays')) ?? DEFAULTS.relays,
     provider: getItem('provider') ?? DEFAULTS.provider,
     apiBaseUrl: getItem('apiBaseUrl') ?? DEFAULTS.apiBaseUrl,
-    apiKey: getItem('rememberKey') === 'false' ? sessionKey : getItem('apiKey') ?? DEFAULTS.apiKey,
+    apiKey: getItem('rememberKey') === 'false' ? readSessionKey() : getItem('apiKey') ?? DEFAULTS.apiKey,
     model: getItem('model') ?? DEFAULTS.model,
     scorer: getItem('scorer') === 'decision' ? 'decision' : 'chat',
     decisionModel: getItem('decisionModel') || DEFAULTS.decisionModel,
@@ -220,7 +220,10 @@ export function saveSettings(settings: AppSettings): string {
   setItem('provider', settings.provider)
   setItem('apiBaseUrl', settings.apiBaseUrl)
   if (settings.rememberKey) setItem('apiKey', settings.apiKey)
-  else { localStorage.removeItem(STORAGE_PREFIX + 'apiKey'); sessionKey = settings.apiKey }
+  else {
+    localStorage.removeItem(STORAGE_PREFIX + 'apiKey'); sessionKey = settings.apiKey
+    try { sessionStorage.setItem('nalgorithm_session_api_key', sessionKey) } catch { /* memory-only remains usable */ }
+  }
   setItem('model', settings.model)
   setItem('scorer', settings.scorer)
   setItem('decisionModel', settings.decisionModel)
@@ -243,6 +246,9 @@ export function saveSettings(settings: AppSettings): string {
 }
 
 let sessionKey = ''
+function readSessionKey(): string {
+  try { return sessionKey || sessionStorage.getItem('nalgorithm_session_api_key') || '' } catch { return sessionKey }
+}
 function readLearnedPrompt(identity: string): string {
   try {
     const state = JSON.parse(localStorage.getItem(`nalgorithm_learned_v2_${pubkeyToHex(identity)}`) ?? 'null')

@@ -25,6 +25,7 @@ import {
 } from './audio-logic.js'
 import { estimateSeconds } from './digest-model.js'
 import { deviceStorage } from './storage.js'
+import { beginActivity } from './activity.js'
 import { isSpeechSupported, speak, splitForSpeech, type SpeechSession } from './speech.js'
 
 export interface PlayerSource {
@@ -76,6 +77,7 @@ export class DigestPlayer {
   private speechStart = 0
   private pendingSeek: number | null = null
   private state: PlayerState
+  private playbackActivity: (() => void) | undefined
 
   constructor(store: KeyValueStore | null = safeStorage()) {
     this.store = store
@@ -135,6 +137,7 @@ export class DigestPlayer {
       if (document.visibilityState === 'hidden') this.persist()
     })
     window.addEventListener('pagehide', () => this.persist())
+    window.addEventListener('nalgorithm:checkpoint', () => this.persist())
 
     this.installMediaSession()
   }
@@ -366,6 +369,8 @@ export class DigestPlayer {
 
   private set(patch: Partial<PlayerState>): void {
     this.state = { ...this.state, ...patch }
+    if ((this.state.playing || this.state.loading) && !this.playbackActivity) this.playbackActivity = beginActivity('playback')
+    if (!this.state.playing && !this.state.loading) { this.playbackActivity?.(); this.playbackActivity = undefined; this.stopSaving() }
     this.emit()
   }
 

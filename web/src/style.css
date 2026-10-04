@@ -173,6 +173,8 @@ code {
   outline-offset: 2px;
   border-radius: 6px;
 }
+.skip-link { position: fixed; inset: 8px auto auto 8px; z-index: 100; padding: 12px; background: var(--surface); transform: translateY(-200%); }
+.skip-link:focus { transform: none; }
 
 .hero :focus-visible {
   outline-color: #fff;
