@@ -18,6 +18,7 @@ const PROVIDER_URLS: Record<string, string> = {
 }
 
 export interface AppSettings {
+  cacheAudio: boolean
   learnFromLikes: boolean
   rememberKey: boolean
   feedOrder: 'new' | 'best'
@@ -103,6 +104,7 @@ function parseDateKey(key: string): Date | null {
 }
 
 const DEFAULTS: AppSettings = {
+  cacheAudio: true,
   learnFromLikes: true,
   rememberKey: true,
   feedOrder: 'new',
@@ -156,6 +158,7 @@ function setItem(key: string, value: string): void {
  */
 export function loadSettings(): AppSettings {
   return {
+    cacheAudio: getItem('cacheAudio') !== 'false',
     learnFromLikes: getItem('learnFromLikes') !== 'false',
     rememberKey: getItem('rememberKey') !== 'false',
     feedOrder: getItem('feedOrder') === 'best' ? 'best' : 'new',
@@ -210,6 +213,7 @@ function readLegacyCustomUrl(): string {
  * Save all settings to localStorage.
  */
 export function saveSettings(settings: AppSettings): string {
+  setItem('cacheAudio', String(settings.cacheAudio))
   setItem('learnFromLikes', String(settings.learnFromLikes))
   setItem('rememberKey', String(settings.rememberKey))
   setItem('feedOrder', settings.feedOrder)

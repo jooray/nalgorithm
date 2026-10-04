@@ -76,6 +76,7 @@ import {
   ApiError,
   createCheckout,
   digestNow,
+  digestAudioUrl,
   getDigest,
   getDigests,
   getDigestStatus,
@@ -1199,6 +1200,7 @@ async function maybeFirstDigest(): Promise<void> {
 }
 
 const hostedBackend: DigestBackend = {
+  audioDownloadUrl: (d) => d.audioUrl ? digestAudioUrl(d.id) : null,
   mode: 'hosted',
   makeLabel: 'Send me a digest now',
   makeAnotherLabel: 'Send me another digest now',
@@ -1240,6 +1242,7 @@ function initClientPicker(): void {
   $<HTMLSelectElement>('#select-feed-order').value = s.feedOrder
   $<HTMLInputElement>('#input-data-saver').checked = s.dataSaver
   $<HTMLSelectElement>('#select-digest-minutes').value = String(s.digestMinutes)
+  $<HTMLInputElement>('#input-cache-audio').checked = s.cacheAudio
   sync()
 }
 
@@ -1256,6 +1259,7 @@ function saveClientPreference(persist = true): string | null {
     feedOrder: $<HTMLSelectElement>('#select-feed-order').value === 'best' ? 'best' : 'new',
     dataSaver: $<HTMLInputElement>('#input-data-saver').checked,
     digestMinutes: Number($<HTMLSelectElement>('#select-digest-minutes').value),
+    cacheAudio: $<HTMLInputElement>('#input-cache-audio').checked,
   })
   return null
 }

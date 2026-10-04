@@ -13,6 +13,7 @@ import type { JobTracker } from './drain.js'
 import type { FeedRunner } from './feed.js'
 import { FeedBusy } from './feed.js'
 import { PreviewError } from './preview/service.js'
+import { safeFetch } from './preview/ssrf.js'
 import type { PreviewService } from './preview/service.js'
 import { ScheduleError, applySchedulePatch, loadSchedule, saveSchedule } from './schedule.js'
 import type { Schedule } from './schedule.js'
@@ -140,6 +141,8 @@ export function createApp(deps: AppDeps) {
   const loginUrl = `${deps.publicUrl}/auth/login`
   const cookiePath = new URL(deps.publicUrl).pathname.replace(/\/+$/, '') || '/'
   const running = new Set<string>()
+  let audioActive = 0
+  const audioHits = new Map<string, number[]>()
 
   function sessionToken(req: IncomingMessage): string | undefined {
     const auth = req.headers.authorization
@@ -270,6 +273,22 @@ export function createApp(deps: AppDeps) {
     }
 
     const digestMatch = method === 'GET' ? /^\/digests\/(\d{1,15})$/.exec(path) : null
+    const audioMatch = method === 'GET' ? /^\/digests\/(\d{1,15})\/audio$/.exec(path) : null
+    if (audioMatch) {
+      const hits = (audioHits.get(npub) ?? []).filter((at) => at > nowSec() - 60)
+      if (hits.length >= 8 || audioActive >= 2) throw new HttpError(429, 'Audio downloads are busy. Try again shortly.')
+      if (audioHits.size >= 1000) audioHits.delete(audioHits.keys().next().value!)
+      audioHits.set(npub, [...hits, nowSec()])
+      const row = await db.get<{ audio_url: string | null }>('SELECT audio_url FROM digests WHERE id = ? AND npub = ?', [Number(audioMatch[1]), npub])
+      if (!row?.audio_url) throw new HttpError(404, 'this digest has no audio')
+      if (audioActive >= 2) throw new HttpError(429, 'Audio downloads are busy. Try again shortly.')
+      audioActive++
+      try {
+      const audio = await safeFetch(row.audio_url, { maxBytes: 60 * 1024 * 1024, truncate: false, timeoutMs: 60_000, accept: 'audio/mpeg', acceptType: (type) => type.startsWith('audio/') || type === 'application/octet-stream' })
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audio.body.length, 'Cache-Control': 'private, no-store', 'Content-Disposition': `attachment; filename="nalgorithm-${audioMatch[1]}.mp3"`, 'X-Content-Type-Options': 'nosniff' })
+      return void res.end(audio.body)
+      } finally { audioActive-- }
+    }
     if (digestMatch) {
       const row = await db.get<DigestRow>('SELECT id, created_at, body, audio_url, notes, duration_s FROM digests WHERE id = ? AND npub = ?', [Number(digestMatch[1]), npub])
       if (!row) throw new HttpError(404, 'digest not found')

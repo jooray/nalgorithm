@@ -27,10 +27,13 @@ import { Waveform } from './waveform.js'
 import { safeAudioUrl } from './hosted/logic.js'
 import { ANOTHER_DIGEST_HINT, makeButtonView } from './digest-job-logic.js'
 import { miniView, scrollAfterInsert } from './mini-player-logic.js'
-import { showTab } from './shell.js'
+import { showTab, currentTab, onTabShown } from './shell.js'
 import { beginActivity } from './activity.js'
+import { loadSettings } from './settings.js'
+import { readOfflineAudio, saveOfflineAudio, fetchAudioBlob, offlineAudioBytes, clearOfflineAudio } from './offline-audio.js'
 
 export interface DigestBackend {
+  audioDownloadUrl?(d: DigestRecord): string | null
   mode: 'hosted' | 'byok'
   /** The button that makes the first digest. */
   makeLabel: string
@@ -83,6 +86,40 @@ let miniTick: number | undefined
 let miniShown = false
 /** Audio files made in this session (bring your own key): digest id to blob URL. */
 const madeAudio = new Map<string, { url: string; filename: string }>()
+const offlineUrls = new Map<string, string>()
+let audioSync: Promise<void> | undefined
+function audioOwner(): string {
+  const store = safeStorage()
+  return `${backend.mode}:${store?.getItem(backend.mode === 'hosted' ? 'nalgorithm_hosted_npub' : 'nalgorithm_npub') ?? 'setup'}`
+}
+async function refreshAudioCache(): Promise<void> {
+  if (audioSync) return audioSync
+  const owner = audioOwner()
+  audioSync = (async () => {
+    const list = digests.slice(0, 3)
+    for (const d of list) {
+      let blob = await readOfflineAudio(owner, d.id)
+      if (!blob && d.audioUrl && loadSettings().cacheAudio && navigator.onLine) {
+        try {
+          blob = await fetchAudioBlob(owner, d.id, backend.audioDownloadUrl?.(d) ?? d.audioUrl)
+          if (owner !== audioOwner() || !loadSettings().cacheAudio) return
+          const saved = await saveOfflineAudio(owner, d.id, d.createdAt, blob)
+          if (!saved) { $('audio-cache-status').textContent = 'Audio plays this session, but this device could not save it offline.'; continue }
+        } catch { $('audio-cache-status').textContent = 'Could not cache some audio. Playback and Download MP3 remain available online.'; continue }
+      }
+      if (owner !== audioOwner()) return
+      if (blob && !offlineUrls.has(d.id)) offlineUrls.set(d.id, URL.createObjectURL(blob))
+    }
+    const keep = new Set(list.map((d) => d.id))
+    for (const [id, url] of offlineUrls) if (!keep.has(id)) { URL.revokeObjectURL(url); offlineUrls.delete(id) }
+    const bytes = await offlineAudioBytes()
+    if (bytes) $('audio-cache-status').textContent = `${(bytes / 1024 / 1024).toFixed(1)} MB cached. Newest three audio digests, up to 30 MB; browsers can evict them.`
+    const d = selected()
+    if (d && !player.current.playing && !player.current.loading) player.load(sourceFor(d))
+    lastShell = ''; paint(player.current)
+  })().finally(() => { audioSync = undefined })
+  return audioSync
+}
 
 // ─── public API ──────────────────────────────────────────────────────────────
 
@@ -114,17 +151,28 @@ export function initDigestView(b: DigestBackend): void {
   $('btn-make-list').addEventListener('click', () => void runMake())
   $('hero-empty-text').textContent = b.emptyText
   $('btn-audio').addEventListener('click', () => void onAudioButton())
+  $('btn-download-audio').addEventListener('click', () => void downloadAudio())
+  $('btn-clear-audio').addEventListener('click', async () => {
+    await clearOfflineAudio()
+    for (const url of offlineUrls.values()) URL.revokeObjectURL(url)
+    offlineUrls.clear(); $('audio-cache-status').textContent = 'Cached audio removed. Downloads you saved outside the app are unchanged.'
+    const d = selected(); if (d && !player.current.playing) player.load(sourceFor(d))
+  })
   initSpeedMenu()
   initNotesTabs()
   initMini()
 
   player.onChange((s) => paint(s))
+  document.addEventListener('nalgorithm:settings-saved', () => { if (loadSettings().cacheAudio) void refreshAudioCache() })
+  onTabShown((tab) => { if (tab === 'digest') { lastShell = ''; paint(player.current) } })
   renderAll()
 }
 
 /** Replace the list (newest first is enforced). Keeps the selection when it still exists. */
 export function setDigests(list: DigestRecord[], options: { select?: string } = {}): void {
   digests = newestFirst(list)
+  const kept = new Set(digests.map((d) => d.id))
+  for (const [id, audio] of madeAudio) if (!kept.has(id)) { URL.revokeObjectURL(audio.url); madeAudio.delete(id) }
   for (const d of digests) rememberSnapshots(d.profiles)
   const routeId = location.hash.startsWith('#digest/') ? location.hash.split('/')[1] : null
   const saved = safeStorage()?.getItem(selectionKey())
@@ -133,6 +181,7 @@ export function setDigests(list: DigestRecord[], options: { select?: string } = 
   setListError(null)
   selectInternal(keep, false)
   renderAll()
+  void refreshAudioCache()
 }
 
 /** Put one digest in front of the list and select it. */
@@ -141,6 +190,7 @@ export function addDigest(d: DigestRecord, options: { openNotes?: boolean } = {}
   rememberSnapshots(d.profiles)
   selectInternal(d.id, options.openNotes ?? false)
   renderAll()
+  void refreshAudioCache()
 }
 
 export function digestCount(): number {
@@ -152,7 +202,7 @@ export function digestIds(): string[] {
 }
 
 export function stopPlayback(): void {
-  if (player?.current.playing) player.pause()
+  player?.load(null)
 }
 
 export function setMakeStatus(text: string, isError = false): void {
@@ -253,7 +303,7 @@ function selectionKey(): string {
 }
 
 function playableUrl(d: DigestRecord): string | null {
-  return madeAudio.get(d.id)?.url ?? safeAudioUrl(d.audioUrl)
+  return madeAudio.get(d.id)?.url ?? offlineUrls.get(d.id) ?? safeAudioUrl(d.audioUrl)
 }
 
 /** Key for resume marks: a session-made audio file still belongs to its digest, not a throwaway blob URL. */
@@ -325,6 +375,7 @@ function entryLength(d: DigestRecord): string {
 }
 
 function renderList(): void {
+  entrySignature = ''
   const list = $('digest-list')
   list.replaceChildren()
   for (const d of digests) {
@@ -366,7 +417,11 @@ function renderList(): void {
 }
 
 /** Cheap, in place: state text, selection and play icon on each entry. */
+let entrySignature = ''
 function paintEntries(s: PlayerState): void {
+  const signature = `${digests.map((d) => d.id).join(',')}|${selectedId}|${s.playing}|${s.loading}|${Math.floor(s.resumeAt)}|${s.played}`
+  if (signature === entrySignature) return
+  entrySignature = signature
   for (const card of document.querySelectorAll<HTMLElement>('#digest-list .digest-entry')) {
     const d = digests.find((x) => x.id === card.dataset.id)
     if (!d) continue
@@ -380,7 +435,8 @@ function paintEntries(s: PlayerState): void {
     state.classList.toggle('is-played', !hint && played)
     const playing = isSel && (s.playing || s.loading)
     const btn = card.querySelector<HTMLButtonElement>('[data-role="play"]')!
-    btn.innerHTML = icon(playing ? 'pause' : 'play', 22)
+    const glyph = playing ? 'pause' : 'play'
+    if (btn.dataset.glyph !== glyph) { btn.innerHTML = icon(glyph, 22); btn.dataset.glyph = glyph }
     const when = `${dayLabel(d.createdAt)}, ${clockLabel(d.createdAt)}`
     btn.setAttribute('aria-label', `${playing ? 'Pause' : 'Play'} the digest from ${when}`)
   }
@@ -390,11 +446,12 @@ function paintTimes(s: PlayerState): void {
   const dur = s.dur
   const pos = scrubFraction !== null ? scrubFraction * dur : s.pos
   const tilde = s.durApprox ? '~' : ''
-  $('t-elapsed').textContent = formatClock(pos)
-  $('t-remaining').textContent = `-${tilde}${formatClock(Math.max(0, dur - pos))}`
+  setText('t-elapsed', formatClock(pos))
+  setText('t-remaining', `-${tilde}${formatClock(Math.max(0, dur - pos))}`)
 }
 
 function paint(s: PlayerState): void {
+  if (currentTab() !== 'digest') { paintMini(); return }
   const d = selected()
   if (!d) {
     paintEntries(s)
@@ -412,14 +469,16 @@ function paint(s: PlayerState): void {
     btn.setAttribute('aria-expanded', String(notesOpen))
     const audioBtn = $<HTMLButtonElement>('btn-audio')
     const made = madeAudio.get(d.id)
-    const offer = Boolean(made) || (backend.canMakeAudio?.() === true && !d.audioUrl)
+    const offer = Boolean(made) || (backend.canMakeAudio?.() === true && !playableUrl(d))
     audioBtn.classList.toggle('hidden', !offer)
     audioBtn.textContent = made ? 'Save MP3' : 'Make audio'
+    $('btn-download-audio').classList.toggle('hidden', !playableUrl(d))
   }
 
   const busy = s.playing || s.loading
   const play = $<HTMLButtonElement>('btn-play')
-  play.innerHTML = icon(busy ? 'pause' : 'play', 40)
+  const glyph = busy ? 'pause' : 'play'
+  if (play.dataset.glyph !== glyph) { play.innerHTML = icon(glyph, 40); play.dataset.glyph = glyph }
   play.setAttribute('aria-label', busy ? 'Pause digest' : 'Play digest')
   play.classList.toggle('is-playing', s.playing)
   play.setAttribute('aria-busy', String(s.loading))
@@ -767,10 +826,14 @@ async function onAudioButton(): Promise<void> {
   const label = btn.textContent
   btn.textContent = 'Making audio…'
   try {
-    madeAudio.set(d.id, await backend.makeAudio(d))
+    const made = await backend.makeAudio(d)
+    const previous = madeAudio.get(d.id)
+    if (previous) URL.revokeObjectURL(previous.url)
+    madeAudio.set(d.id, made)
+    const blob = await fetch(made.url).then((r) => r.blob())
+    if (loadSettings().cacheAudio) { try { await saveOfflineAudio(audioOwner(), d.id, d.createdAt, blob) } catch { $('audio-cache-status').textContent = 'Audio is ready; too large to cache. Use Download MP3.' } }
     // Same digest, now with a real audio file: swap the source under the player.
-    player.load(null)
-    selectInternal(d.id, notesOpen)
+    if (selectedId === d.id) { player.load(null); selectInternal(d.id, notesOpen) }
     lastShell = ''
     renderAll()
   } catch (err) {
@@ -781,4 +844,19 @@ async function onAudioButton(): Promise<void> {
     finishActivity()
     btn.disabled = false
   }
+}
+
+async function downloadAudio(): Promise<void> {
+  const d = selected(); if (!d) return
+  const source = playableUrl(d); if (!source) return
+  const button = $<HTMLButtonElement>('btn-download-audio'); button.disabled = true
+  const finish = beginActivity('audio download')
+  try {
+    const blob = await fetchAudioBlob(audioOwner(), d.id, madeAudio.get(d.id)?.url ?? backend.audioDownloadUrl?.(d) ?? source, 60 * 1024 * 1024)
+    const url = URL.createObjectURL(blob); const link = document.createElement('a')
+    link.href = url; link.download = `nalgorithm-${new Date(d.createdAt * 1000).toISOString().slice(0, 10)}-${d.id}.mp3`; link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    $('player-hint').textContent = 'MP3 download started. Keep the file for reliable offline playback.'
+  } catch (err) { $('player-hint').textContent = `${(err as Error).message} Try online again.`; $('player-hint').classList.add('is-error') }
+  finally { finish(); button.disabled = false }
 }

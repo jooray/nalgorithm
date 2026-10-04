@@ -96,6 +96,7 @@
             <div class="player-foot">
               <p id="player-hint" class="player-hint" role="status"></p>
               <button id="btn-audio" class="pill-btn small hidden" type="button">Make audio</button>
+              <button id="btn-download-audio" class="pill-btn small hidden" type="button">Download MP3</button>
             </div>
           </div>
         </div>
@@ -425,6 +426,9 @@
             <label class="check"><input type="checkbox" id="input-data-saver"><span>Tap to load remote media<small>Saves data and avoids contacting image hosts until you choose to load an image.</small></span></label>
             <label for="select-digest-minutes">Target digest length</label>
             <select id="select-digest-minutes"><option value="3">About 3 minutes</option><option value="6" selected>About 6 minutes</option><option value="10">About 10 minutes</option></select>
+            <label class="check"><input type="checkbox" id="input-cache-audio" checked><span>Keep the newest three digests offline<small>Up to 30 MB on this device. Browsers may evict cached audio; Download MP3 keeps an independent copy.</small></span></label>
+            <p id="audio-cache-status" class="field-hint" role="status"></p>
+            <button id="btn-clear-audio" class="btn btn-small" type="button">Remove cached audio</button>
           </section>
           <section class="tune-section">
             <h2>Open notes in</h2>

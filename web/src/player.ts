@@ -16,6 +16,7 @@
 
 import {
   ResumeStore,
+  invalidateResumeStore,
   clampSeek,
   loadSpeed,
   loadVoiceName,
@@ -115,6 +116,7 @@ export class DigestPlayer {
       const pos = this.audio.currentTime
       if (this.state.mode === 'audio' && this.state.dur > 0 && pos > this.state.dur) this.set({ dur: pos })
       this.set({ pos })
+      this.updatePositionState()
     })
     this.audio.addEventListener('playing', () => this.set({ playing: true, loading: false, error: '' }))
     this.audio.addEventListener('pause', () => {
@@ -138,6 +140,7 @@ export class DigestPlayer {
     })
     window.addEventListener('pagehide', () => this.persist())
     window.addEventListener('nalgorithm:checkpoint', () => this.persist())
+    window.addEventListener('storage', (e) => { if (e.key?.startsWith('nalgorithm_resume')) invalidateResumeStore(this.store) })
 
     this.installMediaSession()
   }
@@ -159,7 +162,7 @@ export class DigestPlayer {
 
   /** Select a digest. Stops whatever was playing; never starts playback. */
   load(source: PlayerSource | null): void {
-    if (this.state.source?.key === source?.key) {
+    if (this.state.source?.key === source?.key && this.state.source?.audioUrl === source?.audioUrl) {
       // Same digest: only the text may have changed (streaming finished).
       if (source) this.state.source = source
       return
@@ -197,7 +200,7 @@ export class DigestPlayer {
 
     if (usesAudio) {
       this.audio.src = source.audioUrl!
-      this.audio.preload = 'metadata'
+      this.audio.preload = 'none'
       this.audio.playbackRate = speed
       this.audio.load()
       if (resumeAt > 0) this.pendingSeek = resumeAt

@@ -21,7 +21,7 @@ Source audit: `AUDIT-GPT61.md`. Started 2026-10-05. No intermediate deployments.
 | Incremental learning, bounded fetching and cleanup | F09, F10, F11 | Implemented; resource and incremental-learning regressions pass |
 | Shared pipeline/provider budget and durable jobs/delivery | F12, F14, F15, F41 | Core jobs/outbox implemented; retention and diagnostics continue |
 | Safe updates, drafts and navigation | F16, F33, F37 | Implemented; atomic deployment integration remains for release |
-| Offline/download audio and efficient playback | F19, F23, F24 | Pending |
+| Offline/download audio and efficient playback | F19, F23, F24 | Implemented; IndexedDB and playback logic regressions pass |
 | Stable rendering, storage and payloads | F20, F21, F22 | Pending |
 | Activation, schedule, ordering and private feedback | F25, F27, F28, F29 | Pending |
 | Media, responsive design, device privacy and visual refinement | F30, F31, F34, F40 | Pending |
@@ -90,3 +90,12 @@ Each group will record changes, tests, limitations and commit references. A find
 - Tab/digest/note routes restore meaningful navigation without autoplay; browser Back closes native sheets. Skip link and intentional view focus added.
 - Release identity is no longer minute-resolution. Worker precaches actual shell dependencies, waits for safe activation and preserves the preceding cache for other active clients; version polling pauses hidden and rechecks online.
 - Web production build and 168 tests pass. Actual browser history/focus/offline/update flows still require the unavailable live-browser pass.
+
+### MP3 downloads, offline audio and playback resources
+
+- Download MP3 for hosted and generated audio; authenticated ownership-checked, SSRF-guarded same-origin download fallback avoids third-party CORS failures. Download concurrency/rate/size are bounded.
+- IndexedDB binary cache retains the newest three audio digests, at most 30 MB (15 MB per cached item), with opt-out, clear/size controls and truthful persistence failure messages. Explicit downloads allow up to 60 MB. Cached audio restores as a playable blob without network.
+- Generated audio completion does not change a newer digest selection. Removed/cleared object URLs are revoked; source selection no longer preloads remote MP3 metadata.
+- Resume records are parsed once and shared between player/history, playback only paints the visible player/mini, history paints on meaningful state changes, and unchanged icons/time strings are not rewritten. Waveform caches dimensions/theme colors.
+- Added test-only IndexedDB and DOM fixtures dependencies. Production dependency audit reports zero vulnerabilities; npm flags three development dependency advisories for review before release.
+- Verification: web/server builds and 170 web tests pass, including newest-three binary eviction/isolation/size tests. Actual airplane-mode/lock-screen playback still needs a live device.

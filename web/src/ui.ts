@@ -314,6 +314,7 @@ export function getFeedContainer(): HTMLElement {
  */
 export function readFieldsToSettings(): AppSettings {
   return {
+    cacheAudio: $<HTMLInputElement>('#input-cache-audio').checked,
     learnFromLikes: $<HTMLInputElement>('#input-learn').checked,
     rememberKey: $<HTMLInputElement>('#input-remember-key').checked,
     feedOrder: $<HTMLSelectElement>('#select-feed-order').value === 'best' ? 'best' : 'new',
@@ -431,6 +432,7 @@ function readSignerRelays(): string[] {
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 function populateFields(settings: AppSettings): void {
+  $<HTMLInputElement>('#input-cache-audio').checked = settings.cacheAudio
   $<HTMLInputElement>('#input-learn').checked = settings.learnFromLikes
   $<HTMLInputElement>('#input-remember-key').checked = settings.rememberKey
   $<HTMLSelectElement>('#select-feed-order').value = settings.feedOrder

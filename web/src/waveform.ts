@@ -29,6 +29,8 @@ export class Waveform {
   private fraction = 0
   private scrubbing = false
   private enabled = true
+  private bounds: { w: number; h: number } | null = null
+  private colors: { on: string; off: string } | null = null
 
   constructor(private readonly host: HTMLElement, private readonly handlers: WaveformHandlers) {
     this.canvas = host.querySelector('canvas') as HTMLCanvasElement
@@ -67,9 +69,9 @@ export class Waveform {
       }
     })
 
-    new ResizeObserver(() => this.draw()).observe(host)
+    new ResizeObserver(() => { this.bounds = null; this.draw() }).observe(host)
     // The theme can change under us.
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => this.draw())
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { this.colors = null; this.draw() })
   }
 
   get isScrubbing(): boolean {
@@ -103,8 +105,7 @@ export class Waveform {
   }
 
   draw(): void {
-    const w = this.host.clientWidth
-    const h = this.host.clientHeight
+    const { w, h } = this.bounds ??= { w: this.host.clientWidth, h: this.host.clientHeight }
     if (w === 0 || h === 0) return
     const dpr = window.devicePixelRatio || 1
     if (this.canvas.width !== Math.round(w * dpr) || this.canvas.height !== Math.round(h * dpr)) {
@@ -116,9 +117,11 @@ export class Waveform {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
 
-    const style = getComputedStyle(this.host)
-    const on = style.getPropertyValue('--wave-on').trim() || '#fff'
-    const off = style.getPropertyValue('--wave-off').trim() || 'rgba(255,255,255,0.3)'
+    if (!this.colors) {
+      const style = getComputedStyle(this.host)
+      this.colors = { on: style.getPropertyValue('--wave-on').trim() || '#fff', off: style.getPropertyValue('--wave-off').trim() || 'rgba(255,255,255,0.3)' }
+    }
+    const { on, off } = this.colors
 
     const count = Math.max(1, Math.floor((w + GAP) / (BAR_W + GAP)))
     const span = count * BAR_W + (count - 1) * GAP

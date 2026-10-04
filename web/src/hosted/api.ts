@@ -77,6 +77,7 @@ const DEFAULT_TIMEOUT_MS = 30_000
 function endpoint(path: string): string {
   return new URL(path, new URL('api/', document.baseURI)).toString()
 }
+export function digestAudioUrl(id: string): string { return endpoint(`digests/${encodeURIComponent(id)}/audio`) }
 
 async function request<T>(
   method: 'GET' | 'POST' | 'PUT',

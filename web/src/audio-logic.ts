@@ -102,6 +102,8 @@ export function resumeHint(pos: number | undefined): string | null {
   return `Resume at ${formatClock(pos)}`
 }
 
+const resumeStates = new WeakMap<KeyValueStore, Record<string, ResumeEntry>>()
+export function invalidateResumeStore(store: KeyValueStore | null): void { if (store) resumeStates.delete(store) }
 export class ResumeStore {
   private readonly store: KeyValueStore | null
 
@@ -110,6 +112,7 @@ export class ResumeStore {
   }
 
   private read(): Record<string, ResumeEntry> {
+    if (this.store && resumeStates.has(this.store)) return resumeStates.get(this.store)!
     try {
       const raw = this.store?.getItem(RESUME_KEY)
       const data = raw ? (JSON.parse(raw) as unknown) : null
@@ -125,6 +128,7 @@ export class ResumeStore {
           ...(e.played ? { played: true } : {}),
         }
       }
+      if (this.store) resumeStates.set(this.store, out)
       return out
     } catch {
       return {}
@@ -132,6 +136,7 @@ export class ResumeStore {
   }
 
   private write(all: Record<string, ResumeEntry>): void {
+    if (this.store) resumeStates.set(this.store, all)
     const keys = Object.keys(all)
     if (keys.length > RESUME_MAX_ENTRIES) {
       keys.sort((a, b) => all[b].at - all[a].at)
