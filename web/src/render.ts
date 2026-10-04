@@ -391,11 +391,11 @@ function renderNoteContent(post: DisplayPost, options: RenderOptions, into: HTML
 function renderScore(post: DisplayPost, full = false): HTMLElement {
   const row = el('div', full ? 'note-score note-score-full' : 'note-score')
   const pill = el('span', 'score-pill')
-  pill.textContent = `Score ${post.score.toFixed(1)}`
-  pill.setAttribute('aria-label', `Score ${post.score.toFixed(1)} out of 10`)
+  pill.textContent = post.defaultScore ? 'Not ranked yet' : `Score ${post.score.toFixed(1)}`
+  pill.setAttribute('aria-label', post.defaultScore ? 'This note has not been ranked' : `Estimated relevance ${post.score.toFixed(1)} out of 10`)
   row.appendChild(pill)
   const reason = el('span', 'score-reason')
-  reason.textContent = post.justification || 'No reason recorded'
+  reason.textContent = post.defaultScore ? 'Model unavailable. Refresh retries only unranked notes.' : post.justification || 'Open Why it ranked for details'
   row.appendChild(reason)
   return row
 }
@@ -415,7 +415,7 @@ function renderPostCard(post: DisplayPost, options: RenderOptions, top = false):
   const card = el('article', top ? 'note note-top' : 'note')
   card.tabIndex = 0
   const name = authorLabel(post.author, options.profiles?.get(post.author)).text
-  card.setAttribute('aria-label', `Note by ${name}, score ${post.score.toFixed(1)}. Open details`)
+  card.setAttribute('aria-label', `Note by ${name}, ${post.defaultScore ? 'not ranked yet' : `relevance ${post.score.toFixed(1)}`}. Open details`)
 
   card.appendChild(renderAvatar(post.author, options, 'post-avatar'))
 

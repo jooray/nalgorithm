@@ -39,7 +39,8 @@ export interface LoginResult {
 const READONLY_NOTICE = `
   <strong>Read-only.</strong> Nalgorithm only needs your public key, so it can
   read your follow list, your feed, and your likes. It never signs, posts,
-  or reacts on your behalf, and it asks your signer for no permission to do so.`
+  or reacts during identity connection. If you choose a note action later,
+  you will connect a signer and approve posting permissions then.`
 
 const HOSTED_NOTICE = `
   <strong>Nothing is posted on its own.</strong> Signing in asks your signer to
@@ -287,14 +288,15 @@ function ensureDialog(): HTMLDialogElement {
 
   dialog = document.createElement('dialog')
   dialog.className = 'login-dialog'
+  dialog.setAttribute('aria-labelledby', 'login-dialog-title')
   dialog.innerHTML = `
     <div class="login-header">
-      <h2>Connect your Nostr identity</h2>
+      <h2 id="login-dialog-title">Connect your Nostr identity</h2>
       <button class="btn-icon login-close" aria-label="Close">&times;</button>
     </div>
     <p class="login-readonly"></p>
     <div class="login-body"></div>
-    <p class="login-status"></p>
+    <p class="login-status" role="status" aria-live="polite"></p>
   `
   document.body.appendChild(dialog)
   return dialog

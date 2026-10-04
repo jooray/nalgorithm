@@ -611,6 +611,17 @@ function initSpeedMenu(): void {
 // ─── show notes ──────────────────────────────────────────────────────────────
 
 function initNotesTabs(): void {
+  const tabs = [...document.querySelectorAll<HTMLButtonElement>('#shownotes [role="tab"]')]
+  tabs.forEach((tab, i) => {
+    tab.id = `shownotes-tab-${tab.dataset.tab}`
+    tab.setAttribute('aria-controls', `shownotes-${tab.dataset.tab}`)
+    document.getElementById(`shownotes-${tab.dataset.tab}`)?.setAttribute('aria-labelledby', tab.id)
+    tab.addEventListener('keydown', (e) => {
+      const target = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : e.key === 'ArrowRight' ? (i + 1) % tabs.length : e.key === 'ArrowLeft' ? (i - 1 + tabs.length) % tabs.length : -1
+      if (target < 0) return
+      e.preventDefault(); tabs[target].click(); tabs[target].focus()
+    })
+  })
   for (const tab of document.querySelectorAll<HTMLButtonElement>('#shownotes [role="tab"]')) {
     tab.addEventListener('click', () => {
       notesTab = tab.dataset.tab === 'text' ? 'text' : 'notes'

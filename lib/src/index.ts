@@ -20,7 +20,7 @@ export {
 export { decisionCompletion, decisionCompletionWithRetry, createPacer } from './decision.js'
 export type { DecisionRequest, DecisionResponse, DecisionScoreAnswer, DecisionScoreQuestion } from './decision.js'
 export { createLearner } from './learner.js'
-export { chatCompletion, chatCompletionWithRetry, chatCompletionStream } from './llm.js'
+export { chatCompletion, chatCompletionWithRetry, chatCompletionStream, ProviderError, providerHeaders } from './llm.js'
 export { synthesizeSpeech, splitTextForTTS, DEFAULT_TTS_MAX_CHARS } from './tts.js'
 export {
   humanizeText,

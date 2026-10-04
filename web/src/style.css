@@ -59,7 +59,7 @@
     --line: #e3dccf;
     --text: #17151f;
     --text-2: #4f4c63;
-    --text-3: #66637a;
+    --text-3: #605d73;
 
     --accent: #3f6b00;
     --on-accent: #ffffff;
@@ -174,8 +174,7 @@ code {
   border-radius: 6px;
 }
 
-.hero :focus-visible,
-.gate :focus-visible {
+.hero :focus-visible {
   outline-color: #fff;
 }
 
@@ -185,14 +184,10 @@ code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
+  html { scroll-behavior: auto; }
+  .btn, .tab, .toast, .play-btn, .note-action .icon, .mini-play { transition: none; }
+  .spinner, .btn.is-busy .icon, dialog.sheet[open], dialog.sheet::backdrop { animation: none; }
+  .spinner { border-color: var(--accent-ink); border-style: dotted; }
 }
 
 /* Exactly one mode's UI shows; before the mode is known, none of it does. */
@@ -2133,6 +2128,9 @@ dialog.sheet::backdrop {
 .toast {
   position: fixed;
   inset: auto 0 calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 12px) 0;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
   z-index: 60;
   display: flex;
   gap: 10px;
@@ -2171,6 +2169,14 @@ dialog.sheet::backdrop {
   font-weight: 700;
   cursor: pointer;
 }
+
+.toast-dismiss { border: 0; background: none; color: inherit; font: inherit; min-height: 44px; padding: 0 8px; cursor: pointer; }
+.login-dialog { max-height: calc(100dvh - 32px); overflow-y: auto; margin: auto; }
+.post-menu-dropdown { min-width: min(250px, calc(100vw - 32px)); max-width: calc(100vw - 32px); }
+.note-actions { flex-wrap: wrap; }
+.new-pill { min-height: 44px; }
+.pill-anchor:has(.new-pill:not(.hidden)) { top: calc(env(safe-area-inset-top) + 80px); }
+@media (max-width: 360px) { .note-actions { margin-left: -56px; justify-content: space-between; } .sheet-body, .sheet-footer { padding-inline: 12px; } }
 
 @keyframes toast-in {
   from {
@@ -2262,6 +2268,7 @@ body[data-mode='hosted']:not([data-signed-in]) #views::before {
 body[data-mode='hosted']:has(#hosted-login:not(.hidden)) #views::before {
   display: none;
 }
+body[data-mode='hosted']:has(#hosted-startup:not(.hidden)) #views::before { display: none; }
 
 /* ─── Paywall ──────────────────────────────────────────────────────────────── */
 

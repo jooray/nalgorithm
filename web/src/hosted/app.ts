@@ -184,6 +184,8 @@ export function initHosted(): void {
 
   // Account
   $('#btn-hosted-login').addEventListener('click', () => void signIn())
+  $('#btn-boot-retry').addEventListener('click', () => void boot())
+  $('#btn-boot-byok').addEventListener('click', () => switchMode('byok'))
   $('#btn-hosted-logout').addEventListener('click', () => void signOut(closeSettings))
   $('#btn-hosted-to-byok').addEventListener('click', () => switchMode('byok'))
   $('#btn-hosted-switch-byok').addEventListener('click', () => switchMode('byok'))
@@ -229,6 +231,7 @@ export function initHosted(): void {
 let openSettingsPanel: () => void = () => {}
 
 async function boot(): Promise<void> {
+  show('#hosted-startup', false)
   paintRemembered()
   try {
     const me = await getMe()
@@ -244,7 +247,10 @@ async function boot(): Promise<void> {
       document.addEventListener('visibilitychange', retryBootWhenVisible)
       return
     }
-    showFailure(err, boot)
+    if (document.body.dataset.signedIn !== 'true') {
+      $('#startup-error').textContent = 'The server did not answer. Check your connection and try again; nothing has been ranked or charged here.'
+      show('#hosted-startup')
+    } else showFailure(err, boot)
   }
 }
 
@@ -279,6 +285,7 @@ function paintRemembered(): void {
 // ─── Login / logout ──────────────────────────────────────────────────────────
 
 function showLogin(message = ''): void {
+  show('#hosted-startup', false)
   document.body.dataset.signedIn = 'false'
   entitlement = null
   userNpub = ''
@@ -695,7 +702,7 @@ function showFailure(err: unknown, retry: () => void | Promise<void>): void {
   const button = $<HTMLButtonElement>('#btn-notice-action')
   button.classList.remove('hidden')
   if (d.action === 'settings') {
-    button.textContent = 'Open settings'
+      button.textContent = 'Open Tune'
     button.onclick = openSettingsPanel
   } else {
     button.textContent = 'Try again'

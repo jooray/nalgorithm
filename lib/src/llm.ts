@@ -7,6 +7,18 @@ import type { ChatMessage, LLMConfig } from './types.js'
 /** Fail a stalled request rather than hanging a scheduled run forever. */
 const DEFAULT_TIMEOUT_MS = 120_000
 
+export class ProviderError extends Error {
+  constructor(readonly status: number, message: string, readonly retryAfterMs = 0) { super(message); this.name = 'ProviderError' }
+  get retryable(): boolean { return this.status === 429 || this.status >= 500 }
+}
+export function providerHeaders(apiKey: string): Record<string, string> {
+  return { 'Content-Type': 'application/json', ...(apiKey.trim() ? { Authorization: `Bearer ${apiKey}` } : {}) }
+}
+function responseError(res: Response): ProviderError {
+  const hint = res.status === 401 || res.status === 403 ? 'Check your model API key and permissions.' : res.status === 400 || res.status === 404 ? 'Check the model name and API endpoint.' : res.status === 429 ? 'The model provider is rate-limiting requests.' : 'The model provider is temporarily unavailable.'
+  return new ProviderError(res.status, `Model request failed (${res.status}). ${hint}`, Math.min(60_000, Math.max(0, Number(res.headers.get('retry-after')) * 1000 || 0)))
+}
+
 interface ChatCompletionResponse {
   choices: Array<{
     message: {
@@ -55,10 +67,7 @@ export async function chatCompletion(
   try {
     res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
-      },
+      headers: providerHeaders(config.apiKey),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     })
@@ -72,8 +81,8 @@ export async function chatCompletion(
   }
 
   if (!res.ok) {
-    const errorBody = await res.text()
-    throw new Error(`LLM API error (${res.status}): ${errorBody}`)
+    await res.body?.cancel()
+    throw responseError(res)
   }
 
   const data = (await res.json()) as ChatCompletionResponse
@@ -144,10 +153,7 @@ export async function chatCompletionStream(
     try {
       res = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${config.apiKey}`,
-        },
+        headers: providerHeaders(config.apiKey),
         body: JSON.stringify(body),
         signal: controller.signal,
       })
@@ -157,8 +163,8 @@ export async function chatCompletionStream(
     }
 
     if (!res.ok) {
-      const errorBody = await res.text()
-      throw new Error(`LLM API error (${res.status}): ${errorBody}`)
+      await res.body?.cancel()
+      throw responseError(res)
     }
     if (!res.body) throw new Error('LLM API returned no response body')
 
@@ -273,8 +279,9 @@ export async function chatCompletionWithRetry(
       return await chatCompletion(config, messages, jsonMode, temperature)
     } catch (err) {
       lastErr = err as Error
+      if (err instanceof ProviderError && !err.retryable) break
       if (attempt < maxAttempts) {
-        const delay = baseDelayMs * Math.pow(2, attempt - 1) // 2s, 4s
+        const delay = err instanceof ProviderError && err.retryAfterMs ? err.retryAfterMs : baseDelayMs * Math.pow(2, attempt - 1)
         console.warn(`LLM call failed (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms:`, lastErr.message)
         await sleep(delay)
       }

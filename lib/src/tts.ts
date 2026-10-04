@@ -12,6 +12,7 @@
  */
 
 import type { TTSConfig, TTSFormat } from './types.js'
+import { providerHeaders, ProviderError } from './llm.js'
 
 /** Provider-side cap on a single `/audio/speech` request. Venice enforces 4096. */
 export const DEFAULT_TTS_MAX_CHARS = 4096
@@ -190,10 +191,7 @@ async function synthesizeChunk(config: TTSConfig, text: string, format: TTSForma
   try {
     res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
-      },
+      headers: providerHeaders(config.apiKey),
       body: JSON.stringify(body),
       // Synthesis is slower than a chat call, but must still not hang forever.
       signal: AbortSignal.timeout(config.timeoutMs ?? 180_000),
@@ -206,8 +204,8 @@ async function synthesizeChunk(config: TTSConfig, text: string, format: TTSForma
   }
 
   if (!res.ok) {
-    const errorBody = await res.text()
-    throw new Error(`TTS API error (${res.status}): ${errorBody}`)
+    await res.body?.cancel()
+    throw new ProviderError(res.status, `Audio request failed (${res.status}). Check the TTS model, voice and key.`)
   }
 
   return new Uint8Array(await res.arrayBuffer())
@@ -275,6 +273,7 @@ export async function synthesizeSpeech(
           break
         } catch (err) {
           lastErr = err as Error
+          if (err instanceof ProviderError && !err.retryable) break
           if (attempt < maxAttempts) await sleep(baseDelayMs * Math.pow(2, attempt - 1))
         }
       }

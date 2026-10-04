@@ -7,6 +7,7 @@
  */
 
 import { icon, type IconName } from './icons.js'
+import { showToast } from './toast.js'
 
 export type TabName = 'digest' | 'feed' | 'tune'
 
@@ -56,16 +57,7 @@ function setChromeColor(): void {
 
 /** A short message that does not depend on which tab is showing. */
 export function toast(text: string): void {
-  const el = document.getElementById('toast')
-  if (!el) return
-  el.textContent = text
-  el.classList.toggle('is-visible', Boolean(text))
-  clearTimeout(toastTimer)
-  if (text) {
-    toastTimer = window.setTimeout(() => {
-      el.classList.remove('is-visible')
-    }, 3200)
-  }
+  if (text) showToast(text)
 }
 
 export function initShell(): void {
@@ -74,7 +66,7 @@ export function initShell(): void {
     const tab = TABS.find((t) => t.name === btn.dataset.tab)!
     btn.innerHTML = `${icon(tab.icon, 26)}<span>${tab.label}</span>`
     btn.addEventListener('click', () => {
-      if (tab.name === active) window.scrollTo({ top: 0, behavior: 'smooth' })
+      if (tab.name === active) window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
       else showTab(tab.name)
     })
   }

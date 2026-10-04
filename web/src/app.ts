@@ -339,12 +339,13 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     if (!quiet) setStatusLoading(text)
   }
   /** A problem: a quiet run leaves the stored feed alone and says so in one line. */
-  const report = (text: string): void => {
+    const report = (text: string): void => {
     if (quiet) {
       pausedUntil = nowSec() + 300
       setQuietNotice(`${text}. Showing your last ranking.`)
-    } else {
-      setStatus(text)
+      } else {
+        setStatus(text)
+        if (currentPosts.length === 0) showEmptyState(true, false, `${text}. Open Tune to check your identity, model and relays.`)
     }
   }
   let working: ScoredPost[] = []
@@ -521,7 +522,8 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     const collapsed = allScored.length - shown
     const cachedLabel = cachedPosts.length > 0 ? ` (${cachedPosts.length} from cache)` : ''
     const boostLabel = collapsed > 0 ? `, ${collapsed} duplicate boosts merged` : ''
-    if (!quiet) setStatus(`Showing ${shown} posts, ranked by relevance${cachedLabel}${boostLabel}`)
+    const unranked = allScored.filter((p) => p.defaultScore).length
+    if (!quiet) setStatus(`Showing ${shown} posts${cachedLabel}${boostLabel}${unranked ? `. ${unranked} not ranked yet; check the model connection.` : ', ranked successfully'}`)
     setRefreshEnabled(true)
 
     // ── Phase 2: background likes → re-rate ────────────────────────────

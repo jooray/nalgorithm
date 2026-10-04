@@ -10,7 +10,7 @@
  *   question per post and reads the score off the returned distribution.
  */
 
-import { chatCompletionWithRetry } from './llm.js'
+import { chatCompletionWithRetry, ProviderError } from './llm.js'
 import { createPacer, decisionCompletionWithRetry } from './decision.js'
 import type { DecisionScoreQuestion } from './decision.js'
 import type {
@@ -54,6 +54,7 @@ export function scoreCacheKey(post: Pick<FetchedPost, 'id' | 'type' | 'originalP
  */
 export function sortByRelevance(posts: ScoredPost[]): ScoredPost[] {
   return [...posts].sort((a, b) => {
+    if (Boolean(a.defaultScore) !== Boolean(b.defaultScore)) return a.defaultScore ? 1 : -1
     if (b.score !== a.score) return b.score - a.score
     return b.createdAt - a.createdAt
   })
@@ -566,6 +567,8 @@ function chunk<T>(arr: T[], size: number): T[][] {
 export function createRanker(config: RankerConfig): Ranker {
   const batchSize = config.batchSize ?? DEFAULT_BATCH_SIZE
   const concurrency = Math.max(1, config.concurrency ?? DEFAULT_CONCURRENCY)
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) throw new Error('Scoring batch size must be a whole number from 1 to 100.')
+  if (!Number.isInteger(concurrency) || concurrency > 20) throw new Error('Scoring concurrency must be a whole number from 1 to 20.')
   const jsonMode = config.jsonMode ?? false
   const scorer = config.scorer ?? 'chat'
   const decisionShape = config.decisionShape ?? 'profile-in-question'
@@ -610,6 +613,8 @@ export function createRanker(config: RankerConfig): Ranker {
         debugError = `Decision response answered ${scoreMap.size}/${posts.length} questions`
       }
     } catch (err) {
+      const status = (err as { status?: number }).status
+      if (status && status < 500 && status !== 429) throw err
       debugError = `Decision call failed: ${(err as Error).message}`
     }
 
@@ -672,6 +677,7 @@ export function createRanker(config: RankerConfig): Ranker {
         debugError = result?.error ?? 'Validation returned no scores'
       }
     } catch (err) {
+      if (err instanceof ProviderError && !err.retryable) throw err
       debugError = `LLM call failed: ${(err as Error).message}`
     }
 

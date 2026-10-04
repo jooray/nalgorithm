@@ -18,7 +18,7 @@
   <div id="app">
     <div id="offline-banner" class="offline-banner hidden" role="status">
       <span class="offline-icon" id="offline-icon"></span>
-      <span>You are offline. Saved digests still play; the feed needs a connection.</span>
+      <span>You are offline. Saved text and cached audio are available; uncached audio and new notes need a connection.</span>
     </div>
 
     <!-- Hosted: trial and plan status, on every tab -->
@@ -51,10 +51,17 @@
       <section id="hosted-login" class="gate hosted-only hidden" aria-labelledby="login-title">
         <img class="gate-logo" src="icon-192.png" alt="" width="56" height="56">
         <h1 id="login-title" class="gate-title">Sign in with your Nostr key.</h1>
-        <p class="gate-lead">Hosted mode needs no API key: 3-day free trial, then 10,000 sats per month. Use a Nostr extension or a remote signer such as Amber. You sign one login event; nothing is posted.</p>
+        <p class="gate-lead">No API key: 3-day free trial, then 10,000 sats per 30 days. Your signer proves your identity. Remote signers also connect for replies, boosts, likes and zap requests; nothing is published unless you choose an action.</p>
         <button id="btn-hosted-login" class="btn btn-primary btn-full" type="button">Sign in with Nostr</button>
         <p id="hosted-login-status" class="form-status" role="status"></p>
         <button id="btn-hosted-to-byok" class="btn btn-ghost btn-full" type="button">Use my own API key instead (free)</button>
+      </section>
+
+      <section id="hosted-startup" class="gate hosted-only hidden" aria-labelledby="startup-title">
+        <h1 id="startup-title" class="gate-title">Could not open your account.</h1>
+        <p id="startup-error" class="gate-lead" role="alert"></p>
+        <button id="btn-boot-retry" class="btn btn-primary btn-full" type="button">Try again</button>
+        <button id="btn-boot-byok" class="btn btn-secondary btn-full" type="button">Use my own model key</button>
       </section>
 
       <!-- ─── Digests tab ───────────────────────────────────────────────────── -->
@@ -211,7 +218,7 @@
               <code id="identity-npub" class="identity-npub"></code>
             </div>
             <button id="btn-connect" class="btn btn-primary btn-full">Connect Nostr identity</button>
-            <p class="field-hint">Reads your public key only. nalgorithm never signs or posts.</p>
+            <p class="field-hint">Reading needs only your public key. Note actions connect your signer only when you choose to reply, boost, like or zap.</p>
             <label for="input-npub">npub or hex pubkey</label>
             <input type="text" id="input-npub" placeholder="npub1... or hex pubkey" spellcheck="false" autocomplete="off">
           </section>
@@ -363,7 +370,7 @@
             </div>
             <label class="check">
               <input type="checkbox" id="hosted-learn" checked>
-              <span>Learn from my likes</span>
+              <span>Learn from my likes<small>Off ranks using only your written interests. Your learned taste is kept for re-enabling.</small></span>
             </label>
             <label class="check">
               <input type="checkbox" id="hosted-previews" checked>
@@ -463,7 +470,6 @@
       <button class="tab" type="button" data-tab="tune"></button>
     </nav>
 
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </div>
 
   <script type="module" src="/src/app.ts"></script>

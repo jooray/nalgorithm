@@ -17,7 +17,7 @@ Source audit: `AUDIT-GPT61.md`. Started 2026-10-05. No intermediate deployments.
 |---|---|---|
 | Ranking context and unique digest selection | F01, F13 | Implemented; library regressions and web/server typechecks pass |
 | Validated setup, storage and provider configuration | F02, F03, F07, F17, F26, F35 | Core implementation done; draft persistence and section saves follow |
-| Visible recovery, truthful scores, permissions and accessibility | F04, F05, F06, F08, F18, F32, F39 | Pending |
+| Visible recovery, truthful scores, permissions and accessibility | F04, F05, F06, F08, F18, F32, F39 | Implemented; automated checks pass, live rendering pending |
 | Incremental learning, bounded fetching and cleanup | F09, F10, F11 | Pending |
 | Shared pipeline/provider budget and durable jobs/delivery | F12, F14, F15, F41 | Pending |
 | Safe updates, drafts and navigation | F16, F33, F37 | Pending |
@@ -57,3 +57,11 @@ Each group will record changes, tests, limitations and commit references. A find
 - Guarded preferences survive blocked/quota storage in memory. Mode is carried in the URL rather than depending on persistence before reload. Session-only model keys are available.
 - Added learning, ordering, media and length preference controls; both modes validate custom post and profile link templates.
 - Verification: web typecheck and all 167 web tests pass.
+
+### Visible recovery and accessibility
+
+- Unified shell/action toasts; visible/clickable popover state and persistent Retry with Dismiss. Removed the unused legacy toast element.
+- Hosted cold startup errors have their own visible recovery gate. Permissions accurately describe retained action permission at login.
+- Failed scores read “Not ranked yet” and sort behind genuine results. Permanent provider errors stop retries/batches; optional Authorization supports local models. Ranker rejects invalid chunk/concurrency bounds.
+- Show-notes tabs have Arrow/Home/End behavior and panel associations; named login dialog announces progress. Light focus, tertiary contrast, narrow action/menu layouts and explicit reduced-motion states corrected.
+- Verification: 201 combined library/web tests and web typecheck pass. No live WCAG certification is claimed.

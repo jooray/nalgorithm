@@ -13,7 +13,7 @@ export interface ToastOptions {
   ms?: number
 }
 
-let current: { el: HTMLElement; timer: number } | null = null
+let current: { el: HTMLElement; timer: number | undefined } | null = null
 
 function dismiss(): void {
   if (!current) return
@@ -38,6 +38,11 @@ export function showToast(text: string, options: ToastOptions = {}): void {
   message.className = 'toast-text'
   message.textContent = text
   el.appendChild(message)
+  const close = document.createElement('button')
+  close.type = 'button'
+  close.className = 'toast-dismiss'
+  close.textContent = 'Dismiss'
+  close.addEventListener('click', dismiss)
 
   if (options.action) {
     const { label, run } = options.action
@@ -51,6 +56,7 @@ export function showToast(text: string, options: ToastOptions = {}): void {
     })
     el.appendChild(button)
   }
+  el.appendChild(close)
 
   el.setAttribute('popover', 'manual')
   document.body.appendChild(el)
@@ -59,6 +65,6 @@ export function showToast(text: string, options: ToastOptions = {}): void {
   } catch {
     // no popover support: it still shows, just beneath any open sheet
   }
-  const ms = options.ms ?? (options.action ? 9000 : 4500)
-  current = { el, timer: window.setTimeout(dismiss, ms) }
+  const ms = options.ms ?? (options.action ? 0 : 4500)
+  current = { el, timer: ms > 0 ? window.setTimeout(dismiss, ms) : undefined }
 }
