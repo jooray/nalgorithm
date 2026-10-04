@@ -16,7 +16,7 @@ Source audit: `AUDIT-GPT61.md`. Started 2026-10-05. No intermediate deployments.
 | Group | Findings | Status |
 |---|---|---|
 | Ranking context and unique digest selection | F01, F13 | Implemented; library regressions and web/server typechecks pass |
-| Validated setup, storage and provider configuration | F02, F03, F07, F17, F26, F35 | Pending |
+| Validated setup, storage and provider configuration | F02, F03, F07, F17, F26, F35 | Core implementation done; draft persistence and section saves follow |
 | Visible recovery, truthful scores, permissions and accessibility | F04, F05, F06, F08, F18, F32, F39 | Pending |
 | Incremental learning, bounded fetching and cleanup | F09, F10, F11 | Pending |
 | Shared pipeline/provider budget and durable jobs/delivery | F12, F14, F15, F41 | Pending |
@@ -48,3 +48,12 @@ Each group will record changes, tests, limitations and commit references. A find
 - Hosted learning-off no longer applies previously learned taste.
 - Tests: fresh library build and 32 tests pass; web no-emit check and server build pass.
 - BrowserOS neo still reports no browser window. Live verification remains pending.
+
+### Validated setup and provider connection
+
+- First BYOK save validates public identity, endpoint/relay schemes and finite whole-number bounds, points at the bad field, and starts the first ranking. Live checks are installed even before setup is complete.
+- Refresh/digest use saved settings instead of silently committing an unsaved Tune draft. Inline save confirmation is persistent.
+- Keyless local Ollama is accepted; a deliberately small paid-capable model test is disclosed. Provider switching clears credentials/hidden overrides/catalog, restoring nonsensitive provider-specific model choices.
+- Guarded preferences survive blocked/quota storage in memory. Mode is carried in the URL rather than depending on persistence before reload. Session-only model keys are available.
+- Added learning, ordering, media and length preference controls; both modes validate custom post and profile link templates.
+- Verification: web typecheck and all 167 web tests pass.

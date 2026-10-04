@@ -69,6 +69,7 @@ import { initDigestView, setDigests, setMakeStatus } from './digest-view.js'
 import { byokBackend, loadLocalDigests } from './byok-digest.js'
 import { rememberProfiles } from './profiles.js'
 import { APP_VERSION } from './version-check.js'
+import { deviceStorage as localStorage } from './storage.js'
 
 import { initVersionCheck, setUpdateBlocked } from './version-check.js'
 
@@ -322,8 +323,7 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
   const auto = opts.auto === true
 
   // Read latest settings from form fields and save
-  const settings = readFieldsToSettings()
-  saveSettings(settings)
+  const settings = loadSettings()
 
   const error = validateSettings(settings)
   if (error) {
@@ -446,7 +446,7 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     }
 
     // 4. Score posts — use cache for previously scored, LLM only for new ones
-    const existingLearnedPrompt = settings.learnedPrompt || undefined
+    const existingLearnedPrompt = settings.learnFromLikes ? settings.learnedPrompt || undefined : undefined
 
     // Prune old cache entries (>30 days)
     const pruned = pruneScoreCache()
@@ -527,7 +527,8 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     // ── Phase 2: background likes → re-rate ────────────────────────────
 
     // Fire and forget — runs in background, doesn't block UI
-    backgroundLearnAndRerate(fetcher, pubkeyHex, since, settings)
+    if (settings.learnFromLikes) void backgroundLearnAndRerate(fetcher, pubkeyHex, since, settings)
+    else fetcher.destroy()
   } catch (err) {
     report(`Error: ${(err as Error).message}`)
     console.error('Feed error:', err)
@@ -601,8 +602,7 @@ async function backgroundLearnAndRerate(
 async function regenerateLearnedPrompt(): Promise<void> {
   if (isRunning) return
 
-  const settings = readFieldsToSettings()
-  saveSettings(settings)
+  const settings = loadSettings()
 
   const error = validateSettings(settings)
   if (error) {
@@ -675,8 +675,7 @@ async function regenerateLearnedPrompt(): Promise<void> {
  * yet) a fresh feed run first, so "Write a digest" works from a cold start.
  */
 async function ensureFeed(): Promise<{ posts: ScoredPost[]; profiles: Map<string, ProfileData> }> {
-  const settings = readFieldsToSettings()
-  saveSettings(settings)
+  const settings = loadSettings()
   const problem = validateSettings(settings)
   if (problem) throw new Error(`${problem}. Open Tune to finish setting up.`)
   if (currentPosts.length === 0) {
@@ -720,7 +719,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initDigestView(
     byokBackend({
       ensureFeed,
-      readSettings: readFieldsToSettings,
+      readSettings: loadSettings,
       setStatus: setMakeStatus,
     })
   )
@@ -731,5 +730,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const stored = showStoredFeed(settings)
   const valid = !validateSettings(settings)
   if (!stored && valid && !settings.autoRefresh) showEmptyState(true, true)
-  if (valid) startLiveChecks({ check: autoCheck, tick: paintAge })
+  startLiveChecks({ check: autoCheck, tick: paintAge })
+  document.addEventListener('nalgorithm:settings-saved', autoCheck)
 })

@@ -1223,6 +1223,9 @@ function initClientPicker(): void {
     $('#client-hint').classList.toggle('hidden', !custom)
   }
   select.addEventListener('change', sync)
+  $<HTMLSelectElement>('#select-feed-order').value = s.feedOrder
+  $<HTMLInputElement>('#input-data-saver').checked = s.dataSaver
+  $<HTMLSelectElement>('#select-digest-minutes').value = String(s.digestMinutes)
   sync()
 }
 
@@ -1232,10 +1235,14 @@ function saveClientPreference(): string | null {
   const custom = $<HTMLInputElement>('#input-client-custom').value.trim()
   const customProfile = $<HTMLInputElement>('#input-client-custom-profile').value.trim()
   if (preset === 'custom') {
-    const problem = validateTemplate(custom)
+    const problem = validateTemplate(custom) ?? validateTemplate(customProfile)
     if (problem) return problem
   }
-  saveSettings({ ...loadSettings(), clientPreset: preset, clientCustomUrl: custom, clientCustomProfileUrl: customProfile })
+  saveSettings({ ...loadSettings(), clientPreset: preset, clientCustomUrl: custom, clientCustomProfileUrl: customProfile,
+    feedOrder: $<HTMLSelectElement>('#select-feed-order').value === 'best' ? 'best' : 'new',
+    dataSaver: $<HTMLInputElement>('#input-data-saver').checked,
+    digestMinutes: Number($<HTMLSelectElement>('#select-digest-minutes').value),
+  })
   return null
 }
 

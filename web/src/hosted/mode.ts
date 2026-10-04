@@ -8,10 +8,13 @@
 
 import { loadSettings } from '../settings.js'
 import { chooseMode, type AppMode } from './logic.js'
+import { deviceStorage as localStorage } from '../storage.js'
 
 const MODE_KEY = 'nalgorithm_mode'
 
 export function getStoredMode(): string | null {
+  const chosen = new URL(location.href).searchParams.get('mode')
+  if (chosen === 'hosted' || chosen === 'byok') return chosen
   try {
     return localStorage.getItem(MODE_KEY)
   } catch {
@@ -42,5 +45,7 @@ export function resolveMode(): AppMode | 'choose' {
 /** Remember a mode and restart, so exactly one mode's UI is ever wired up. */
 export function switchMode(mode: AppMode): void {
   setStoredMode(mode)
-  location.reload()
+  const url = new URL(location.href)
+  url.searchParams.set('mode', mode)
+  location.assign(url.toString())
 }

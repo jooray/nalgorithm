@@ -4,6 +4,8 @@
 
 import { DEFAULT_SIGNER_RELAYS } from './nostr-login.js'
 import { pubkeyToHex, rankingContext } from 'nalgorithm'
+import { deviceStorage as localStorage, storageNotice } from './storage.js'
+import { setupProblem } from './settings-validation.js'
 import { isClientPreset, presetFromUrl, validateTemplate, type ClientPreset } from './client-url.js'
 
 const STORAGE_PREFIX = 'nalgorithm_'
@@ -16,6 +18,11 @@ const PROVIDER_URLS: Record<string, string> = {
 }
 
 export interface AppSettings {
+  learnFromLikes: boolean
+  rememberKey: boolean
+  feedOrder: 'new' | 'best'
+  dataSaver: boolean
+  digestMinutes: number
   npub: string
   relays: string[]
   provider: string
@@ -96,6 +103,11 @@ function parseDateKey(key: string): Date | null {
 }
 
 const DEFAULTS: AppSettings = {
+  learnFromLikes: true,
+  rememberKey: true,
+  feedOrder: 'new',
+  dataSaver: false,
+  digestMinutes: 6,
   npub: '',
   relays: [
     'wss://relay.damus.io',
@@ -144,11 +156,16 @@ function setItem(key: string, value: string): void {
  */
 export function loadSettings(): AppSettings {
   return {
+    learnFromLikes: getItem('learnFromLikes') !== 'false',
+    rememberKey: getItem('rememberKey') !== 'false',
+    feedOrder: getItem('feedOrder') === 'best' ? 'best' : 'new',
+    dataSaver: getItem('dataSaver') === 'true',
+    digestMinutes: Number(getItem('digestMinutes')) || 6,
     npub: getItem('npub') ?? DEFAULTS.npub,
     relays: parseJsonArray(getItem('relays')) ?? DEFAULTS.relays,
     provider: getItem('provider') ?? DEFAULTS.provider,
     apiBaseUrl: getItem('apiBaseUrl') ?? DEFAULTS.apiBaseUrl,
-    apiKey: getItem('apiKey') ?? DEFAULTS.apiKey,
+    apiKey: getItem('rememberKey') === 'false' ? sessionKey : getItem('apiKey') ?? DEFAULTS.apiKey,
     model: getItem('model') ?? DEFAULTS.model,
     scorer: getItem('scorer') === 'decision' ? 'decision' : 'chat',
     decisionModel: getItem('decisionModel') || DEFAULTS.decisionModel,
@@ -192,12 +209,18 @@ function readLegacyCustomUrl(): string {
 /**
  * Save all settings to localStorage.
  */
-export function saveSettings(settings: AppSettings): void {
+export function saveSettings(settings: AppSettings): string {
+  setItem('learnFromLikes', String(settings.learnFromLikes))
+  setItem('rememberKey', String(settings.rememberKey))
+  setItem('feedOrder', settings.feedOrder)
+  setItem('dataSaver', String(settings.dataSaver))
+  setItem('digestMinutes', String(settings.digestMinutes))
   setItem('npub', settings.npub)
   setItem('relays', JSON.stringify(settings.relays))
   setItem('provider', settings.provider)
   setItem('apiBaseUrl', settings.apiBaseUrl)
-  setItem('apiKey', settings.apiKey)
+  if (settings.rememberKey) setItem('apiKey', settings.apiKey)
+  else { localStorage.removeItem(STORAGE_PREFIX + 'apiKey'); sessionKey = settings.apiKey }
   setItem('model', settings.model)
   setItem('scorer', settings.scorer)
   setItem('decisionModel', settings.decisionModel)
@@ -217,6 +240,17 @@ export function saveSettings(settings: AppSettings): void {
   setItem('autoRefresh', String(settings.autoRefresh))
   setItem('ttsModel', settings.ttsModel)
   setItem('ttsVoice', settings.ttsVoice)
+  return storageNotice()
+}
+
+let sessionKey = ''
+export function saveProviderDraft(provider: string, fields: Pick<AppSettings, 'apiBaseUrl' | 'apiKey' | 'model' | 'digestModel' | 'learnerModel'>): void {
+  const { apiKey: _key, ...safe } = fields
+  setItem(`provider_${provider}`, JSON.stringify(safe))
+}
+export function providerDraft(provider: string): Pick<AppSettings, 'apiBaseUrl' | 'model' | 'digestModel' | 'learnerModel'> {
+  const defaults = { apiBaseUrl: PROVIDER_URLS[provider] ?? '', model: provider === 'ollama' ? 'llama3.2' : provider === 'openrouter' ? 'google/gemma-3-27b-it' : provider === 'custom' ? '' : DEFAULTS.model, digestModel: '', learnerModel: '' }
+  try { return { ...defaults, ...JSON.parse(getItem(`provider_${provider}`) ?? '{}') } } catch { return defaults }
 }
 
 /**
@@ -323,13 +357,8 @@ export function getProviderUrl(provider: string): string {
  * Check if settings are valid enough to run.
  */
 export function validateSettings(settings: AppSettings): string | null {
-  if (!settings.npub.trim()) return 'npub is required'
-  if (settings.relays.length === 0) return 'At least one relay is required'
-  if (!settings.apiBaseUrl.trim()) return 'API Base URL is required'
-  if (!settings.apiKey.trim()) return 'API Key is required'
-  if (!settings.model.trim()) return 'Model name is required'
-  if (settings.scorer === 'decision' && !settings.decisionModel.trim()) return 'Decision model name is required'
-  if (!settings.userPrompt.trim()) return 'User prompt is required — describe your interests'
+  const problem = setupProblem(settings)
+  if (problem) return problem.message
   if (settings.clientPreset === 'custom') {
     const bad = validateTemplate(settings.clientCustomUrl) ?? validateTemplate(settings.clientCustomProfileUrl)
     if (bad) return `Custom client links: ${bad}`

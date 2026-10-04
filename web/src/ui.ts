@@ -8,6 +8,8 @@ import {
   validateSettings,
   clearScoreCache,
   PROVIDER_URLS,
+  providerDraft,
+  saveProviderDraft,
   type AppSettings,
 } from './settings.js'
 import { openLoginDialog } from './login-ui.js'
@@ -17,6 +19,8 @@ import { listVoices } from './speech.js'
 import { loadVoiceName, saveVoiceName } from './audio-logic.js'
 import { safeStorage } from './player.js'
 import { toNpub } from './nostr-login.js'
+import { setupProblem } from './settings-validation.js'
+import { chatCompletion } from 'nalgorithm'
 import {
   fetchModels,
   loadCachedModels,
@@ -54,12 +58,23 @@ export function initUI(
   // Provider change updates API base URL
   const selectProvider = $<HTMLSelectElement>('#select-provider')
   const inputApiBase = $<HTMLInputElement>('#input-api-base')
+  let previousProvider = selectProvider.value
 
   selectProvider.addEventListener('change', () => {
+    saveProviderDraft(previousProvider, readFieldsToSettings())
     const provider = selectProvider.value
-    if (provider !== 'custom') {
-      inputApiBase.value = PROVIDER_URLS[provider] ?? ''
-    }
+    const draft = providerDraft(provider)
+    inputApiBase.value = draft.apiBaseUrl
+    $<HTMLInputElement>('#input-api-key').value = ''
+    $<HTMLInputElement>('#input-model').value = draft.model
+    $<HTMLInputElement>('#input-digest-model').value = draft.digestModel
+    $<HTMLInputElement>('#input-learner-model').value = draft.learnerModel
+    $<HTMLSelectElement>('#select-scorer').value = 'chat'
+    toggleDecisionFields('chat')
+    $('#model-list').replaceChildren()
+    $('#model-catalog-status').textContent = 'Provider changed. Add its key and test the connection.'
+    $('#btn-recommend-models').classList.add('hidden')
+    previousProvider = provider
     inputApiBase.readOnly = provider !== 'custom'
   })
 
@@ -68,17 +83,52 @@ export function initUI(
 
   // Save settings
   const btnSave = $<HTMLButtonElement>('#btn-save-settings')
+  let firstSetup = Boolean(validateSettings(settings))
+  if (firstSetup) btnSave.textContent = 'Save and rank my feed'
   btnSave.addEventListener('click', () => {
     const updated = readFieldsToSettings()
-    saveSettings(updated)
+    const problem = setupProblem(updated)
+    const error = validateSettings(updated)
+    if (error) {
+      setTuneStatus(error, true)
+      if (problem) {
+        const field = document.getElementById(problem.field)
+        field?.setAttribute('aria-invalid', 'true')
+        field?.setAttribute('aria-describedby', 'tune-status')
+        field?.focus()
+      }
+      return
+    }
+    for (const field of document.querySelectorAll('[aria-invalid="true"]')) field.removeAttribute('aria-invalid')
+    const notice = saveSettings(updated)
     saveVoiceName(safeStorage(), $<HTMLSelectElement>('#select-speech-voice').value)
-    setStatus('Settings saved')
+    setTuneStatus(notice || 'Interests and feed settings saved.')
+    document.dispatchEvent(new Event('nalgorithm:settings-saved'))
     // A feed that was waiting on setup now only waits for Refresh.
     if (!validateSettings(updated) && $('#feed-list').childElementCount === 0) showEmptyState(true, true)
 
     // Enable refresh button if settings look valid
     const btnRefresh = $<HTMLButtonElement>('#btn-refresh')
     btnRefresh.disabled = false
+    if (firstSetup) {
+      firstSetup = false
+      btnSave.textContent = 'Save interests and feed'
+      showTab('feed')
+      void onRefresh().catch((err) => setStatus((err as Error).message))
+    }
+  })
+
+  $('#btn-test-model').addEventListener('click', async () => {
+    const s = readFieldsToSettings()
+    const button = $<HTMLButtonElement>('#btn-test-model')
+    button.disabled = true
+    $('#model-catalog-status').textContent = 'Testing one small model request…'
+    try {
+      await chatCompletion({ apiBaseUrl: s.apiBaseUrl, apiKey: s.apiKey, model: s.model, timeoutMs: 15000 }, [{ role: 'user', content: 'Reply with OK only.' }])
+      $('#model-catalog-status').textContent = 'Model connection works. Save and rank your feed.'
+    } catch (err) {
+      $('#model-catalog-status').textContent = `${(err as Error).message}. Check the key/model. For local Ollama, allow this app origin in OLLAMA_ORIGINS and restart Ollama.`
+    } finally { button.disabled = false }
   })
 
   // Connect Nostr identity (NIP-07 extension or NIP-46 remote signer)
@@ -179,7 +229,7 @@ export function initUI(
   })
 
   // Enable refresh if settings look valid
-  if (settings.npub && settings.apiKey && settings.userPrompt) {
+  if (!validateSettings(settings)) {
     btnRefresh.disabled = false
   }
 
@@ -262,6 +312,11 @@ export function getFeedContainer(): HTMLElement {
  */
 export function readFieldsToSettings(): AppSettings {
   return {
+    learnFromLikes: $<HTMLInputElement>('#input-learn').checked,
+    rememberKey: $<HTMLInputElement>('#input-remember-key').checked,
+    feedOrder: $<HTMLSelectElement>('#select-feed-order').value === 'best' ? 'best' : 'new',
+    dataSaver: $<HTMLInputElement>('#input-data-saver').checked,
+    digestMinutes: Number($<HTMLSelectElement>('#select-digest-minutes').value),
     npub: $<HTMLInputElement>('#input-npub').value.trim(),
     relays: $<HTMLTextAreaElement>('#input-relays').value
       .split('\n')
@@ -275,14 +330,14 @@ export function readFieldsToSettings(): AppSettings {
     decisionModel: $<HTMLInputElement>('#input-decision-model').value.trim() || 'jev-latest',
     digestModel: $<HTMLInputElement>('#input-digest-model').value.trim(),
     learnerModel: $<HTMLInputElement>('#input-learner-model').value.trim(),
-    digestTopN: parseInt($<HTMLInputElement>('#input-digest-topn').value, 10) || 15,
+    digestTopN: Number($<HTMLInputElement>('#input-digest-topn').value),
     digestForSpeech: $<HTMLInputElement>('#input-digest-speech').checked,
     signerRelays: readSignerRelays(),
     userPrompt: $<HTMLTextAreaElement>('#input-user-prompt').value.trim(),
     learnedPrompt: $<HTMLTextAreaElement>('#input-learned-prompt').value,
-    hoursBack: parseInt($<HTMLInputElement>('#input-hours-back').value, 10) || 24,
-    batchSize: parseInt($<HTMLInputElement>('#input-batch-size').value, 10) || 20,
-    concurrency: Math.max(1, parseInt($<HTMLInputElement>('#input-concurrency').value, 10) || 1),
+    hoursBack: Number($<HTMLInputElement>('#input-hours-back').value),
+    batchSize: Number($<HTMLInputElement>('#input-batch-size').value),
+    concurrency: Number($<HTMLInputElement>('#input-concurrency').value),
     clientPreset: $<HTMLSelectElement>('#select-client').value as AppSettings['clientPreset'],
     clientCustomUrl: $<HTMLInputElement>('#input-client-custom').value.trim(),
     clientCustomProfileUrl: $<HTMLInputElement>('#input-client-custom-profile').value.trim(),
@@ -374,6 +429,11 @@ function readSignerRelays(): string[] {
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 function populateFields(settings: AppSettings): void {
+  $<HTMLInputElement>('#input-learn').checked = settings.learnFromLikes
+  $<HTMLInputElement>('#input-remember-key').checked = settings.rememberKey
+  $<HTMLSelectElement>('#select-feed-order').value = settings.feedOrder
+  $<HTMLInputElement>('#input-data-saver').checked = settings.dataSaver
+  $<HTMLSelectElement>('#select-digest-minutes').value = String(settings.digestMinutes)
   $<HTMLInputElement>('#input-npub').value = settings.npub
   $<HTMLTextAreaElement>('#input-relays').value = settings.relays.join('\n')
   $<HTMLSelectElement>('#select-provider').value = settings.provider

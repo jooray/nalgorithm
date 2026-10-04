@@ -24,6 +24,7 @@ import {
   type KeyValueStore,
 } from './audio-logic.js'
 import { estimateSeconds } from './digest-model.js'
+import { deviceStorage } from './storage.js'
 import { isSpeechSupported, speak, splitForSpeech, type SpeechSession } from './speech.js'
 
 export interface PlayerSource {
@@ -61,11 +62,7 @@ const BACK_SECONDS = 15
 const FORWARD_SECONDS = 30
 
 export function safeStorage(): KeyValueStore | null {
-  try {
-    return window.localStorage
-  } catch {
-    return null
-  }
+  return deviceStorage
 }
 
 export class DigestPlayer {

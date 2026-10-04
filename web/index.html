@@ -221,6 +221,7 @@
             <label for="input-user-prompt">Your words (the ranking rule)</label>
             <textarea id="input-user-prompt" rows="6" placeholder="I like cypherpunk culture, decentralized technology, Bitcoin, and thoughtful longform posts. I don't care about price speculation or GM posts."></textarea>
             <p id="input-user-prompt-count" class="field-hint count" aria-live="polite"></p>
+            <label class="check"><input type="checkbox" id="input-learn" checked><span>Learn from my likes<small>Off uses only your written interests. Previously learned taste is kept for re-enabling.</small></span></label>
             <label for="input-learned-prompt">Learned from your likes</label>
             <textarea id="input-learned-prompt" rows="4" readonly class="readonly-field" placeholder="Will be generated after the first run..."></textarea>
             <button id="btn-regenerate-learned" class="btn btn-small">Regenerate from likes</button>
@@ -262,11 +263,14 @@
             <label for="input-api-key">API key</label>
             <input type="password" id="input-api-key" placeholder="sk-..." spellcheck="false" autocomplete="off">
             <div class="model-catalog">
+              <button id="btn-test-model" class="btn btn-small" type="button">Test model connection</button>
               <button id="btn-load-models" class="btn btn-small" type="button">Load model list</button>
               <button id="btn-recommend-models" class="btn btn-small hidden" type="button">Use recommended</button>
               <span id="model-catalog-status" class="catalog-status"></span>
             </div>
             <datalist id="model-list"></datalist>
+            <p class="field-hint">The connection test makes one small request; your provider may charge for it.</p>
+            <label class="check"><input type="checkbox" id="input-remember-key" checked><span>Remember my API key on this device<small>Off keeps the key only while this page is open. Use this on shared devices.</small></span></label>
             <label for="input-model">Model (scoring)</label>
             <input type="text" id="input-model" list="model-list" placeholder="deepseek-v4-flash-0731" spellcheck="false" autocomplete="off">
             <p class="field-hint">Does the bulk of the work. Keep it cheap and fast.</p>
@@ -297,7 +301,7 @@
               </div>
               <div>
                 <label for="input-concurrency">Parallel calls</label>
-                <input type="number" id="input-concurrency" min="1" value="1" inputmode="numeric">
+                <input type="number" id="input-concurrency" min="1" max="10" value="1" inputmode="numeric">
               </div>
             </div>
             <p class="field-hint">How many scoring calls run at once. 1 is sequential; 5 is roughly five times faster on a cold cache. Keep it within what your provider's rate limits allow.</p>
@@ -406,6 +410,14 @@
 
         <!-- Both modes -->
         <div class="tune">
+          <section class="tune-section">
+            <h2>Reading and listening</h2>
+            <label for="select-feed-order">Feed order</label>
+            <select id="select-feed-order"><option value="new">New arrivals first</option><option value="best">Best relevance first</option></select>
+            <label class="check"><input type="checkbox" id="input-data-saver"><span>Tap to load remote media<small>Saves data and avoids contacting image hosts until you choose to load an image.</small></span></label>
+            <label for="select-digest-minutes">Target digest length</label>
+            <select id="select-digest-minutes"><option value="3">About 3 minutes</option><option value="6" selected>About 6 minutes</option><option value="10">About 10 minutes</option></select>
+          </section>
           <section class="tune-section">
             <h2>Open notes in</h2>
             <label for="select-client">Nostr client</label>
