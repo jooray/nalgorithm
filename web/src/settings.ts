@@ -175,7 +175,7 @@ export function loadSettings(): AppSettings {
     digestForSpeech: (getItem('digestForSpeech') ?? String(DEFAULTS.digestForSpeech)) === 'true',
     signerRelays: parseJsonArray(getItem('signerRelays')) ?? DEFAULTS.signerRelays,
     userPrompt: getItem('userPrompt') ?? DEFAULTS.userPrompt,
-    learnedPrompt: getItem('learnedPrompt') ?? DEFAULTS.learnedPrompt,
+    learnedPrompt: readLearnedPrompt(getItem('npub') ?? ''),
     hoursBack: parseInt(getItem('hoursBack') ?? '', 10) || DEFAULTS.hoursBack,
     batchSize: parseInt(getItem('batchSize') ?? '', 10) || DEFAULTS.batchSize,
     concurrency: parseInt(getItem('concurrency') ?? '', 10) || DEFAULTS.concurrency,
@@ -230,7 +230,6 @@ export function saveSettings(settings: AppSettings): string {
   setItem('digestForSpeech', String(settings.digestForSpeech))
   setItem('signerRelays', JSON.stringify(settings.signerRelays))
   setItem('userPrompt', settings.userPrompt)
-  setItem('learnedPrompt', settings.learnedPrompt)
   setItem('hoursBack', String(settings.hoursBack))
   setItem('batchSize', String(settings.batchSize))
   setItem('concurrency', String(settings.concurrency))
@@ -244,6 +243,12 @@ export function saveSettings(settings: AppSettings): string {
 }
 
 let sessionKey = ''
+function readLearnedPrompt(identity: string): string {
+  try {
+    const state = JSON.parse(localStorage.getItem(`nalgorithm_learned_v2_${pubkeyToHex(identity)}`) ?? 'null')
+    return typeof state?.prompt === 'string' ? state.prompt : ''
+  } catch { return '' }
+}
 export function saveProviderDraft(provider: string, fields: Pick<AppSettings, 'apiBaseUrl' | 'apiKey' | 'model' | 'digestModel' | 'learnerModel'>): void {
   const { apiKey: _key, ...safe } = fields
   setItem(`provider_${provider}`, JSON.stringify(safe))

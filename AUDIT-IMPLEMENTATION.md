@@ -18,7 +18,7 @@ Source audit: `AUDIT-GPT61.md`. Started 2026-10-05. No intermediate deployments.
 | Ranking context and unique digest selection | F01, F13 | Implemented; library regressions and web/server typechecks pass |
 | Validated setup, storage and provider configuration | F02, F03, F07, F17, F26, F35 | Core implementation done; draft persistence and section saves follow |
 | Visible recovery, truthful scores, permissions and accessibility | F04, F05, F06, F08, F18, F32, F39 | Implemented; automated checks pass, live rendering pending |
-| Incremental learning, bounded fetching and cleanup | F09, F10, F11 | Pending |
+| Incremental learning, bounded fetching and cleanup | F09, F10, F11 | Implemented; resource and incremental-learning regressions pass |
 | Shared pipeline/provider budget and durable jobs/delivery | F12, F14, F15, F41 | Pending |
 | Safe updates, drafts and navigation | F16, F33, F37 | Pending |
 | Offline/download audio and efficient playback | F19, F23, F24 | Pending |
@@ -65,3 +65,11 @@ Each group will record changes, tests, limitations and commit references. A find
 - Failed scores read “Not ranked yet” and sort behind genuine results. Permanent provider errors stop retries/batches; optional Authorization supports local models. Ranker rejects invalid chunk/concurrency bounds.
 - Show-notes tabs have Arrow/Home/End behavior and panel associations; named login dialog announces progress. Light focus, tertiary contrast, narrow action/menu layouts and explicit reduced-motion states corrected.
 - Verification: 201 combined library/web tests and web typecheck pass. No live WCAG certification is claimed.
+
+### Learning and relay resources
+
+- Native relay max-wait plus bounded worker pools/deadlines for content, embed and profile queries. Internally owned pools are destroyed; test-injected pools close all touched fallback/outbox relays.
+- Profiles enrich without holding up cached/scored content. Learning uses the previous taste immediately and runs independently, single-flight per identity, no more than hourly automatically.
+- BYOK and hosted share incremental learning with processed reaction IDs, reaction-time watermarks, overlap and a durable bounded-page catch-up cursor. Context changes cannot commit another reader's taste; learning-off does not use learned taste.
+- Manual Update learned taste uses the same incremental path and guaranteed teardown.
+- Full workspace build passes; 204 combined library/web tests pass. Server selection fixture now asserts best unique notes are selected before cutting, rather than preserving the old premature-cut bug.

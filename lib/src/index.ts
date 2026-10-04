@@ -8,6 +8,7 @@
 
 export { createFetcher, pubkeyToHex, parseProfileEvents } from './fetcher.js'
 export { fingerprint, rankingContext, contextualScoreKey } from './ranking-context.js'
+export { mapConcurrent } from './work-pool.js'
 export { sanitizeRelayUrl, isAcceptableRelayUrl } from './relay-url.js'
 export { collectPostPubkeys, extractReferencedPubkeys, MAX_PROFILE_PUBKEYS } from './pubkeys.js'
 export {
@@ -78,6 +79,7 @@ export type {
   FetchedPost,
   FetchPostsOptions,
   FetchLikesOptions,
+  FetchLikesResult,
   LikedPostContent,
   EmbeddedPost,
   PostType,

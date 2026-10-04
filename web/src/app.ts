@@ -67,9 +67,10 @@ import {
 } from './snapshot-logic.js'
 import { initDigestView, setDigests, setMakeStatus } from './digest-view.js'
 import { byokBackend, loadLocalDigests } from './byok-digest.js'
-import { rememberProfiles } from './profiles.js'
+import { rememberProfiles, knownProfiles } from './profiles.js'
 import { APP_VERSION } from './version-check.js'
 import { deviceStorage as localStorage } from './storage.js'
+import { learnIncrementally, activeLearningResult } from './learning.js'
 
 import { initVersionCheck, setUpdateBlocked } from './version-check.js'
 
@@ -385,6 +386,7 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
 
   // We keep the fetcher alive across both phases so relay connections are reused
   const fetcher = createFetcher({ relays: settings.relays })
+  let profileTask: Promise<void> = Promise.resolve()
 
   try {
     // ── Phase 1: fetch → score → display ───────────────────────────────
@@ -438,13 +440,13 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     // 3. Fetch profiles for all post authors (including embedded + referenced in content)
     progress(`Fetched ${posts.length} posts. Loading profiles...`)
     const allPubkeys = collectPostPubkeys(posts)
-    try {
-      currentProfiles = await fetcher.getProfiles(allPubkeys)
-      rememberProfiles(currentProfiles)
-    } catch (err) {
-      console.warn('Failed to fetch profiles:', err)
-      // Continue without profiles
-    }
+    currentProfiles = knownProfiles(allPubkeys)
+    profileTask = fetcher.getProfiles(allPubkeys).then((found) => {
+      rememberProfiles(found)
+      if (sigOf(loadSettings()) !== sigOf(settings)) return
+      for (const [pk, profile] of found) currentProfiles.set(pk, profile)
+      if (currentPosts.length && !quiet) renderCurrent(settings)
+    }).catch((err) => console.warn('Profile enrichment unavailable:', err))
 
     // 4. Score posts — use cache for previously scored, LLM only for new ones
     const existingLearnedPrompt = settings.learnFromLikes ? settings.learnedPrompt || undefined : undefined
@@ -529,8 +531,8 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     // ── Phase 2: background likes → re-rate ────────────────────────────
 
     // Fire and forget — runs in background, doesn't block UI
-    if (settings.learnFromLikes) void backgroundLearnAndRerate(fetcher, pubkeyHex, since, settings)
-    else fetcher.destroy()
+    void profileTask.finally(() => fetcher.destroy())
+    if (settings.learnFromLikes) void backgroundLearnAndRerate(createFetcher({ relays: settings.relays }), pubkeyHex, since, settings)
   } catch (err) {
     report(`Error: ${(err as Error).message}`)
     console.error('Feed error:', err)
@@ -557,42 +559,8 @@ async function backgroundLearnAndRerate(
   settings: ReturnType<typeof loadSettings>
 ): Promise<void> {
   try {
-    // 1. Fetch likes limited to the same time window
-    const likes = await fetcher.getLikes(pubkeyHex, {
-      limit: 200,
-      since,
-    })
-
-    fetcher.destroy()
-
-    if (likes.length === 0) {
-      console.log('[Nalgorithm] No likes in time window, skipping learn phase')
-      return
-    }
-
-    console.log(`[Nalgorithm] Found ${likes.length} likes in time window, summarizing...`)
-
-    // 2. Summarize preferences
-    const learner = createLearner({
-      apiBaseUrl: settings.apiBaseUrl,
-      apiKey: settings.apiKey,
-      model: settings.learnerModel.trim() || settings.model,
-    })
-
-    const newLearnedPrompt = await learner.summarizeLikes(likes)
-
-    if (!newLearnedPrompt) {
-      console.log('[Nalgorithm] Learner returned empty prompt')
-      return
-    }
-
-    // 3. Save the new learned prompt (no re-scoring)
-    const freshSettings = loadSettings()
-    freshSettings.learnedPrompt = newLearnedPrompt
-    saveSettings(freshSettings)
-    setLearnedPrompt(newLearnedPrompt)
-
-    console.log('[Nalgorithm] Learned prompt updated (will apply to next refresh)')
+    const prompt = await learnIncrementally(fetcher, settings)
+    if (prompt && activeLearningResult(settings)) setLearnedPrompt(prompt)
   } catch (err) {
     console.warn('[Nalgorithm] Background learn failed:', err)
     // Don't overwrite the main status — user already has their ranked feed
@@ -611,56 +579,17 @@ async function regenerateLearnedPrompt(): Promise<void> {
     setStatus(`Config error: ${error}`)
     return
   }
+  if (!settings.learnFromLikes) { setStatus('Enable Learn from my likes in Tune before updating learned taste.'); return }
 
   isRunning = true
   setRefreshEnabled(false)
 
   try {
-    let pubkeyHex: string
-    try {
-      pubkeyHex = pubkeyToHex(settings.npub)
-    } catch {
-      setStatus('Invalid npub or pubkey')
-      return
-    }
-
-    const since = Math.floor(Date.now() / 1000) - settings.hoursBack * 3600
-
     setStatusLoading('Fetching likes...')
     const fetcher = createFetcher({ relays: settings.relays })
-
-    const likes = await fetcher.getLikes(pubkeyHex, {
-      limit: 200,
-      since,
-    })
-
-    fetcher.destroy()
-
-    if (likes.length === 0) {
-      setStatus('No likes found in the time window')
-      return
-    }
-
-    setStatusLoading(`Found ${likes.length} liked posts. Summarizing preferences...`)
-
-    const learner = createLearner({
-      apiBaseUrl: settings.apiBaseUrl,
-      apiKey: settings.apiKey,
-      model: settings.learnerModel.trim() || settings.model,
-    })
-
-    const learnedPrompt = await learner.summarizeLikes(likes)
-
-    if (learnedPrompt) {
-      const updated = loadSettings()
-      updated.learnedPrompt = learnedPrompt
-      saveSettings(updated)
-      setLearnedPrompt(learnedPrompt)
-      setStatus('Learned prompt updated (will apply to next refresh)')
-    } else {
-      setStatus('Could not generate learned prompt (LLM error)')
-      return
-    }
+    const learnedPrompt = await learnIncrementally(fetcher, settings, true)
+    if (learnedPrompt && activeLearningResult(settings)) setLearnedPrompt(learnedPrompt)
+    setStatus(learnedPrompt ? 'Learned taste is up to date. It applies to future notes; unchanged likes cost no model call.' : 'No likes to learn from yet.')
   } catch (err) {
     setStatus(`Error: ${(err as Error).message}`)
     console.error('Regenerate error:', err)

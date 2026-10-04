@@ -54,7 +54,7 @@ test('a digest stores its ordered notes; the DM lists them after the spoken text
 
   const row = await db.get('SELECT notes FROM digests WHERE npub = ?', [NPUB])
   const stored = parseNotes(row.notes)
-  assert.deepEqual(stored.map((n) => n.id), [hex(2), hex(1)], 'same posts and order the digest was written from (the feed is cut at topN, then sorted)')
+  assert.deepEqual(stored.map((n) => n.id), [hex(2), hex(3)], 'unique eligible posts are ranked before the topN cut, matching the writer input')
   assert.equal(stored[0].reason, 'about bitcoin'); assert.equal(stored[0].kind, 1)
 
   assert.deepEqual(calls.synth, ['Good morning, nostrich! Spoken text.'], 'speech input is the spoken text only')

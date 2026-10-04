@@ -18,6 +18,7 @@ export type FeedRunner = (npub: string, settings: UserSettings, store: PipelineS
 
 /** Cap on posts fetched per run, so a huge follow list cannot run up cost. */
 export const MAX_POSTS = 500
+const learning = new Map<string, Promise<unknown>>()
 
 /**
  * Profiles for everyone the feed shows: authors, the original authors inside
@@ -37,6 +38,7 @@ export async function loadFeedProfiles(
 export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?: Db): FeedRunner {
   return async (npub, settings, store) => {
     const fetcher = createFetcher({ relays: config.relays })
+    let enrichment: Promise<unknown> = Promise.resolve()
     try {
       const follows = await fetcher.getFollows(npub)
       if (follows.length === 0) return { posts: [], profiles: {}, fetched: 0 }
@@ -44,23 +46,19 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
       const posts = await fetcher.getPosts(follows, { hoursBack: settings.hoursBack, maxPosts: MAX_POSTS })
       if (posts.length === 0) return { posts: [], profiles: {}, fetched: 0 }
 
-      const profiles = await loadFeedProfiles(fetcher, posts, undefined, db)
+      const profiles = new Map<string, ProfileData>()
+      enrichment = loadFeedProfiles(fetcher, posts, undefined, db).then((found) => {
+        for (const [pk, profile] of found) profiles.set(pk, profile)
+      }).catch((err) => log.warn(`profile enrichment unavailable: ${(err as Error).message}`))
 
-      let learnedPrompt: string | undefined
-      if (settings.learnFromLikes) {
-        learnedPrompt = await refreshLearnedPrompt({
-          fetcher,
-          store,
-          pubkeyHex: npub,
-          log,
-          llm: {
-            apiBaseUrl: config.venice.apiBaseUrl,
-            apiKey: config.venice.apiKey,
-            model: config.venice.learnerModel,
-          },
-        })
-      } else {
-        learnedPrompt = undefined
+      const learned = settings.learnFromLikes ? await store.getLearned() : null
+      const learnedPrompt = learned?.prompt
+      if (settings.learnFromLikes && !learning.has(npub) && (!learned || Date.now() - Date.parse(learned.updatedAt) >= 60 * 60_000)) {
+        const learnerFetcher = createFetcher({ relays: config.relays })
+        const work = refreshLearnedPrompt({ fetcher: learnerFetcher, store, pubkeyHex: npub, log,
+          llm: { apiBaseUrl: config.venice.apiBaseUrl, apiKey: config.venice.apiKey, model: config.venice.learnerModel },
+        }).catch((err) => log.warn(`learning failed: ${(err as Error).message}`)).finally(() => { learnerFetcher.destroy(); learning.delete(npub) })
+        learning.set(npub, work)
       }
 
       const ranker = createRanker({
@@ -85,7 +83,7 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
         learnedPrompt,
       }
     } finally {
-      fetcher.destroy()
+      void enrichment.finally(() => fetcher.destroy())
     }
   }
 }

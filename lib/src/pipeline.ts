@@ -41,6 +41,9 @@ export interface CachedScore {
 }
 
 export interface LearnedState {
+  backfillUntil?: number
+  latestReactionTimestamp?: number
+  processedReactionIds?: string[]
   prompt: string
   updatedAt: string
   /** Unix timestamp (seconds) of the most recent like that was processed */
@@ -191,18 +194,30 @@ export async function refreshLearnedPrompt(opts: RefreshLearnedOptions): Promise
     learnedPrompt = cached.prompt
   }
 
-  const sinceTimestamp = cached?.lastLikeTimestamp ? cached.lastLikeTimestamp + 1 : undefined
+  const sinceTimestamp = cached?.lastLikeTimestamp ? Math.max(0, cached.lastLikeTimestamp - 300) : undefined
+  const fetchedAt = Math.floor(now() / 1000)
   log.info(
     sinceTimestamp
       ? `Fetching likes since ${new Date(sinceTimestamp * 1000).toISOString()}...`
       : 'Fetching likes (first run)...',
   )
-  const likes = await fetcher.getLikes(pubkeyHex, {
+  const fetchedLikes = await fetcher.getLikes(pubkeyHex, {
     limit: 200,
-    ...(sinceTimestamp ? { since: sinceTimestamp } : {}),
+    ...(sinceTimestamp !== undefined ? { since: sinceTimestamp } : {}),
+    ...(cached?.backfillUntil !== undefined ? { until: cached.backfillUntil } : {}),
   })
+  const processed = new Set(cached?.processedReactionIds ?? [])
+  const likes = fetchedLikes.filter((like) => !processed.has(like.reactionId ?? like.id))
+  const fullPage = (fetchedLikes.reactionCount ?? fetchedLikes.length) >= 200
+  const latestReactionTimestamp = Math.max(cached?.latestReactionTimestamp ?? cached?.lastLikeTimestamp ?? 0, ...fetchedLikes.map((l) => l.reactedAt ?? fetchedAt))
+  const checkpoint = {
+    lastLikeTimestamp: fullPage ? cached?.lastLikeTimestamp : latestReactionTimestamp,
+    ...(fullPage && fetchedLikes.nextUntil !== undefined ? { backfillUntil: fetchedLikes.nextUntil } : {}),
+    latestReactionTimestamp,
+  }
 
   if (likes.length === 0) {
+    if (cached && (fullPage || cached.backfillUntil !== undefined)) await store.putLearned({ ...cached, backfillUntil: undefined, ...checkpoint })
     log.info('No new likes since last run, keeping existing learned prompt')
     return learnedPrompt
   }
@@ -222,7 +237,10 @@ export async function refreshLearnedPrompt(opts: RefreshLearnedOptions): Promise
       await store.putLearned({
         prompt: learnedPrompt,
         updatedAt: new Date(now()).toISOString(),
-        lastLikeTimestamp: Math.floor(now() / 1000),
+        // Never jump over likes created while the model was running. Full pages
+        // retain the previous watermark until coverage can be checked again.
+        ...checkpoint,
+        processedReactionIds: [...processed, ...likes.map((l) => l.reactionId ?? l.id)].slice(-2000),
       })
     } else {
       log.warn('LLM returned empty learned prompt, skipping save')

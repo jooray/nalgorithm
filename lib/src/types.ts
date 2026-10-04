@@ -167,6 +167,8 @@ export interface FetchPostsOptions {
 }
 
 export interface FetchLikesOptions {
+  /** Pagination boundary for catch-up; excludes later reactions. */
+  until?: number
   /** Maximum number of likes to fetch (default: 200) */
   limit?: number
   /** Only include likes created after this Unix timestamp (seconds) */
@@ -243,12 +245,18 @@ export interface DebugEntry {
 // ─── Learner types ───────────────────────────────────────────────────────────
 
 export interface LikedPostContent {
+  reactionId?: string
+  reactedAt?: number
   /** Event ID of the liked post */
   id: string
   /** Text content of the liked post */
   content: string
   /** Author pubkey of the liked post */
   author: string
+}
+export interface FetchLikesResult extends Array<LikedPostContent> {
+  reactionCount?: number
+  nextUntil?: number
 }
 
 // ─── Profile types ───────────────────────────────────────────────────────────
@@ -333,7 +341,7 @@ export interface Fetcher {
   /** Fetch posts from followed users, classified and with resolved embeds */
   getPosts(follows: string[], options?: FetchPostsOptions): Promise<FetchedPost[]>
   /** Fetch the user's liked posts' content */
-  getLikes(pubkey: string, options?: FetchLikesOptions): Promise<LikedPostContent[]>
+  getLikes(pubkey: string, options?: FetchLikesOptions): Promise<FetchLikesResult>
   /** Fetch profile metadata (kind 0) for a list of pubkeys */
   getProfiles(pubkeys: string[]): Promise<Map<string, ProfileData>>
   /** Close all relay connections */

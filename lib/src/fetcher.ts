@@ -14,6 +14,7 @@ import * as nip19 from 'nostr-tools/nip19'
 import * as nip10 from 'nostr-tools/nip10'
 import type { Event as NostrEvent } from 'nostr-tools/pure'
 import { sanitizeRelayUrl } from './relay-url.js'
+import { mapConcurrent } from './work-pool.js'
 
 import type {
   FetcherConfig,
@@ -22,6 +23,7 @@ import type {
   FetchPostsOptions,
   FetchLikesOptions,
   LikedPostContent,
+  FetchLikesResult,
   EmbeddedPost,
   ProfileData,
 } from './types.js'
@@ -32,7 +34,7 @@ const DEFAULT_LIKES_LIMIT = 200
 // Max pubkeys per relay filter to avoid relay rejections
 const FILTER_AUTHOR_CHUNK = 200
 // Timeout for relay queries (ms)
-const QUERY_TIMEOUT = 30_000
+const QUERY_TIMEOUT = 8_000
 // Public relays that index kind 0 widely; asked only for pubkeys nobody else knew.
 const DEFAULT_PROFILE_RELAYS = ['wss://purplepag.es', 'wss://relay.damus.io']
 // Indexers are flaky with big author filters; small batches answer reliably.
@@ -181,7 +183,7 @@ async function queryWithTimeout(
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
-      pool.querySync(relays, filter as Parameters<SimplePool['querySync']>[1]),
+      pool.querySync(relays, filter as Parameters<SimplePool['querySync']>[1], { maxWait: timeout }),
       new Promise<NostrEvent[]>((resolve) => {
         timer = setTimeout(() => resolve([]), timeout)
       }),
@@ -209,6 +211,13 @@ export function createFetcher(config: FetcherConfig): Fetcher {
   const pool = (config.pool ?? new SimplePool()) as SimplePool
   const { relays } = config
   const fallbackRelays = config.profileFallbackRelays ?? DEFAULT_PROFILE_RELAYS
+  const opened = new Set(relays)
+  let destroyed = false
+  const query = (urls: string[], filter: Record<string, unknown>, timeout = QUERY_TIMEOUT): Promise<NostrEvent[]> => {
+    if (destroyed || timeout <= 0) return Promise.resolve([])
+    urls.forEach((url) => opened.add(url))
+    return queryWithTimeout(pool, urls, filter, timeout)
+  }
 
   async function getFollows(pubkey: string): Promise<string[]> {
     const hex = pubkeyToHex(pubkey)
@@ -216,7 +225,7 @@ export function createFetcher(config: FetcherConfig): Fetcher {
     const event = await pool.get(relays, {
       kinds: [3],
       authors: [hex],
-    })
+    }, { maxWait: QUERY_TIMEOUT })
 
     if (!event) return []
 
@@ -239,15 +248,16 @@ export function createFetcher(config: FetcherConfig): Fetcher {
     const authorChunks = chunk(follows, FILTER_AUTHOR_CHUNK)
     const allEvents: NostrEvent[] = []
 
-    for (const authorBatch of authorChunks) {
-      const events = await queryWithTimeout(pool, relays, {
+    const fetchDeadline = Date.now() + 30_000
+    await mapConcurrent(authorChunks, 3, async (authorBatch) => {
+      const events = await query(relays, {
         kinds: [1, 6],
         authors: authorBatch,
         since,
         limit: maxPosts,
-      })
+      }, Math.min(QUERY_TIMEOUT, Math.max(1, fetchDeadline - Date.now())))
       allEvents.push(...events)
-    }
+    }, fetchDeadline)
 
     // Deduplicate by event ID
     const seen = new Set<string>()
@@ -261,7 +271,9 @@ export function createFetcher(config: FetcherConfig): Fetcher {
     const results: FetchedPost[] = []
     const idsToResolve: Array<{ eventId: string; forPostIndex: number; field: 'quotedPost' | 'originalPost' }> = []
 
-    for (const event of unique) {
+    const candidates = unique.filter((event) => event.kind === 6 || (event.kind === 1 && !isReply(event)))
+      .sort((a, b) => b.created_at - a.created_at).slice(0, maxPosts)
+    for (const event of candidates) {
       if (event.kind === 6) {
         // Boost/repost
         const originalFromContent = parseRepostContent(event)
@@ -325,10 +337,11 @@ export function createFetcher(config: FetcherConfig): Fetcher {
       const idChunks = chunk(uniqueIds, 50)
       const resolvedMap = new Map<string, EmbeddedPost>()
 
-      for (const idBatch of idChunks) {
-        const events = await queryWithTimeout(pool, relays, {
+      const embedDeadline = Date.now() + 12_000
+      await mapConcurrent(idChunks, 3, async (idBatch) => {
+        const events = await query(relays, {
           ids: idBatch,
-        })
+        }, Math.min(QUERY_TIMEOUT, Math.max(1, embedDeadline - Date.now())))
         for (const e of events) {
           resolvedMap.set(e.id, {
             id: e.id,
@@ -336,7 +349,7 @@ export function createFetcher(config: FetcherConfig): Fetcher {
             content: e.content,
           })
         }
-      }
+      }, embedDeadline)
 
       // Attach resolved posts
       for (const resolve of idsToResolve) {
@@ -364,7 +377,7 @@ export function createFetcher(config: FetcherConfig): Fetcher {
   async function getLikes(
     pubkey: string,
     options: FetchLikesOptions = {}
-  ): Promise<LikedPostContent[]> {
+  ): Promise<FetchLikesResult> {
     const hex = pubkeyToHex(pubkey)
     const limit = options.limit ?? DEFAULT_LIKES_LIMIT
 
@@ -377,7 +390,9 @@ export function createFetcher(config: FetcherConfig): Fetcher {
     if (options.since != null) {
       filter.since = options.since
     }
-    const reactions = await queryWithTimeout(pool, relays, filter)
+    if (options.until != null) filter.until = options.until
+    const reactions = await query(relays, filter)
+    const page = { reactionCount: reactions.length, nextUntil: reactions.length ? Math.min(...reactions.map((r) => r.created_at)) - 1 : undefined }
 
     // Extract liked event IDs (only positive reactions)
     const likedEventIds: string[] = []
@@ -388,7 +403,7 @@ export function createFetcher(config: FetcherConfig): Fetcher {
       if (eTag?.[1]) likedEventIds.push(eTag[1])
     }
 
-    if (likedEventIds.length === 0) return []
+    if (likedEventIds.length === 0) return Object.assign([], page)
 
     // Fetch the liked posts
     const uniqueIds = [...new Set(likedEventIds)]
@@ -396,7 +411,7 @@ export function createFetcher(config: FetcherConfig): Fetcher {
     const likedPosts: LikedPostContent[] = []
 
     for (const idBatch of idChunks) {
-      const events = await queryWithTimeout(pool, relays, {
+        const events = await query(relays, {
         ids: idBatch,
       })
       for (const e of events) {
@@ -406,12 +421,14 @@ export function createFetcher(config: FetcherConfig): Fetcher {
             id: e.id,
             author: e.pubkey,
             content: e.content,
+            reactionId: reactions.find((r) => r.tags.some((t) => t[0] === 'e' && t[1] === e.id))?.id,
+            reactedAt: reactions.find((r) => r.tags.some((t) => t[0] === 'e' && t[1] === e.id))?.created_at,
           })
         }
       }
     }
 
-    return likedPosts
+    return Object.assign(likedPosts, page)
   }
 
   async function getProfiles(pubkeys: string[]): Promise<Map<string, ProfileData>> {
@@ -419,22 +436,24 @@ export function createFetcher(config: FetcherConfig): Fetcher {
     if (pubkeys.length === 0) return profiles
 
     const uniquePubkeys = [...new Set(pubkeys)]
+    const profileDeadline = Date.now() + 15_000
 
     // One failed chunk must not lose the profiles the others found.
     async function fetchInto(relayList: string[], wanted: string[], size = FILTER_AUTHOR_CHUNK, timeout = QUERY_TIMEOUT): Promise<void> {
-      for (const batch of chunk(wanted, size)) {
+      await mapConcurrent(chunk(wanted, size), 3, async (batch) => {
+        if (destroyed || Date.now() >= profileDeadline) return
         try {
-          const events = await queryWithTimeout(pool, relayList, { kinds: [0], authors: batch }, timeout)
+          const events = await query(relayList, { kinds: [0], authors: batch }, Math.min(timeout, Math.max(1, profileDeadline - Date.now())))
           for (const [pubkey, profile] of parseProfileEvents(events)) profiles.set(pubkey, profile)
         } catch {
           // Relay error: leave these unresolved, the fallback pass may cover them.
         }
-      }
+      }, profileDeadline)
     }
 
     async function outboxPass(missing: string[], indexers: string[]): Promise<void> {
       if (missing.length === 0 || indexers.length === 0) return
-      const deadline = Date.now() + OUTBOX_BUDGET_MS
+      const deadline = Math.min(profileDeadline, Date.now() + OUTBOX_BUDGET_MS)
       const left = () => Math.max(0, deadline - Date.now())
 
       // kind 10002 from the indexers, in small batches.
@@ -442,7 +461,7 @@ export function createFetcher(config: FetcherConfig): Fetcher {
       for (const batch of chunk(missing, PROFILE_RETRY_CHUNK)) {
         if (left() === 0) return
         try {
-          const events = await queryWithTimeout(pool, indexers, { kinds: [10002], authors: batch }, Math.min(OUTBOX_QUERY_TIMEOUT, left()))
+          const events = await query(indexers, { kinds: [10002], authors: batch }, Math.min(OUTBOX_QUERY_TIMEOUT, left()))
           for (const e of events) {
             if (e.kind !== 10002 || !batch.includes(e.pubkey)) continue
             const prev = newestList.get(e.pubkey)
@@ -505,7 +524,9 @@ export function createFetcher(config: FetcherConfig): Fetcher {
   }
 
   function destroy(): void {
-    pool.close(relays)
+    destroyed = true
+    if (!config.pool) pool.destroy()
+    else pool.close([...opened])
   }
 
   return { getFollows, getPosts, getLikes, getProfiles, destroy }

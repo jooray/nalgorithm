@@ -150,6 +150,7 @@ async function migrate(db: Db): Promise<void> {
   await addColumn(db, 'digests', 'notes', 'TEXT NULL')
   // Exact length of the audio, measured from its frames. Older digests have none.
   await addColumn(db, 'digests', 'duration_s', `${ddl.real(db.dialect)} NULL`)
+  await addColumn(db, 'learned', 'processed_reactions', 'TEXT NULL')
 }
 
 const CHUNK = 500
@@ -164,21 +165,29 @@ export const SCORE_TTL_SECONDS = 30 * 86_400
 export function createStore(db: Db, npub: string, now: () => number = () => Math.floor(Date.now() / 1000)): PipelineStore {
   return {
     async getLearned() {
-      const row = await db.get<{ prompt: string; updated_at: string; last_like_ts: number | null }>(
-        'SELECT prompt, updated_at, last_like_ts FROM learned WHERE npub = ?',
+      const row = await db.get<{ prompt: string; updated_at: string; last_like_ts: number | null; processed_reactions?: string | null }>(
+        'SELECT prompt, updated_at, last_like_ts, processed_reactions FROM learned WHERE npub = ?',
         [npub],
       )
       if (!row) return null
       const state: LearnedState = { prompt: row.prompt, updatedAt: row.updated_at }
       if (row.last_like_ts !== null) state.lastLikeTimestamp = Number(row.last_like_ts)
+      if (row.processed_reactions) {
+        try {
+          const parsed = JSON.parse(row.processed_reactions)
+          if (Array.isArray(parsed)) state.processedReactionIds = parsed
+          else { state.processedReactionIds = parsed.ids; state.backfillUntil = parsed.until; state.latestReactionTimestamp = parsed.latest }
+        } catch { /* old/corrupt state remains usable */ }
+      }
       return state
     },
     async putLearned(state) {
-      await db.run(upsert(db, 'learned', ['npub', 'prompt', 'updated_at', 'last_like_ts'], ['npub'], ['prompt', 'updated_at', 'last_like_ts']), [
+      await db.run(upsert(db, 'learned', ['npub', 'prompt', 'updated_at', 'last_like_ts', 'processed_reactions'], ['npub'], ['prompt', 'updated_at', 'last_like_ts', 'processed_reactions']), [
         npub,
         state.prompt,
         state.updatedAt,
         state.lastLikeTimestamp ?? null,
+        state.processedReactionIds ? JSON.stringify({ ids: state.processedReactionIds, until: state.backfillUntil, latest: state.latestReactionTimestamp }) : null,
       ])
     },
     async getScores(keys) {
