@@ -42,6 +42,7 @@ export interface ServerConfig {
     /** Tried once if the digest model fails. */
     digestFallbackModel: string
     humanizerModel: string
+    humanizerEnabled: boolean
     learnerModel: string
     ttsModel: string
     ttsVoice: string
@@ -104,6 +105,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       digestModel: env.DIGEST_MODEL ?? 'deepseek-v4-1-flash',
       digestFallbackModel: env.DIGEST_FALLBACK_MODEL ?? 'claude-sonnet-5-5',
       humanizerModel: env.HUMANIZER_MODEL ?? 'deepseek-v4-1-flash',
+      humanizerEnabled: env.HUMANIZER_ENABLED !== 'false',
       learnerModel: env.LEARNER_MODEL ?? 'deepseek-v4-1-flash',
       ttsModel: env.TTS_MODEL ?? 'tts-kokoro',
       ttsVoice: env.TTS_VOICE ?? 'af_bella',

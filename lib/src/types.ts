@@ -20,6 +20,7 @@ export interface NalgorithmConfig {
 }
 
 export interface FetcherConfig {
+  signal?: AbortSignal
   /** Relay WebSocket URLs */
   relays: string[]
   /**
@@ -38,6 +39,7 @@ export interface FetcherConfig {
 }
 
 export interface RankerConfig {
+  signal?: AbortSignal
   /** OpenAI-compatible API base URL */
   apiBaseUrl: string
   /** API key */
@@ -289,6 +291,7 @@ export interface ChatMessage {
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'max'
 
 export interface LLMConfig {
+  signal?: AbortSignal
   apiBaseUrl: string
   apiKey: string
   model: string
@@ -312,6 +315,7 @@ export interface LLMConfig {
 export type TTSFormat = 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm'
 
 export interface TTSConfig {
+  signal?: AbortSignal
   /** OpenAI-compatible API base URL (e.g. "https://api.venice.ai/api/v1") */
   apiBaseUrl: string
   /** API key for the TTS endpoint */

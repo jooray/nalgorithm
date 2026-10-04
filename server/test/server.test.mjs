@@ -609,7 +609,7 @@ test('digest slot: a stale claim can be taken over, a failed run keeps the old d
   const db = await freshDb()
   const n = 'a'.repeat(64)
   const first = await claimDigestJob(db, n, T0)
-  assert.deepEqual(first, { claimed: true, startedAt: T0 })
+  assert.equal(first.claimed, true); assert.equal(first.startedAt, T0); assert.equal(first.owner.length, 32)
   assert.deepEqual(await claimDigestJob(db, n, T0 + 5), { claimed: false, startedAt: T0 })
   await finishDigestJob(db, n, T0, 'sent', T0 + 60)
   let st = await digestJobStatus(db, n, T0 + 61)
@@ -626,8 +626,9 @@ test('digest slot: a stale claim can be taken over, a failed run keeps the old d
   // A late finish from the dead run must not free the new claim.
   await finishDigestJob(db, n, T0 + 200, 'sent', T0 + 900)
   assert.equal((await digestJobStatus(db, n, T0 + 901)).running, true)
-  assert.equal(await interruptRunningJobs(db, T0 + 1000), 1)
-  st = await digestJobStatus(db, n, T0 + 1001)
+  assert.equal(await interruptRunningJobs(db, T0 + 1000), 0, 'startup must preserve another process\'s fresh lease')
+  assert.equal(await interruptRunningJobs(db, T0 + 1500), 1)
+  st = await digestJobStatus(db, n, T0 + 1501)
   assert.deepEqual([st.running, st.lastStatus], [false, 'interrupted'])
 })
 

@@ -578,6 +578,7 @@ export function createRanker(config: RankerConfig): Ranker {
     apiKey: config.apiKey,
     model: config.model,
     reasoningEffort: config.reasoningEffort,
+    signal: config.signal,
   }
 
   async function scoreBatchDecision(
@@ -754,6 +755,7 @@ export function createRanker(config: RankerConfig): Ranker {
 
     const worker = async (): Promise<void> => {
       for (;;) {
+        config.signal?.throwIfAborted()
         const index = nextBatch++
         if (index >= batches.length) return
 

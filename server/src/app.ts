@@ -11,6 +11,7 @@ import { parseNotes } from './digest-notes.js'
 import { ShuttingDown } from './drain.js'
 import type { JobTracker } from './drain.js'
 import type { FeedRunner } from './feed.js'
+import { FeedBusy } from './feed.js'
 import { PreviewError } from './preview/service.js'
 import type { PreviewService } from './preview/service.js'
 import { ScheduleError, applySchedulePatch, loadSchedule, saveSchedule } from './schedule.js'
@@ -351,7 +352,9 @@ export function createApp(deps: AppDeps) {
       }
 
       if (running.has(npub)) throw new HttpError(429, 'a feed run is already in progress', { code: 'in_progress' })
+      if (running.size >= 12) throw new HttpError(503, 'ranking is busy, try again shortly', { code: 'busy' })
       const endJob = deps.jobs?.begin() ?? (() => {})
+      running.add(npub)
       try {
         // One unit per real run, as before. Served-from-snapshot answers above
         // never reach this line, so they are free.
@@ -361,9 +364,8 @@ export function createApp(deps: AppDeps) {
           throw new HttpError(429, 'daily limit reached, try again tomorrow', { code: 'daily_cap' })
         }
 
-        running.add(npub)
         try {
-          const result = await deps.feed(npub, settings, createStore(db, npub, nowSec))
+          const result = await deps.feed(npub, settings, createStore(db, npub, nowSec), AbortSignal.timeout(180_000), force)
           const posts = result.posts.slice(0, limit).map(publicPost)
           // Authors plus anyone mentioned in the text, so mentions render as names.
           const authors = new Set(collectPostPubkeys(result.posts.slice(0, limit), Infinity))
@@ -376,6 +378,7 @@ export function createApp(deps: AppDeps) {
           running.delete(npub)
         }
       } finally {
+        running.delete(npub)
         endJob()
       }
     }
@@ -389,6 +392,7 @@ export function createApp(deps: AppDeps) {
     } catch (err) {
       if (err instanceof HttpError) return send(res, err.status, { error: err.message, ...err.extra })
       if (err instanceof DigestRunning) return send(res, 409, { error: 'a digest is already being made for you', code: 'digest_running', startedAt: err.startedAt })
+      if (err instanceof FeedBusy) return send(res, 429, { error: err.message, code: 'in_progress' })
       if (err instanceof ShuttingDown) return send(res, 503, { error: err.message, code: 'shutting_down' })
       if (err instanceof PreviewError) return send(res, err.status, { error: err.message })
       if (err instanceof BillingUnavailable) return send(res, 503, { error: 'billing is unavailable, try again shortly', code: 'billing_unavailable' })

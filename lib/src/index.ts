@@ -9,6 +9,7 @@
 export { createFetcher, pubkeyToHex, parseProfileEvents } from './fetcher.js'
 export { fingerprint, rankingContext, contextualScoreKey } from './ranking-context.js'
 export { mapConcurrent } from './work-pool.js'
+export { configureProviderBudget, withProviderSlot, providerBudgetStats } from './provider-budget.js'
 export { sanitizeRelayUrl, isAcceptableRelayUrl } from './relay-url.js'
 export { collectPostPubkeys, extractReferencedPubkeys, MAX_PROFILE_PUBKEYS } from './pubkeys.js'
 export {

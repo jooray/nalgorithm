@@ -32,14 +32,14 @@ async function relay(mode = 'ok') {
 }
 
 /** Sender whose recipient's DM relays and the bot's own inbox are mock relays. */
-async function setup({ recipientMode = 'ok', selfMode = 'ok' } = {}) {
+async function setup({ recipientMode = 'ok', selfMode = 'ok', outbox } = {}) {
   const theirs = await relay(recipientMode)
   const mine = await relay(selfMode)
   const indexer = await relay()
   const { finalizeEvent } = await import('nostr-tools/pure')
   indexer.seed(finalizeEvent({ kind: 10050, created_at: 100, tags: [['relay', theirs.url]], content: '' }, peerSk))
   const resolver = createRelayResolver({ pool, indexers: [indexer.url], fallback: [mine.url], allowInsecureRelays: true })
-  const sender = createDmSender({ pool, resolver, secretKey: botSk, selfRelays: [mine.url], log, publish: fast })
+  const sender = createDmSender({ pool, resolver, secretKey: botSk, selfRelays: [mine.url], log, publish: fast, outbox })
   return { theirs, mine, sender }
 }
 
@@ -87,6 +87,19 @@ test('nip17: a rejected recipient copy is reported as not delivered', async () =
   const [res] = await sender.send(peerPk, 'nope')
   assert.equal(res.delivered, false)
   assert.equal(Object.values(res.relays)[0].status, 'rejected')
+})
+
+test('durable outbox retries the same signed wrap and skips delivered parts', async () => {
+  const stored = new Map()
+  const outbox = { async get(key) { return stored.get(key) ?? null }, async put(key, _recipient, value) { stored.set(key, value) } }
+  const { theirs, sender } = await setup({ recipientMode: 'reject', outbox })
+  const [failed] = await sender.send(peerPk, 'persisted message', { idempotencyKey: 'digest:1' })
+  theirs.ackMode = 'ok'
+  const [sent] = await sender.send(peerPk, 'persisted message', { idempotencyKey: 'digest:1' })
+  assert.equal(sent.eventId, failed.eventId); assert.equal(sent.rumorId, failed.rumorId); assert.equal(sent.delivered, true)
+  const before = theirs.events.length
+  await sender.send(peerPk, 'persisted message', { idempotencyKey: 'digest:1' })
+  assert.equal(theirs.events.length, before)
 })
 
 test('extra relays are used in addition to the resolved ones', async () => {

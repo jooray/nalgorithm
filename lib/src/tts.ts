@@ -13,6 +13,7 @@
 
 import type { TTSConfig, TTSFormat } from './types.js'
 import { providerHeaders, ProviderError } from './llm.js'
+import { withProviderSlot } from './provider-budget.js'
 
 /** Provider-side cap on a single `/audio/speech` request. Venice enforces 4096. */
 export const DEFAULT_TTS_MAX_CHARS = 4096
@@ -194,7 +195,7 @@ async function synthesizeChunk(config: TTSConfig, text: string, format: TTSForma
       headers: providerHeaders(config.apiKey),
       body: JSON.stringify(body),
       // Synthesis is slower than a chat call, but must still not hang forever.
-      signal: AbortSignal.timeout(config.timeoutMs ?? 180_000),
+      signal: config.signal ? AbortSignal.any([config.signal, AbortSignal.timeout(config.timeoutMs ?? 180_000)]) : AbortSignal.timeout(config.timeoutMs ?? 180_000),
     })
   } catch (err) {
     if ((err as Error).name === 'TimeoutError' || (err as Error).name === 'AbortError') {
@@ -268,8 +269,9 @@ export async function synthesizeSpeech(
       let lastErr: Error | undefined
       let audio: Uint8Array | undefined
       for (let attempt = 1; attempt <= maxAttempts && !failure; attempt++) {
+        config.signal?.throwIfAborted()
         try {
-          audio = await synthesizeChunk(config, chunks[i], format)
+          audio = await withProviderSlot(config, () => synthesizeChunk(config, chunks[i], format))
           break
         } catch (err) {
           lastErr = err as Error

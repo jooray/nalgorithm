@@ -1,4 +1,5 @@
-import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
+import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools/pure'
+import { createHash } from 'node:crypto'
 import type { AbstractSimplePool } from 'nostr-tools/pool'
 import * as nip04 from 'nostr-tools/nip04'
 import { publishToRelays, type PublishOptions } from './publish.js'
@@ -25,6 +26,7 @@ export class DmSendError extends Error {
 }
 
 export interface DmSendOptions {
+  idempotencyKey?: string
   format?: DmProtocol
   /** Relays where this peer's messages were seen arriving; appended to the resolved targets. */
   extraRelays?: string[]
@@ -55,6 +57,7 @@ export interface DmSender {
 }
 
 export interface DmSenderOptions {
+  outbox?: { get(key: string): Promise<StoredDm | null>; put(key: string, recipient: string, value: StoredDm): Promise<void> }
   pool: Pick<AbstractSimplePool, 'ensureRelay'>
   resolver: RelayResolver
   secretKey: Uint8Array
@@ -64,6 +67,7 @@ export interface DmSenderOptions {
   publish?: PublishOptions
   wrap?: WrapOptions
 }
+export interface StoredDm { recipient: Event; self?: Event; rumorId?: string; result?: DmSendResult }
 
 /** Cut at the last boundary that keeps a part under `max`: blank line, line, space, then hard. */
 function cutPoint(text: string, max: number): number {
@@ -93,13 +97,15 @@ export function createDmSender(opts: DmSenderOptions): DmSender {
   const log = opts.log ?? silentLogger
   const botPubkey = getPublicKey(secretKey)
 
-  async function sendPart(recipient: string, text: string, format: DmProtocol, extraRelays: string[], createdAt: number): Promise<DmSendResult> {
+  async function sendPart(recipient: string, text: string, format: DmProtocol, extraRelays: string[], createdAt: number, outboxKey?: string): Promise<DmSendResult> {
     const { relays, tier } = await resolver.resolve(recipient, extraRelays)
+    const saved = outboxKey ? await opts.outbox?.get(outboxKey) : null
+    if (saved?.result?.delivered) return saved.result
 
     if (format === 'nip04') {
       // Legacy path: a single kind 4 event. It is authored by the bot, so relays
       // keep it as sent history and no separate self-copy is needed.
-      const event = finalizeEvent(
+      const event = saved?.recipient ?? finalizeEvent(
         {
           kind: KIND_NIP04,
           created_at: createdAt,
@@ -108,14 +114,19 @@ export function createDmSender(opts: DmSenderOptions): DmSender {
         },
         secretKey,
       )
+      if (outboxKey && opts.outbox && !saved) await opts.outbox.put(outboxKey, recipient, { recipient: event })
       const res = await publishToRelays(pool, event, relays, opts.publish)
-      return { delivered: res.delivered, protocol: 'nip04', tier, eventId: event.id, rumorId: event.id, relays: res.relays }
+      const result: DmSendResult = { delivered: res.delivered, protocol: 'nip04', tier, eventId: event.id, rumorId: event.id, relays: res.relays }
+      if (outboxKey && opts.outbox) await opts.outbox.put(outboxKey, recipient, { recipient: event, result })
+      return result
     }
 
     // One rumor, two wraps: the recipient's copy and ours share the rumor id.
     const rumor = buildRumor(botPubkey, recipient, text, createdAt)
-    const toRecipient = wrapRumor(secretKey, rumor, recipient, opts.wrap)
-    const toSelf = wrapRumor(secretKey, rumor, botPubkey, opts.wrap)
+    const rumorId = saved?.rumorId ?? rumor.id
+    const toRecipient = saved?.recipient ?? wrapRumor(secretKey, rumor, recipient, opts.wrap)
+    const toSelf = saved?.self ?? wrapRumor(secretKey, rumor, botPubkey, opts.wrap)
+    if (outboxKey && opts.outbox && !saved) await opts.outbox.put(outboxKey, recipient, { recipient: toRecipient, self: toSelf, rumorId })
     const [res, self] = await Promise.all([
       publishToRelays(pool, toRecipient, relays, opts.publish),
       publishToRelays(pool, toSelf, selfRelays, opts.publish).catch((err: Error) => {
@@ -124,15 +135,17 @@ export function createDmSender(opts: DmSenderOptions): DmSender {
       }),
     ])
     if (self && !self.delivered) log.warn('dm self-copy not accepted by any relay')
-    return {
+    const result: DmSendResult = {
       delivered: res.delivered,
       protocol: 'nip17',
       tier,
       eventId: toRecipient.id,
-      rumorId: rumor.id,
+      rumorId,
       relays: res.relays,
       selfCopy: self ? { delivered: self.delivered, eventId: toSelf.id, relays: self.relays } : undefined,
     }
+    if (outboxKey && opts.outbox) await opts.outbox.put(outboxKey, recipient, { recipient: toRecipient, self: toSelf, rumorId, result })
+    return result
   }
 
   return {
@@ -145,9 +158,11 @@ export function createDmSender(opts: DmSenderOptions): DmSender {
       // Clients order by the second-resolution rumor time, so consecutive parts
       // get strictly increasing times even when they go out within one second.
       let createdAt = 0
+      let partIndex = 0
       for (const part of splitMessage(text)) {
         createdAt = Math.max(opts.wrap?.now ?? Math.floor(Date.now() / 1000), createdAt + 1)
-        const result = await sendPart(recipientPubkey, part, format, sendOpts.extraRelays ?? [], createdAt)
+        const outboxKey = sendOpts.idempotencyKey ? createHash('sha256').update(JSON.stringify([recipientPubkey, format, sendOpts.idempotencyKey, partIndex++, part])).digest('hex') : undefined
+        const result = await sendPart(recipientPubkey, part, format, sendOpts.extraRelays ?? [], createdAt, outboxKey)
         results.push(result)
         if (!result.delivered) {
           log.warn(`dm not delivered (${format}, tier ${result.tier}); ${results.length} part(s) attempted`)

@@ -14,6 +14,7 @@
  */
 
 import type { LLMConfig } from './types.js'
+import { withProviderSlot } from './provider-budget.js'
 
 const DEFAULT_TIMEOUT_MS = 60_000
 
@@ -76,7 +77,7 @@ export function createPacer(requestsPerMinute = DEFAULT_REQUESTS_PER_MINUTE): ()
  * Throws with the status in the message so the caller can tell a 429 from a
  * schema change (400), which on a beta endpoint is the failure to expect.
  */
-export async function decisionCompletion(
+async function decisionCompletionRaw(
   config: LLMConfig,
   request: DecisionRequest
 ): Promise<DecisionResponse> {
@@ -92,7 +93,7 @@ export async function decisionCompletion(
         Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify({ model: config.model, ...request }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: config.signal ? AbortSignal.any([config.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     })
   } catch (err) {
     if ((err as Error).name === 'TimeoutError' || (err as Error).name === 'AbortError') {
@@ -120,6 +121,10 @@ export async function decisionCompletion(
   return data
 }
 
+export function decisionCompletion(config: LLMConfig, request: DecisionRequest): Promise<DecisionResponse> {
+  return withProviderSlot(config, () => decisionCompletionRaw(config, request))
+}
+
 /**
  * `decisionCompletion` with pacing and a short retry.
  *
@@ -134,6 +139,7 @@ export async function decisionCompletionWithRetry(
 ): Promise<DecisionResponse> {
   let lastErr: Error | undefined
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    config.signal?.throwIfAborted()
     await pace()
     try {
       return await decisionCompletion(config, request)

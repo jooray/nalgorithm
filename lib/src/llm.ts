@@ -3,6 +3,7 @@
  */
 
 import type { ChatMessage, LLMConfig } from './types.js'
+import { withProviderSlot } from './provider-budget.js'
 
 /** Fail a stalled request rather than hanging a scheduled run forever. */
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -37,7 +38,7 @@ interface ChatCompletionResponse {
  * @param temperature - Sampling temperature (default: 0.3)
  * @returns The assistant's response content string
  */
-export async function chatCompletion(
+async function chatCompletionRaw(
   config: LLMConfig,
   messages: ChatMessage[],
   jsonMode = false,
@@ -69,7 +70,7 @@ export async function chatCompletion(
       method: 'POST',
       headers: providerHeaders(config.apiKey),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: config.signal ? AbortSignal.any([config.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     })
   } catch (err) {
     // Surface a timeout as a normal error so the retry path can handle it,
@@ -94,6 +95,10 @@ export async function chatCompletion(
   return data.choices[0].message.content
 }
 
+export function chatCompletion(config: LLMConfig, messages: ChatMessage[], jsonMode = false, temperature = 0.3): Promise<string> {
+  return withProviderSlot(config, () => chatCompletionRaw(config, messages, jsonMode, temperature))
+}
+
 /**
  * Call an OpenAI-compatible chat completions endpoint with streaming.
  *
@@ -104,7 +109,7 @@ export async function chatCompletion(
  *
  * @param onDelta - Receives each fragment of content as it arrives.
  */
-export async function chatCompletionStream(
+async function chatCompletionStreamRaw(
   config: LLMConfig,
   messages: ChatMessage[],
   onDelta: (text: string) => void,
@@ -155,7 +160,7 @@ export async function chatCompletionStream(
         method: 'POST',
         headers: providerHeaders(config.apiKey),
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: config.signal ? AbortSignal.any([config.signal, controller.signal]) : controller.signal,
       })
     } catch (err) {
       if (timedOut) throw new Error(`LLM API sent nothing for ${idleMs}ms`)
@@ -254,6 +259,10 @@ export async function chatCompletionStream(
   return full
 }
 
+export function chatCompletionStream(config: LLMConfig, messages: ChatMessage[], onDelta: (text: string) => void, temperature = 0.5): Promise<string> {
+  return withProviderSlot(config, () => chatCompletionStreamRaw(config, messages, onDelta, temperature))
+}
+
 /**
  * Sleep for a given number of milliseconds.
  */
@@ -275,6 +284,7 @@ export async function chatCompletionWithRetry(
 ): Promise<string> {
   let lastErr: Error | undefined
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    config.signal?.throwIfAborted()
     try {
       return await chatCompletion(config, messages, jsonMode, temperature)
     } catch (err) {

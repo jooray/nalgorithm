@@ -112,7 +112,7 @@ function describeSubscription(state: ProductState, tz: string): string {
 /** Erase everything stored about an npub except billing records, which live in the billing service. */
 export async function deleteUserData(db: Db, npub: string): Promise<void> {
   await db.transaction(async (tx) => {
-    for (const table of ['scores', 'feed_snapshots', 'digest_jobs', 'learned', 'settings', 'sessions', 'schedules', 'digests', 'deliveries', 'peers', 'accounts']) {
+    for (const table of ['scores', 'feed_snapshots', 'digest_jobs', 'pipeline_jobs', 'dm_outbox', 'learned', 'settings', 'sessions', 'schedules', 'digests', 'deliveries', 'peers', 'accounts']) {
       await tx.run(`DELETE FROM ${table} WHERE npub = ?`, [npub])
     }
   })

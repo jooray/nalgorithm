@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { PipelineLogger, ProfileData } from 'nalgorithm'
 import type { DigestSourceNote } from 'nalgorithm'
 import { digestSourceNotes, selectDigestPosts, synthesizeSpeech as libSynthesize, writeDigest as libWriteDigest } from 'nalgorithm'
-import { notesSection, serializeNotes } from './digest-notes.js'
+import { notesSection, serializeNotes, parseNotes } from './digest-notes.js'
 import { mp3DurationSeconds } from './mp3-duration.js'
 import { MAX_TEXT_LENGTH } from './dm/send.js'
 import type { BillingClient } from './billing-client.js'
@@ -24,7 +24,7 @@ export interface DmSendOutcome {
 }
 
 export interface DmSender {
-  send(recipient: string, text: string, opts: { format: DmFormat }): Promise<DmSendOutcome | DmSendOutcome[]>
+  send(recipient: string, text: string, opts: { format: DmFormat; idempotencyKey?: string }): Promise<DmSendOutcome | DmSendOutcome[]>
 }
 
 export interface ModelConfig {
@@ -33,6 +33,7 @@ export interface ModelConfig {
   digestModel: string
   digestFallbackModel?: string
   humanizerModel: string
+  humanizerEnabled?: boolean
   ttsModel: string
   ttsVoice: string
 }
@@ -114,7 +115,7 @@ const all = (r: DmSendOutcome | DmSendOutcome[]): DmSendOutcome[] => (Array.isAr
  * before any model is called, and each optional step (speech, upload) degrades
  * to a text-only digest instead of losing the digest already paid for.
  */
-export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?: boolean } = {}): Promise<DigestOutcome> {
+export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?: boolean; signal?: AbortSignal } = {}): Promise<DigestOutcome> {
   const { db, billing, log } = deps
   const now = deps.now ? deps.now() : Math.floor(Date.now() / 1000)
   const write = deps.writeDigest ?? libWriteDigest
@@ -135,6 +136,10 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   if (state.state === 'unknown') return { status: 'billing_unavailable' }
   if (state.state !== 'active' && state.state !== 'trial') return { status: 'not_entitled' }
 
+  const pending = await db.get<{ id: number; created_at: number; body: string; audio_url: string | null; notes: string | null }>(
+    "SELECT id, created_at, body, audio_url, notes FROM digests WHERE npub = ? AND status = 'delivery_pending' ORDER BY created_at DESC LIMIT 1", [npub])
+  if (pending) return deliverDigest(deps, npub, pending.id, pending.created_at, pending.body, pending.audio_url, parseNotes(pending.notes))
+
   // A scheduled digest counts once per day however often it is retried; a manual
   // one is unique each time so the daily cap limits how many can be asked for.
   const key = opts.manual ? `digest:${npub}:m:${randomBytes(6).toString('hex')}` : `digest:${npub}:s:${dayStamp(now)}`
@@ -148,18 +153,18 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   let audioUrl: string | null = null
   let durationSeconds: number | null = null
   try {
-    const feed = await deps.feed(npub, settings, store)
+    const feed = await deps.feed(npub, settings, store, opts.signal)
     if (feed.posts.length === 0) return { status: 'no_posts' }
 
     const top = selectDigestPosts(feed.posts, settings.topN)
     if (top.length === 0) return { status: 'failed', detail: 'No notes could be ranked. Check the model connection.' }
     notes = digestSourceNotes(top, settings.topN)
     const profiles = new Map<string, ProfileData>(Object.entries(feed.profiles))
-    const llm = { apiBaseUrl: deps.models.apiBaseUrl, apiKey: deps.models.apiKey }
+    const llm = { apiBaseUrl: deps.models.apiBaseUrl, apiKey: deps.models.apiKey, signal: opts.signal }
     text = await write({
       primary: { llm: { ...llm, model: deps.models.digestModel }, temperature: 0.7 },
       fallback: deps.models.digestFallbackModel ? { llm: { ...llm, model: deps.models.digestFallbackModel }, temperature: 0.7 } : undefined,
-      humanizer: { llm: { ...llm, model: deps.models.humanizerModel } },
+      humanizer: deps.models.humanizerEnabled === false ? undefined : { llm: { ...llm, model: deps.models.humanizerModel } },
       digest: {
         posts: top,
         profiles,
@@ -173,6 +178,8 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
     })
 
     try {
+      opts.signal?.throwIfAborted()
+      if (deps.upload) {
       const audio = await synth(
         { ...llm, model: deps.models.ttsModel, voice: schedule.voice ?? deps.models.ttsVoice, format: 'mp3' },
         text,
@@ -185,23 +192,33 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
           log.warn(`digest audio upload failed for ${npub.slice(0, 8)}: ${(err as Error).message}`)
         }
       }
+      }
     } catch (err) {
       log.warn(`digest speech failed for ${npub.slice(0, 8)}: ${(err as Error).message}`)
     }
   } catch (err) {
     return { status: 'failed', detail: (err as Error).message }
   }
+  opts.signal?.throwIfAborted()
 
   const digestId = (
-    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status, notes, duration_s) VALUES (?, ?, ?, ?, ?, ?, ?)', [npub, now, text, audioUrl, 'ok', serializeNotes(notes), durationSeconds])
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status, notes, duration_s) VALUES (?, ?, ?, ?, ?, ?, ?)', [npub, now, text, audioUrl, 'delivery_pending', serializeNotes(notes), durationSeconds])
   ).lastInsertId
+
+  return deliverDigest(deps, npub, digestId, now, text, audioUrl, notes)
+}
+
+async function deliverDigest(deps: DigestDeps, npub: string, digestId: number, createdAt: number, text: string, audioUrl: string | null, notes: DigestSourceNote[]): Promise<DigestOutcome> {
+  const { db } = deps
+  const now = deps.now ? deps.now() : Math.floor(Date.now() / 1000)
+  const schedule = await loadSchedule(db, npub)
 
   const format = await effectiveFormat(db, npub, schedule)
   let delivered = false
   let tier: string | null = null
   let detail: string | null = null
   try {
-    const results = all(await deps.dm.send(npub, composeMessage(text, audioUrl, now, notes, deps.appUrl), { format }))
+    const results = all(await deps.dm.send(npub, composeMessage(text, audioUrl, createdAt, notes, deps.appUrl), { format, idempotencyKey: `digest:${digestId}` }))
     delivered = results.length > 0 && results.every((r) => r.delivered)
     tier = results[0]?.tier ?? null
     detail = results.filter((r) => !r.delivered).map((r) => r.detail ?? 'not delivered').join('; ') || null
@@ -217,7 +234,8 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
     tier,
     detail,
   ])
-  if (!delivered) return { status: 'failed', detail: detail ?? 'the DM was not delivered', hasAudio: audioUrl !== null }
+  if (!delivered) return { status: 'failed', detail: 'Ready in the app; DM relay delivery is pending. ' + (detail ?? ''), hasAudio: audioUrl !== null }
+  await db.run("UPDATE digests SET status = 'ok' WHERE id = ? AND npub = ?", [digestId, npub])
   return { status: 'sent', hasAudio: audioUrl !== null }
 }
 

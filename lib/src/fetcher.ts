@@ -213,7 +213,9 @@ export function createFetcher(config: FetcherConfig): Fetcher {
   const fallbackRelays = config.profileFallbackRelays ?? DEFAULT_PROFILE_RELAYS
   const opened = new Set(relays)
   let destroyed = false
+  config.signal?.addEventListener('abort', () => destroy(), { once: true })
   const query = (urls: string[], filter: Record<string, unknown>, timeout = QUERY_TIMEOUT): Promise<NostrEvent[]> => {
+    config.signal?.throwIfAborted()
     if (destroyed || timeout <= 0) return Promise.resolve([])
     urls.forEach((url) => opened.add(url))
     return queryWithTimeout(pool, urls, filter, timeout)

@@ -19,7 +19,7 @@ Source audit: `AUDIT-GPT61.md`. Started 2026-10-05. No intermediate deployments.
 | Validated setup, storage and provider configuration | F02, F03, F07, F17, F26, F35 | Core implementation done; draft persistence and section saves follow |
 | Visible recovery, truthful scores, permissions and accessibility | F04, F05, F06, F08, F18, F32, F39 | Implemented; automated checks pass, live rendering pending |
 | Incremental learning, bounded fetching and cleanup | F09, F10, F11 | Implemented; resource and incremental-learning regressions pass |
-| Shared pipeline/provider budget and durable jobs/delivery | F12, F14, F15, F41 | Pending |
+| Shared pipeline/provider budget and durable jobs/delivery | F12, F14, F15, F41 | Core jobs/outbox implemented; retention and diagnostics continue |
 | Safe updates, drafts and navigation | F16, F33, F37 | Pending |
 | Offline/download audio and efficient playback | F19, F23, F24 | Pending |
 | Stable rendering, storage and payloads | F20, F21, F22 | Pending |
@@ -73,3 +73,12 @@ Each group will record changes, tests, limitations and commit references. A find
 - BYOK and hosted share incremental learning with processed reaction IDs, reaction-time watermarks, overlap and a durable bounded-page catch-up cursor. Context changes cannot commit another reader's taste; learning-off does not use learned taste.
 - Manual Update learned taste uses the same incremental path and guaranteed teardown.
 - Full workspace build passes; 204 combined library/web tests pass. Server selection fixture now asserts best unique notes are selected before cutting, rather than preserving the old premature-cut bug.
+
+### Shared jobs, provider capacity and durable delivery
+
+- Feed lock precedes billing awaits. Same-context feed/digest work is single-flight and short-lived results are reused; database-owned renewable pipeline claims prevent competing processes from doing the same ranking.
+- One shared provider budget spans scoring, learning, writing, humanizing and TTS; hosted uses 3 active calls / 90 request starts per minute with bounded intake/queues. Scheduler fills a free slot immediately.
+- Digest claims have owner tokens and renewable heartbeats; startup preserves other healthy owners. Manual/scheduled work carries a 30-minute abort deadline through scoring/writer/TTS requests.
+- Saved delivery-pending artifacts are retried without regeneration or another billing consumption. The durable DM outbox persists signed encrypted events before publication and retries the same IDs; accepted parts are skipped.
+- No-upload servers do not synthesize unusable audio. Humanizer remains on by default and is configurable via `HUMANIZER_ENABLED=false`; vendored prompt untouched.
+- Verification: full workspace build, 205 combined library/web tests, and 226 disposable-SQLite/mock-relay server tests pass, including race, lease and durable retry regressions.

@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import type { PipelineLogger } from 'nalgorithm'
+import { configureProviderBudget, providerBudgetStats, type PipelineLogger } from 'nalgorithm'
 import { createApp } from './app.js'
 import { createBillingClient } from './billing-client.js'
 import { createBot, createDbSeenStore } from './bot.js'
@@ -15,6 +15,8 @@ import { createDmInbox, createDmPool, createDmSender, createRelayResolver } from
 import { createFeedRunner } from './feed.js'
 import { createPreviewService } from './preview/service.js'
 import { configureWebSocket } from './websocket.js'
+import { upsert } from './database.js'
+import type { StoredDm } from './dm/send.js'
 
 const log: PipelineLogger = {
   info: (m) => process.stderr.write(`[server] ${m}\n`),
@@ -23,6 +25,7 @@ const log: PipelineLogger = {
 
 configureWebSocket()
 const config = loadConfig()
+configureProviderBudget(config.venice, { concurrency: 3, requestsPerMinute: 90 })
 const db = await openDb(config.databaseUrl)
 const billing = createBillingClient({ url: config.billing.url, token: config.billing.token, product: 'nalgorithm' })
 const feed = createFeedRunner(config, log, db)
@@ -40,7 +43,17 @@ if (config.bot) {
   const secretKey = Uint8Array.from(Buffer.from(config.bot.secretKeyHex, 'hex'))
   const pool = createDmPool()
   const resolver = createRelayResolver({ pool, fallback: config.bot.fallbackRelays })
-  const rawSender = createDmSender({ pool, resolver, secretKey, selfRelays: config.bot.relays, log })
+  const rawSender = createDmSender({ pool, resolver, secretKey, selfRelays: config.bot.relays, log,
+    outbox: {
+      async get(key) {
+        const row = await db.get<{ state_json: string }>('SELECT state_json FROM dm_outbox WHERE cache_key = ?', [key])
+        return row ? JSON.parse(row.state_json) as StoredDm : null
+      },
+      async put(key, npub, value) {
+        await db.run(upsert(db, 'dm_outbox', ['cache_key', 'npub', 'state_json', 'created_at'], ['cache_key'], ['state_json']), [key, npub, JSON.stringify(value), nowSec()])
+      },
+    },
+  })
 
   // The DM layer reports per-relay outcomes; the digest job wants one readable reason per failed part.
   const sender: DmSender = {
@@ -68,6 +81,7 @@ if (config.bot) {
       digestModel: config.venice.digestModel,
       digestFallbackModel: config.venice.digestFallbackModel,
       humanizerModel: config.venice.humanizerModel,
+      humanizerEnabled: config.venice.humanizerEnabled,
       ttsModel: config.venice.ttsModel,
       ttsVoice: config.venice.ttsVoice,
     },
@@ -80,7 +94,7 @@ if (config.bot) {
     dm: sender,
     log,
     run: async (npub, opts) => {
-      const outcome = await runInSlot(db, npub, nowSec, () => runDigest(digestDeps, npub, opts), jobs)
+      const outcome = await runInSlot(db, npub, nowSec, () => runDigest(digestDeps, npub, { ...opts, signal: AbortSignal.timeout(30 * 60_000) }), jobs)
       // Busy or restarting: a transient failure, so the schedule retries soon.
       return outcome.status === 'busy' ? { status: 'failed' as const, detail: outcome.detail } : outcome
     },
@@ -140,8 +154,12 @@ const app = createApp({
 
 // Old cached scores are useless after 30 days; prune once a day.
 setInterval(() => {
+  log.info(`model budget: ${JSON.stringify(providerBudgetStats())}`)
   pruneScores(db).then((n) => log.info(`pruned ${n} old scores`), (e) => log.warn(`prune failed: ${(e as Error).message}`))
   previews.prune().then((n) => log.info(`pruned ${n} old link previews`), (e) => log.warn(`prune failed: ${(e as Error).message}`))
+  void db.run('DELETE FROM sessions WHERE expires_at < ?', [nowSec()]).catch(() => {})
+  void db.run('DELETE FROM profiles WHERE fetched_at < ?', [nowSec() - 90 * 86400]).catch(() => {})
+  void db.run('DELETE FROM dm_outbox WHERE created_at < ?', [nowSec() - 30 * 86400]).catch(() => {})
 }, 86_400_000).unref()
 
 const server = createServer(app)

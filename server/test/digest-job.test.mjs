@@ -160,6 +160,25 @@ test('a feed failure is reported without a digest or a DM', async () => {
   assert.equal(calls.dm.length, 0)
 })
 
+test('pending relay delivery reuses the saved digest without models, TTS or another billing unit', async () => {
+  const db = await freshDb(); await withPrompt(db)
+  const failed = rig(db, { dmThrows: true })
+  assert.equal((await runDigest(failed.deps, NPUB)).status, 'failed')
+  const original = await db.get('SELECT id FROM digests WHERE npub = ?', [NPUB])
+  const retry = rig(db)
+  assert.equal((await runDigest(retry.deps, NPUB)).status, 'sent')
+  assert.equal(retry.calls.feed + retry.calls.write.length + retry.calls.synth.length + retry.calls.consume.length, 0)
+  assert.equal(retry.calls.dm[0].opts.idempotencyKey, `digest:${original.id}`)
+  assert.equal((await db.all('SELECT id FROM digests WHERE npub = ?', [NPUB])).length, 1)
+})
+
+test('text-only server does not pay for undeliverable speech', async () => {
+  const db = await freshDb(); await withPrompt(db)
+  const { deps, calls } = rig(db, { noUpload: true })
+  await runDigest(deps, NPUB)
+  assert.equal(calls.synth.length, 0)
+})
+
 test('a DM that is not delivered is recorded as failed, including a partial multi-part delivery', async () => {
   for (const over of [{ dmThrows: true }, { dmResult: [{ delivered: true }, { delivered: false, detail: 'rejected by all relays' }] }]) {
     const db = await freshDb(); await withPrompt(db)

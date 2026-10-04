@@ -124,6 +124,8 @@ function schema(d: Dialect): string[] {
       created_at BIGINT NOT NULL,
       json ${d === 'sqlite' ? 'TEXT' : 'MEDIUMTEXT'} NOT NULL
     )${opts}`,
+    `CREATE TABLE IF NOT EXISTS pipeline_jobs (npub ${t(64)} PRIMARY KEY, owner ${t(64)} NOT NULL, lease_until BIGINT NOT NULL)${opts}`,
+    `CREATE TABLE IF NOT EXISTS dm_outbox (cache_key ${t(64)} PRIMARY KEY, npub ${t(64)} NOT NULL, state_json TEXT NOT NULL, created_at BIGINT NOT NULL)${opts}`,
   ].filter(Boolean)
 }
 
@@ -151,6 +153,8 @@ async function migrate(db: Db): Promise<void> {
   // Exact length of the audio, measured from its frames. Older digests have none.
   await addColumn(db, 'digests', 'duration_s', `${ddl.real(db.dialect)} NULL`)
   await addColumn(db, 'learned', 'processed_reactions', 'TEXT NULL')
+  await addColumn(db, 'digest_jobs', 'lease_at', 'BIGINT NULL')
+  await addColumn(db, 'digest_jobs', 'owner', `${ddl.text(db.dialect, 64)} NULL`)
 }
 
 const CHUNK = 500

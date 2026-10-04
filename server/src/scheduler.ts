@@ -1,5 +1,6 @@
 import type { PipelineLogger } from 'nalgorithm'
 import type { Db } from './db.js'
+import { mapConcurrent } from 'nalgorithm'
 import { recordRun, effectiveFormat } from './digest-job.js'
 import type { DigestOutcome, DmSender } from './digest-job.js'
 import { dueSchedules, loadSchedule, saveSchedule } from './schedule.js'
@@ -86,9 +87,7 @@ export function createScheduler(deps: SchedulerDeps) {
     try {
       const due = (await dueSchedules(db, now())).filter((s) => !running.has(s.npub))
       const limit = deps.concurrency ?? 2
-      for (let i = 0; i < due.length; i += limit) {
-        await Promise.all(due.slice(i, i + limit).map((s) => runOne(s.npub)))
-      }
+      await mapConcurrent(due, limit, (s) => runOne(s.npub))
     } catch (err) {
       log.warn(`scheduler tick failed: ${(err as Error).message}`)
     } finally {
