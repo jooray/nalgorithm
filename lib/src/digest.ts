@@ -8,7 +8,7 @@
  */
 
 import { chatCompletionWithRetry, chatCompletionStream } from './llm.js'
-import { sortByRelevance } from './ranker.js'
+import { sortByRelevance, scoreCacheKey } from './ranker.js'
 import type { ChatMessage, DigestSourceNote, LLMConfig, ProfileData, ScoredPost } from './types.js'
 
 export const DEFAULT_DIGEST_SYSTEM_PROMPT = `You are a witty, knowledgeable radio host delivering a spoken-word digest of what happened on Nostr in the last 24 hours. Always open with "Good morning, nostrich!" Your style is conversational, warm, and engaging — like a smart friend catching you up over coffee. You weave posts together into a narrative rather than reading them one by one. Add context, make connections between topics, and keep the energy up. Aim for about 6 minutes of spoken content (roughly 1100-1500 words): never pad, and keep every item tight.`
@@ -150,6 +150,17 @@ export interface DigestOptions {
 
 export const DIGEST_NOTE_MAX_CHARS = 1500
 
+/** One real relevance judgment per unique note; boosts do not consume extra slots. */
+export function selectDigestPosts(posts: ScoredPost[], topN = 15): ScoredPost[] {
+  const seen = new Set<string>()
+  return sortByRelevance(posts).filter((post) => {
+    const key = scoreCacheKey(post)
+    if (post.defaultScore || seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).slice(0, Math.max(1, Math.min(50, topN)))
+}
+
 /**
  * The notes a digest is composed from, in the order the digest prompt lists
  * them: the same sort and cut as buildDigestMessages (`topN` defaults to 15).
@@ -157,8 +168,7 @@ export const DIGEST_NOTE_MAX_CHARS = 1500
  * wants to open; a quote by the quoting note itself.
  */
 export function digestSourceNotes(posts: ScoredPost[], topN = 15): DigestSourceNote[] {
-  return sortByRelevance(posts)
-    .slice(0, topN)
+  return selectDigestPosts(posts, topN)
     .map((post) => {
       const boost = post.type === 'boost' && post.originalPost ? post.originalPost : null
       const note: DigestSourceNote = {
@@ -177,7 +187,7 @@ export function digestSourceNotes(posts: ScoredPost[], topN = 15): DigestSourceN
 /** Build the chat messages for a digest run, without sending them. */
 export function buildDigestMessages(options: DigestOptions): ChatMessage[] {
   const topN = options.topN ?? 15
-  const topPosts = sortByRelevance(options.posts).slice(0, topN)
+  const topPosts = selectDigestPosts(options.posts, topN)
 
   const postsBlock = topPosts
     .map((post, i) => formatPostForDigest(post, i, options.profiles))
@@ -210,6 +220,7 @@ export async function generateDigest(config: LLMConfig, options: DigestOptions):
     throw new Error('Nothing to summarize — no scored posts')
   }
   const messages = buildDigestMessages(options)
+  if (selectDigestPosts(options.posts, options.topN).length === 0) throw new Error('No successfully ranked notes yet. Fix the model connection and rank again.')
   const temperature = options.temperature ?? 0.5
 
   if (options.onDelta) {

@@ -7,6 +7,7 @@
  */
 
 export { createFetcher, pubkeyToHex, parseProfileEvents } from './fetcher.js'
+export { fingerprint, rankingContext, contextualScoreKey } from './ranking-context.js'
 export { sanitizeRelayUrl, isAcceptableRelayUrl } from './relay-url.js'
 export { collectPostPubkeys, extractReferencedPubkeys, MAX_PROFILE_PUBKEYS } from './pubkeys.js'
 export {
@@ -32,6 +33,7 @@ export {
   generateDigest,
   buildDigestMessages,
   digestSourceNotes,
+  selectDigestPosts,
   FAITHFULNESS_RULES,
   SPOKEN_SIGN_OFF,
   DIGEST_NOTE_MAX_CHARS,

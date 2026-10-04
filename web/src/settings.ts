@@ -3,6 +3,7 @@
  */
 
 import { DEFAULT_SIGNER_RELAYS } from './nostr-login.js'
+import { pubkeyToHex, rankingContext } from 'nalgorithm'
 import { isClientPreset, presetFromUrl, validateTemplate, type ClientPreset } from './client-url.js'
 
 const STORAGE_PREFIX = 'nalgorithm_'
@@ -70,6 +71,12 @@ export interface CachedScore {
   justification?: string
   /** Which scorer produced it; absent means chat, as every older entry was. */
   scorer?: 'decision'
+}
+
+export function scoreNamespace(settings: AppSettings): string {
+  let identity = settings.npub.trim()
+  try { identity = pubkeyToHex(identity) } catch { /* validation reports malformed identity */ }
+  return `${identity}_${rankingContext({ ...settings, model: settings.scorer === 'decision' ? settings.decisionModel : settings.model })}_`
 }
 
 /** Max age for cache date-keys before pruning (30 days) */
@@ -227,11 +234,12 @@ export function updateSetting<K extends keyof AppSettings>(
 /**
  * Load the full score cache (all date-keys merged into one map).
  */
-export function loadScoreCache(): Map<string, CachedScore> {
+export function loadScoreCache(settings = loadSettings()): Map<string, CachedScore> {
+  const prefix = SCORE_CACHE_PREFIX + scoreNamespace(settings)
   const merged = new Map<string, CachedScore>()
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
-    if (!key || !key.startsWith(SCORE_CACHE_PREFIX)) continue
+    if (!key || !key.startsWith(prefix)) continue
     try {
       const entries: Record<string, CachedScore> = JSON.parse(localStorage.getItem(key)!)
       for (const [id, cached] of Object.entries(entries)) {
@@ -248,9 +256,10 @@ export function loadScoreCache(): Map<string, CachedScore> {
  * Add scored entries to the cache and save (writes to today's date-key).
  */
 export function cacheScores(
-  entries: Array<{ id: string; score: number; justification?: string; scorer?: 'decision' }>
+  entries: Array<{ id: string; score: number; justification?: string; scorer?: 'decision' }>,
+  settings = loadSettings()
 ): void {
-  const key = SCORE_CACHE_PREFIX + todayKey()
+  const key = SCORE_CACHE_PREFIX + scoreNamespace(settings) + todayKey()
   let bucket: Record<string, CachedScore> = {}
   try {
     const raw = localStorage.getItem(key)
@@ -277,7 +286,7 @@ export function pruneScoreCache(): number {
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
     if (!key || !key.startsWith(SCORE_CACHE_PREFIX)) continue
-    const dateStr = key.slice(SCORE_CACHE_PREFIX.length)
+    const dateStr = key.slice(-10)
     const date = parseDateKey(dateStr)
     if (date && date < cutoff) {
       keysToDelete.push(key)

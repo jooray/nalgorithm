@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { PipelineLogger, ProfileData } from 'nalgorithm'
 import type { DigestSourceNote } from 'nalgorithm'
-import { digestSourceNotes, synthesizeSpeech as libSynthesize, writeDigest as libWriteDigest } from 'nalgorithm'
+import { digestSourceNotes, selectDigestPosts, synthesizeSpeech as libSynthesize, writeDigest as libWriteDigest } from 'nalgorithm'
 import { notesSection, serializeNotes } from './digest-notes.js'
 import { mp3DurationSeconds } from './mp3-duration.js'
 import { MAX_TEXT_LENGTH } from './dm/send.js'
@@ -151,7 +151,8 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
     const feed = await deps.feed(npub, settings, store)
     if (feed.posts.length === 0) return { status: 'no_posts' }
 
-    const top = feed.posts.slice(0, settings.topN)
+    const top = selectDigestPosts(feed.posts, settings.topN)
+    if (top.length === 0) return { status: 'failed', detail: 'No notes could be ranked. Check the model connection.' }
     notes = digestSourceNotes(top, settings.topN)
     const profiles = new Map<string, ProfileData>(Object.entries(feed.profiles))
     const llm = { apiBaseUrl: deps.models.apiBaseUrl, apiKey: deps.models.apiKey }

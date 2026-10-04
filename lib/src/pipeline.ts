@@ -13,6 +13,7 @@ import { chatCompletionWithRetry } from './llm.js'
 import { buildDigestMessages } from './digest.js'
 import { humanizeText } from './humanizer.js'
 import { scoreCacheKey } from './ranker.js'
+import { contextualScoreKey } from './ranking-context.js'
 import type { DigestOptions } from './digest.js'
 import type {
   Fetcher,
@@ -243,6 +244,7 @@ export interface ScoreCachedOptions {
 }
 
 export interface ScoreCachedInput {
+  context?: string
   userPrompt: string
   learnedPrompt?: string
   profiles?: Map<string, ProfileData>
@@ -267,7 +269,8 @@ export async function scorePostsCached(
 ): Promise<ScoredPost[]> {
   const { ranker, store, scorer, log = silentLogger } = opts
 
-  const cached = await store.getScores([...new Set(posts.map(scoreCacheKey))])
+  const keyFor = (post: FetchedPost): string => contextualScoreKey(scoreCacheKey(post), input.context)
+  const cached = await store.getScores([...new Set(posts.map(keyFor))])
 
   const entryFor = (sp: ScoredPost): CachedScore => ({
     score: sp.score,
@@ -280,7 +283,7 @@ export async function scorePostsCached(
   const uncached: FetchedPost[] = []
   for (const post of posts) {
     // Keyed by the boosted event where there is one, see scoreCacheKey.
-    const hit = cached[scoreCacheKey(post)]
+    const hit = cached[keyFor(post)]
     // The two scorers sit on different scales (a decision score runs lower),
     // so a score from the other one would mis-rank rather than save a call.
     if (hit && (hit.scorer ?? 'chat') === scorer) {
@@ -312,7 +315,7 @@ export async function scorePostsCached(
       onBatchScored: (batch) => {
         const entries: Record<string, CachedScore> = {}
         for (const sp of batch) {
-          if (!sp.defaultScore) entries[scoreCacheKey(sp)] = entryFor(sp)
+          if (!sp.defaultScore) entries[keyFor(sp)] = entryFor(sp)
         }
         if (Object.keys(entries).length > 0) {
           pending = pending.then(() => store.putScores(entries))

@@ -279,7 +279,7 @@ async function scorePosts(
             score: p.score,
             justification: p.justification,
             ...(decision ? { scorer: 'decision' as const } : {}),
-          }))
+          })), settings
         )
       }
       onBatch?.(batch)
@@ -452,7 +452,7 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     const pruned = pruneScoreCache()
     if (pruned > 0) console.log(`[Nalgorithm] Pruned ${pruned} old score cache date-keys`)
 
-    const scoreCache = loadScoreCache()
+    const scoreCache = loadScoreCache(settings)
     const cachedPosts: ScoredPost[] = []
     const uncachedPosts: FetchedPost[] = []
 
@@ -733,4 +733,3 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!stored && valid && !settings.autoRefresh) showEmptyState(true, true)
   if (valid) startLiveChecks({ check: autoCheck, tick: paintAge })
 })
-

@@ -15,7 +15,7 @@ Source audit: `AUDIT-GPT61.md`. Started 2026-10-05. No intermediate deployments.
 
 | Group | Findings | Status |
 |---|---|---|
-| Ranking context and unique digest selection | F01, F13 | Pending |
+| Ranking context and unique digest selection | F01, F13 | Implemented; library regressions and web/server typechecks pass |
 | Validated setup, storage and provider configuration | F02, F03, F07, F17, F26, F35 | Pending |
 | Visible recovery, truthful scores, permissions and accessibility | F04, F05, F06, F08, F18, F32, F39 | Pending |
 | Incremental learning, bounded fetching and cleanup | F09, F10, F11 | Pending |
@@ -38,3 +38,13 @@ Each group will record changes, tests, limitations and commit references. A find
 - Do not edit the vendored humanizer skill.
 - Version the release once; deploy hosted server, app and landing together only after verification.
 - Send one concise SimpleX completion summary, or a blocker if the release cannot safely proceed.
+
+## Implementation log
+
+### Ranking context and unique selections
+
+- SHA-256 ranking fingerprints include explicit interests, provider/model/scorer/rubric and learning policy, never credentials. Hosted cache keys include context; BYOK namespaces include canonical identity. Old unknown-provenance scores are not reused in a new context.
+- Original notes and boosts share one digest slot, before top-N selection. Fallback/unranked notes do not enter the best-note digest.
+- Hosted learning-off no longer applies previously learned taste.
+- Tests: fresh library build and 32 tests pass; web no-emit check and server build pass.
+- BrowserOS neo still reports no browser window. Live verification remains pending.
