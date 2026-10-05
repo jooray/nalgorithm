@@ -31,6 +31,7 @@ import { showTab, currentTab, onTabShown } from './shell.js'
 import { beginActivity } from './activity.js'
 import { loadSettings } from './settings.js'
 import { readOfflineAudio, saveOfflineAudio, fetchAudioBlob, offlineAudioBytes, clearOfflineAudio } from './offline-audio.js'
+import { identityKey } from './local-data.js'
 
 export interface DigestBackend {
   audioDownloadUrl?(d: DigestRecord): string | null
@@ -88,9 +89,13 @@ let miniShown = false
 const madeAudio = new Map<string, { url: string; filename: string }>()
 const offlineUrls = new Map<string, string>()
 let audioSync: Promise<void> | undefined
+/** The canonical identity whose digests are listed, however it was typed. */
+function listIdentity(): string {
+  const raw = safeStorage()?.getItem(backend.mode === 'hosted' ? 'nalgorithm_hosted_npub' : 'nalgorithm_npub') ?? ''
+  return identityKey(raw) ?? 'setup'
+}
 function audioOwner(): string {
-  const store = safeStorage()
-  return `${backend.mode}:${store?.getItem(backend.mode === 'hosted' ? 'nalgorithm_hosted_npub' : 'nalgorithm_npub') ?? 'setup'}`
+  return `${backend.mode}:${listIdentity()}`
 }
 async function refreshAudioCache(): Promise<void> {
   if (audioSync) return audioSync
@@ -297,9 +302,7 @@ function selected(): DigestRecord | null {
   return digests.find((d) => d.id === selectedId) ?? null
 }
 function selectionKey(): string {
-  const store = safeStorage()
-  const identity = store?.getItem(document.body.dataset.mode === 'hosted' ? 'nalgorithm_hosted_npub' : 'nalgorithm_npub') ?? 'setup'
-  return `nalgorithm_selected_digest_${backend.mode}_${identity}`
+  return `nalgorithm_selected_digest_${backend.mode}_${listIdentity()}`
 }
 
 function playableUrl(d: DigestRecord): string | null {

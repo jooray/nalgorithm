@@ -28,7 +28,7 @@ import {
   pruneScoreCache,
 } from './settings.js'
 
-import { renderFeed, aggregateBoosts, clientRenderOptions } from './render.js'
+import { renderFeed, clearFeed, aggregateBoosts, clientRenderOptions } from './render.js'
 import { setActorProvider } from './signer.js'
 
 import '@fontsource-variable/inter/wght.css'
@@ -60,16 +60,14 @@ import {
   ageLabel,
   decideMerge,
   freshIds,
-  loadLocalSnapshot,
-  saveLocalSnapshot,
   shouldAutoRun,
   type LocalSnapshot,
 } from './snapshot-logic.js'
-import { initDigestView, setDigests, setMakeStatus } from './digest-view.js'
+import { initDigestView, setDigests, setMakeStatus, stopPlayback } from './digest-view.js'
 import { byokBackend, loadLocalDigests } from './byok-digest.js'
+import { identityKey, loadFeedSnapshot, saveFeedSnapshot, setLegacyOwner } from './local-data.js'
 import { rememberProfiles, knownProfiles } from './profiles.js'
 import { APP_VERSION } from './version-check.js'
-import { deviceStorage as localStorage } from './storage.js'
 import { learnIncrementally, activeLearningResult } from './learning.js'
 
 import { initVersionCheck, setUpdateBlocked } from './version-check.js'
@@ -99,35 +97,16 @@ let baseKeys: string[] = []
 let baseFresh: string[] = []
 let shownFresh: string[] = []
 
-const FEED_KEY_PREFIX = 'nalgorithm_byok_feed_'
 const nowSec = (): number => Math.floor(Date.now() / 1000)
 const sigOf = (s: ReturnType<typeof loadSettings>): string => `${s.npub.trim()}|${s.hoursBack}|${s.userPrompt}`
 const keysOf = (posts: ScoredPost[]): string[] => aggregateBoosts(posts).map((p) => p.id)
-
-function feedStore(): Storage | null {
-  try {
-    return localStorage
-  } catch {
-    return null
-  }
-}
 
 function paintAge(): void {
   setAgeLabel(ageLabel(shownAt, nowSec()))
 }
 
-/** Keep the newest ranking on this device, and drop the copies of other identities. */
+/** Keep the newest ranking on this device, under the identity it was ranked for. */
 function saveByokFeed(posts: ScoredPost[], at: number, settings: ReturnType<typeof loadSettings>, fresh: string[]): void {
-  const store = feedStore()
-  if (!store) return
-  try {
-    for (let i = store.length - 1; i >= 0; i--) {
-      const k = store.key(i)
-      if (k?.startsWith(FEED_KEY_PREFIX) && k !== FEED_KEY_PREFIX + settings.npub.trim()) store.removeItem(k)
-    }
-  } catch {
-    // Cleanup is best-effort.
-  }
   const snap: LocalSnapshot = {
     v: 1,
     createdAt: at,
@@ -137,14 +116,15 @@ function saveByokFeed(posts: ScoredPost[], at: number, settings: ReturnType<type
     posts: posts as unknown as LocalSnapshot['posts'],
     profiles: Object.fromEntries(currentProfiles),
   }
-  saveLocalSnapshot(store, FEED_KEY_PREFIX + settings.npub.trim(), snap, (kept) => new Set(collectPostPubkeys(kept as never, Infinity)))
+  void saveFeedSnapshot('byok', settings.npub, snap, (kept) => new Set(collectPostPubkeys(kept as never, Infinity)))
 }
 
 /** Draw the feed this device remembers, before any network call. True when there was one. */
-function showStoredFeed(settings: ReturnType<typeof loadSettings>): boolean {
+async function showStoredFeed(settings: ReturnType<typeof loadSettings>): Promise<boolean> {
   if (!settings.npub.trim()) return false
-  const snap = loadLocalSnapshot(feedStore(), FEED_KEY_PREFIX + settings.npub.trim())
-  if (!snap || snap.posts.length === 0) return false
+  const snap = await loadFeedSnapshot('byok', settings.npub)
+  // A run that finished first, or a different identity saved meanwhile, wins.
+  if (!snap || snap.posts.length === 0 || currentPosts.length > 0 || identityKey(loadSettings().npub) !== identityKey(settings.npub)) return false
   currentPosts = snap.posts as unknown as ScoredPost[]
   currentProfiles = new Map(Object.entries(snap.profiles).map(([k, v]) => [k, v as ProfileData]))
   rememberProfiles(currentProfiles)
@@ -156,6 +136,28 @@ function showStoredFeed(settings: ReturnType<typeof loadSettings>): boolean {
   setStatus(`Showing ${aggregateBoosts(currentPosts).length} posts, ranked by relevance`)
   paintAge()
   return true
+}
+
+/** Another identity in Tune: nothing of the previous one stays on screen. */
+let shownIdentity: string | null = null
+async function followIdentity(settings: ReturnType<typeof loadSettings>): Promise<void> {
+  const next = identityKey(settings.npub)
+  // A run in flight finishes for its own identity, then calls this again.
+  if (next === shownIdentity || isRunning) return
+  shownIdentity = next
+  stopPlayback()
+  currentPosts = []
+  currentProfiles = new Map()
+  shownIds = baseKeys = baseFresh = shownFresh = []
+  shownAt = fetchedAt = null
+  pending = null
+  rankedSig = null
+  hideNewPill()
+  clearFeed(getFeedContainer())
+  paintAge()
+  setDigests(await loadLocalDigests(settings.npub))
+  const stored = await showStoredFeed(settings)
+  if (!stored && !validateSettings(settings) && !settings.autoRefresh) showEmptyState(true, true)
 }
 
 /**
@@ -275,7 +277,7 @@ async function scorePosts(
     onBatchScored: (batch) => {
       const real = batch.filter((p) => !p.defaultScore)
       if (real.length > 0) {
-        cacheScores(
+        void cacheScores(
           real.map((p) => ({
             id: scoreCacheKey(p),
             score: p.score,
@@ -340,19 +342,21 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     if (!quiet) setStatusLoading(text)
   }
   /** A problem: a quiet run leaves the stored feed alone and says so in one line. */
-    const report = (text: string): void => {
+  const report = (text: string): void => {
     if (quiet) {
       pausedUntil = nowSec() + 300
       setQuietNotice(`${text}. Showing your last ranking.`)
-      } else {
-        setStatus(text)
-        if (currentPosts.length === 0) showEmptyState(true, false, `${text}. Open Tune to check your identity, model and relays.`)
+    } else {
+      setStatus(text)
+      if (currentPosts.length === 0) showEmptyState(true, false, `${text}. Open Tune to check your identity, model and relays.`)
     }
   }
+  /** False once Tune names another identity: this run's results then only go to its own storage. */
+  const stillMine = (): boolean => identityKey(loadSettings().npub) === identityKey(settings.npub)
   let working: ScoredPost[] = []
   const setWorking = (list: ScoredPost[]): void => {
     working = list
-    if (!quiet) {
+    if (!quiet && stillMine()) {
       currentPosts = list
       renderCurrent(settings)
     }
@@ -452,10 +456,10 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     const existingLearnedPrompt = settings.learnFromLikes ? settings.learnedPrompt || undefined : undefined
 
     // Prune old cache entries (>30 days)
-    const pruned = pruneScoreCache()
+    const pruned = await pruneScoreCache()
     if (pruned > 0) console.log(`[Nalgorithm] Pruned ${pruned} old score cache date-keys`)
 
-    const scoreCache = loadScoreCache(settings)
+    const scoreCache = await loadScoreCache(settings)
     const cachedPosts: ScoredPost[] = []
     const uncachedPosts: FetchedPost[] = []
 
@@ -518,6 +522,10 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
 
     // Merge cached + newly scored, sort by score descending
     const allScored = [...cachedPosts, ...newlyScored].sort((a, b) => b.score - a.score)
+    if (!stillMine()) {
+      saveByokFeed(allScored, nowSec(), settings, [])
+      return
+    }
     applyRanking(allScored, settings, !auto)
 
     const shown = aggregateBoosts(allScored).length
@@ -542,6 +550,7 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     isRunning = false
     setUpdateBlocked(false)
     setBackgroundBusy(null)
+    if (!stillMine()) void followIdentity(loadSettings())
   }
 }
 
@@ -654,13 +663,13 @@ document.addEventListener('DOMContentLoaded', () => {
       setStatus: setMakeStatus,
     })
   )
-  setDigests(loadLocalDigests())
+  // A digest history from before identities were kept apart belongs to the identity set up then.
+  setLegacyOwner((m) => (m === 'byok' ? settings.npub : null))
 
-  // The feed from last time is on screen at once; a background run follows when it is stale
-  // and the reader allows it (Tune: "Update my feed automatically when I open the app").
-  const stored = showStoredFeed(settings)
-  const valid = !validateSettings(settings)
-  if (!stored && valid && !settings.autoRefresh) showEmptyState(true, true)
-  startLiveChecks({ check: autoCheck, tick: paintAge })
-  document.addEventListener('nalgorithm:settings-saved', autoCheck)
+  // The feed from last time is on screen as soon as it is read; a background run follows when
+  // it is stale and the reader allows it (Tune: "Update my feed automatically when I open the app").
+  void followIdentity(settings).then(() => {
+    startLiveChecks({ check: autoCheck, tick: paintAge })
+    document.addEventListener('nalgorithm:settings-saved', () => void followIdentity(loadSettings()).then(autoCheck))
+  })
 })

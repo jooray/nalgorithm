@@ -7,6 +7,7 @@ import { pubkeyToHex, rankingContext } from 'nalgorithm'
 import { deviceStorage as localStorage, storageNotice } from './storage.js'
 import { setupProblem } from './settings-validation.js'
 import { isClientPreset, presetFromUrl, validateTemplate, type ClientPreset } from './client-url.js'
+import { deleteRecord, getRecord, listRecords, putRecord } from './records.js'
 
 const STORAGE_PREFIX = 'nalgorithm_'
 
@@ -280,85 +281,127 @@ export function updateSetting<K extends keyof AppSettings>(
   saveSettings(settings)
 }
 
-/**
- * Load the full score cache (all date-keys merged into one map).
- */
-export function loadScoreCache(settings = loadSettings()): Map<string, CachedScore> {
-  const prefix = SCORE_CACHE_PREFIX + scoreNamespace(settings)
-  const merged = new Map<string, CachedScore>()
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i)
-    if (!key || !key.startsWith(prefix)) continue
-    try {
-      const entries: Record<string, CachedScore> = JSON.parse(localStorage.getItem(key)!)
-      for (const [id, cached] of Object.entries(entries)) {
-        merged.set(id, cached)
-      }
-    } catch {
-      // ignore corrupt entries
+// Scores live in IndexedDB, one record per ranking namespace and day, so a batch
+// rewrites one day's bucket off the main thread instead of reparsing localStorage.
+const SCORE_RECORD_PREFIX = 'scores:'
+const buckets = new Map<string, Record<string, CachedScore>>()
+const bucketWrites = new Map<string, Promise<unknown>>()
+
+/** Older builds kept day buckets in localStorage; move this namespace's into IndexedDB once. */
+async function migrateLegacyScores(namespace: string): Promise<void> {
+  const prefix = SCORE_CACHE_PREFIX + namespace
+  const legacy: string[] = []
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key?.startsWith(prefix)) legacy.push(key)
     }
+  } catch {
+    return
+  }
+  for (const key of legacy) {
+    let entries: Record<string, CachedScore>
+    try {
+      entries = JSON.parse(localStorage.getItem(key) ?? '{}')
+    } catch {
+      localStorage.removeItem(key) // unreadable, so there is nothing to keep
+      continue
+    }
+    const recordKey = SCORE_RECORD_PREFIX + namespace + key.slice(prefix.length)
+    const existing = (await getRecord<Record<string, CachedScore>>(recordKey)) ?? {}
+    if (await putRecord(recordKey, { ...entries, ...existing })) localStorage.removeItem(key)
+  }
+}
+
+/**
+ * Load the full score cache (all day buckets of this ranking context merged into one map).
+ */
+export async function loadScoreCache(settings = loadSettings()): Promise<Map<string, CachedScore>> {
+  const namespace = scoreNamespace(settings)
+  await migrateLegacyScores(namespace)
+  const merged = new Map<string, CachedScore>()
+  for (const record of await listRecords<Record<string, CachedScore>>(SCORE_RECORD_PREFIX + namespace)) {
+    for (const [id, cached] of Object.entries(record.value ?? {})) merged.set(id, cached)
+  }
+  for (const [key, bucket] of buckets) {
+    if (!key.startsWith(SCORE_RECORD_PREFIX + namespace)) continue
+    for (const [id, cached] of Object.entries(bucket)) merged.set(id, cached)
   }
   return merged
 }
 
 /**
- * Add scored entries to the cache and save (writes to today's date-key).
+ * Add scored entries to today's bucket. Every batch is written as it lands, in
+ * order, so a closed tab keeps everything scored so far. Resolves to false when
+ * the device could only keep them for this session.
  */
 export function cacheScores(
   entries: Array<{ id: string; score: number; justification?: string; scorer?: 'decision' }>,
   settings = loadSettings()
-): void {
-  const key = SCORE_CACHE_PREFIX + scoreNamespace(settings) + todayKey()
-  let bucket: Record<string, CachedScore> = {}
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw) bucket = JSON.parse(raw)
-  } catch {
-    // start fresh
-  }
-  for (const e of entries) {
-    bucket[e.id] = { score: e.score, justification: e.justification, ...(e.scorer ? { scorer: e.scorer } : {}) }
-  }
-  localStorage.setItem(key, JSON.stringify(bucket))
+): Promise<boolean> {
+  const key = SCORE_RECORD_PREFIX + scoreNamespace(settings) + todayKey()
+  const write = (bucketWrites.get(key) ?? Promise.resolve()).then(async () => {
+    let bucket = buckets.get(key)
+    if (!bucket) {
+      bucket = (await getRecord<Record<string, CachedScore>>(key)) ?? {}
+      buckets.set(key, bucket)
+    }
+    for (const e of entries) {
+      bucket[e.id] = { score: e.score, justification: e.justification, ...(e.scorer ? { scorer: e.scorer } : {}) }
+    }
+    return putRecord(key, bucket)
+  })
+  bucketWrites.set(key, write.catch(() => undefined))
+  return write
 }
 
 /**
- * Prune cache date-keys older than 30 days. Returns the number of keys removed.
+ * Prune day buckets older than 30 days. Returns the number of buckets removed.
  */
-export function pruneScoreCache(): number {
+export async function pruneScoreCache(): Promise<number> {
   const cutoff = new Date()
   cutoff.setDate(cutoff.getDate() - CACHE_MAX_AGE_DAYS)
-
-  let removed = 0
-  const keysToDelete: string[] = []
-
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i)
-    if (!key || !key.startsWith(SCORE_CACHE_PREFIX)) continue
-    const dateStr = key.slice(-10)
-    const date = parseDateKey(dateStr)
-    if (date && date < cutoff) {
-      keysToDelete.push(key)
-    }
+  const old = (key: string): boolean => {
+    const date = parseDateKey(key.slice(-10))
+    return date !== null && date < cutoff
   }
 
-  for (const key of keysToDelete) {
-    localStorage.removeItem(key)
+  let removed = 0
+  for (const key of await listScoreKeys()) {
+    if (!old(key)) continue
+    if (key.startsWith(SCORE_RECORD_PREFIX)) {
+      await deleteRecord(key)
+      buckets.delete(key)
+    } else {
+      localStorage.removeItem(key)
+    }
     removed++
   }
   return removed
 }
 
-/**
- * Clear the entire score cache (all date-keys).
- */
-export function clearScoreCache(): void {
-  const keysToDelete: string[] = []
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i)
-    if (key && key.startsWith(SCORE_CACHE_PREFIX)) keysToDelete.push(key)
+async function listScoreKeys(): Promise<string[]> {
+  const keys = (await listRecords(SCORE_RECORD_PREFIX)).map((r) => r.key)
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key?.startsWith(SCORE_CACHE_PREFIX)) keys.push(key)
+    }
+  } catch {
+    // Storage blocked: only IndexedDB buckets remain.
   }
-  for (const key of keysToDelete) localStorage.removeItem(key)
+  return keys
+}
+
+/**
+ * Clear the entire score cache (all day buckets, every context).
+ */
+export async function clearScoreCache(): Promise<void> {
+  for (const key of await listScoreKeys()) {
+    if (key.startsWith(SCORE_RECORD_PREFIX)) await deleteRecord(key)
+    else localStorage.removeItem(key)
+  }
+  buckets.clear()
 }
 
 /**

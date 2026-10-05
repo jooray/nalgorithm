@@ -36,12 +36,9 @@ import {
 } from '../feed-live.js'
 import {
   ageLabel,
-  clearLocalSnapshot,
   decideMerge,
   freshIds,
-  loadLocalSnapshot,
   quietNotice,
-  saveLocalSnapshot,
   shouldAutoRun,
   type LocalSnapshot,
 } from '../snapshot-logic.js'
@@ -69,7 +66,7 @@ import {
   type DigestBackend,
 } from '../digest-view.js'
 import { readDigest, type DigestRecord } from '../digest-model.js'
-import { HOSTED_CACHE_KEY, loadHistory, saveHistory } from '../digest-history.js'
+import { clearIdentityData, clearLegacyHistory, identityKey, loadDigestHistory, loadFeedSnapshot, saveDigestHistory, saveFeedSnapshot, setLegacyOwner } from '../local-data.js'
 import { safeStorage } from '../player.js'
 import { rememberProfiles } from '../profiles.js'
 import {
@@ -155,7 +152,6 @@ let stopLive: (() => void) | undefined
 let digestsKnown = false
 let digestBoot: Promise<void> = Promise.resolve()
 
-const FEED_KEY = (npub: string): string => `nalgorithm_hosted_feed_${npub}`
 const LAST_NPUB_KEY = 'nalgorithm_hosted_npub'
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string): T => {
@@ -201,7 +197,6 @@ export function initHosted(): void {
   $('#btn-hosted-empty-action').addEventListener('click', focusPrompt)
 
   initDigestView(hostedBackend)
-  setDigests(loadHistory(safeStorage(), readDigest, HOSTED_CACHE_KEY))
 
   initDigestForm(closeSettings)
 
@@ -235,12 +230,14 @@ let openSettingsPanel: () => void = () => {}
 
 async function boot(): Promise<void> {
   show('#hosted-startup', false)
-  paintRemembered()
+  const remembered = paintRemembered()
   try {
     const me = await getMe()
     await onSignedIn(me.npub, me.entitlement)
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) return showLogin()
+    // Offline answers fast; what this device remembers decides between a quiet line and the error gate.
+    await remembered
     // Offline or the server is down, but the last ranking is on screen: leave it be.
     const api = err instanceof ApiError ? err : new ApiError(0, (err as Error).message, 'network')
     const quiet = shownIds.length > 0 ? quietNotice(api.status, api.code) : null
@@ -263,20 +260,34 @@ function retryBootWhenVisible(): void {
   void boot()
 }
 
-/** Before the server has answered: draw the ranking this device remembers, so a reload is not blank. */
-function paintRemembered(): void {
-  const store = safeStorage()
-  let npub: string | null = null
+/** The identity whose remembered ranking and digests are on screen before the server confirms the session. */
+let paintedNpub: string | null = null
+
+function lastNpub(): string | null {
   try {
-    npub = store?.getItem(LAST_NPUB_KEY) ?? null
+    return safeStorage()?.getItem(LAST_NPUB_KEY) ?? null
   } catch {
-    npub = null
+    return null
   }
+}
+
+/**
+ * Before the server has answered: draw what this device remembers for the account last signed
+ * in here, so a reload is not blank. `onSignedIn` drops it if the session turns out to be someone
+ * else's, and `showLogin` if there is no session.
+ */
+async function paintRemembered(): Promise<void> {
+  const npub = lastNpub()
   if (!npub) return
-  const snap = loadLocalSnapshot(store, FEED_KEY(npub))
-  if (!snap || snap.posts.length === 0) return
+  // A digest list cached before identities were kept apart was this account's.
+  setLegacyOwner((mode) => (mode === 'hosted' ? npub : null))
+  const [snap, digests] = await Promise.all([loadFeedSnapshot('hosted', npub), loadDigestHistory('hosted', npub, readDigest)])
+  // The server may have answered meanwhile: its account and data win.
+  if (document.body.dataset.signedIn === 'false' || (userNpub && userNpub !== npub)) return
+  paintedNpub = npub
+  if (!digestsKnown && digests.length > 0) setDigests(digests)
+  if (!snap || snap.posts.length === 0 || shownIds.length > 0) return
   document.body.dataset.signedIn = 'true'
-  userNpub = ''
   drawFeed(
     { posts: snap.posts as unknown as FeedResponse['posts'], profiles: snap.profiles as FeedResponse['profiles'], hoursBack: snap.hoursBack ?? 24 },
     Array.isArray(snap.fresh) ? snap.fresh : []
@@ -300,6 +311,12 @@ function showLogin(message = ''): void {
   show('#hosted-empty', false)
   clearFeed($('#hosted-feed'))
   resetFeedState()
+  // Without a session, nothing remembered for any account stays on screen.
+  if (paintedNpub || digestCount() > 0) {
+    stopPlayback()
+    setDigests([])
+  }
+  paintedNpub = null
   setStatus('')
   setLoginStatus(message, Boolean(message))
 }
@@ -373,12 +390,12 @@ async function signOut(closeSettings: () => void): Promise<void> {
   // The next person on this device must not see this account's digests.
   stopPlayback()
   try {
-    safeStorage()?.removeItem(HOSTED_CACHE_KEY)
     safeStorage()?.removeItem(LAST_NPUB_KEY)
   } catch {
     // nothing cached to clear
   }
-  clearLocalSnapshot(safeStorage(), FEED_KEY(userNpub))
+  clearLegacyHistory('hosted')
+  if (userNpub) await clearIdentityData('hosted', userNpub)
   setDigests([])
   showLogin()
 }
@@ -388,6 +405,13 @@ let linkPreviewsOn = true
 
 async function onSignedIn(npub: string, ent: Entitlement): Promise<void> {
   const switched = userNpub !== npub
+  // A remembered ranking or digest list from another account goes before anything of this one is drawn.
+  if (paintedNpub && identityKey(paintedNpub) !== identityKey(npub)) {
+    stopPlayback()
+    resetShown()
+    setDigests([])
+  }
+  paintedNpub = null
   userNpub = npub
   document.body.dataset.signedIn = 'true'
   show('#hosted-login', false)
@@ -418,8 +442,6 @@ async function onSignedIn(npub: string, ent: Entitlement): Promise<void> {
   if (!promptSet) return showFirstRun()
   $('#hosted-prompt-firstrun').classList.add('hidden')
 
-  // A different person on this device must not see the previous one's ranking.
-  if (switched && shownIds.length > 0 && !loadLocalSnapshot(safeStorage(), FEED_KEY(npub))) resetShown()
   stopLive?.()
   // Runs the first check straight away: latest snapshot from the server, then a background run if it is stale.
   stopLive = startLiveChecks({ check: () => void liveCheck(), tick: paintAge })
@@ -573,7 +595,7 @@ function rememberFeed(feed: FeedResponse, at: number, fresh: string[]): void {
     posts: feed.posts as unknown as LocalSnapshot['posts'],
     profiles: feed.profiles,
   }
-  saveLocalSnapshot(safeStorage(), FEED_KEY(userNpub), snap, (posts) => new Set(collectPostPubkeys(posts as never, Infinity)))
+  void saveFeedSnapshot('hosted', userNpub, snap, (posts) => new Set(collectPostPubkeys(posts as never, Infinity)))
 }
 
 function paintAge(): void {
@@ -1001,16 +1023,19 @@ async function loadDigestSection(): Promise<void> {
  * Returns the list, or null when it could not be read.
  */
 async function loadDigests(quiet = false): Promise<DigestRecord[] | null> {
-  const store = safeStorage()
-  const cached = loadHistory(store, readDigest, HOSTED_CACHE_KEY)
+  const owner = userNpub
+  if (!owner) return null
+  const cached = await loadDigestHistory('hosted', owner, readDigest)
   if (!quiet) setListLoading(true)
   lastListLoad = Date.now()
   try {
     const fresh = await getDigests(DIGEST_FEED_LIMIT)
+    // Signed out or another account meanwhile: this list is not theirs to see.
+    if (userNpub !== owner) return null
     // A list that omits the notes must not wipe notes already fetched.
     const known = new Map(cached.map((d) => [d.id, d]))
     const list = fresh.map((d) => (d.notes === undefined && known.get(d.id)?.notes ? { ...d, notes: known.get(d.id)!.notes } : d))
-    saveHistory(store, list, HOSTED_CACHE_KEY)
+    void saveDigestHistory('hosted', owner, list)
     digestsKnown = true
     const same = list.length === digestCount() && list.every((d, i) => d.id === digestIds()[i])
     if (!quiet || !same) setDigests(list)

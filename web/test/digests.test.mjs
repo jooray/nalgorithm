@@ -4,20 +4,9 @@ import {
   readSourceNote, readDigest, digestSourceNotes, toScoredPost, makeLocalDigest, notePubkeys,
   estimateSeconds, formatLength, firstLines, newestFirst, digestLengthLabel,
 } from '../src/digest-model.ts'
-import { HISTORY_CAP, loadHistory, withDigest, saveHistory, addToHistory } from '../src/digest-history.ts'
+import { HISTORY_CAP, withDigest } from '../src/digest-history.ts'
 
 const hex = (c) => c.repeat(64)
-const memory = (limit = Infinity) => {
-  const m = new Map()
-  return {
-    getItem: (k) => (m.has(k) ? m.get(k) : null),
-    setItem: (k, v) => {
-      if (String(v).length > limit) throw new Error('QuotaExceededError')
-      m.set(k, String(v))
-    },
-    removeItem: (k) => void m.delete(k),
-  }
-}
 const post = (id, score, extra = {}) => ({
   id: hex(id), type: 'original', author: hex('a'), content: `note ${id}`, createdAt: 1000, score,
   justification: `why ${id}`, rawEvent: { kind: 1 }, ...extra,
@@ -104,29 +93,6 @@ test('history: newest first, deduplicated by id, capped', () => {
   assert.equal(again[0].text, 'replaced')
 })
 
-test('history: round trips through storage and ignores junk', () => {
-  const s = memory()
-  addToHistory(s, readDigest, digest(1, 10))
-  addToHistory(s, readDigest, digest(2, 20, { notes: [] }))
-  const list = loadHistory(s, readDigest)
-  assert.deepEqual(list.map((d) => d.id), ['2', '1'])
-  assert.deepEqual(list[0].notes, [])
-  s.setItem('nalgorithm_digest_history_v1', '[{"id":1},"x",null]')
-  assert.deepEqual(loadHistory(s, readDigest), [])
-  s.setItem('nalgorithm_digest_history_v1', 'nope')
-  assert.deepEqual(loadHistory(s, readDigest), [])
-  assert.deepEqual(loadHistory(null, readDigest), [])
-})
-
-test('history: a full store sheds the oldest digests, never the newest', () => {
-  const s = memory(400)
-  const list = [digest(3, 30), digest(2, 20), digest(1, 10)].map((d) => ({ ...d, text: 'x'.repeat(150) }))
-  const kept = saveHistory(s, list)
-  assert.ok(kept.length < 3)
-  assert.equal(kept[0].id, '3')
-  assert.equal(loadHistory(s, readDigest).length, kept.length)
-})
-
 test('lengths and lines', () => {
   assert.equal(formatLength(232), '3 min 52 s')
   assert.equal(formatLength(180), '3 min')
@@ -143,12 +109,6 @@ test('readDigest: the exact audio length is kept when it is a positive number, d
   assert.equal('durationSeconds' in readDigest({ ...base, durationSeconds: null }), false, 'older digests have none')
   assert.equal('durationSeconds' in readDigest(base), false)
   for (const bad of [0, -5, '227', NaN, Infinity]) assert.equal('durationSeconds' in readDigest({ ...base, durationSeconds: bad }), false, String(bad))
-})
-
-test('history: the exact length survives storage', () => {
-  const s = memory()
-  addToHistory(s, readDigest, { id: '5', createdAt: 50, text: 't', audioUrl: 'https://x/a.mp3', durationSeconds: 227.448 })
-  assert.equal(loadHistory(s, readDigest)[0].durationSeconds, 227.448)
 })
 
 test('digestLengthLabel: server length from the first render, the player figure after, a guess last', () => {

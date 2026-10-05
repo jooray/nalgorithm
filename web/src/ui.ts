@@ -209,8 +209,7 @@ export function initUI(
   // Clear scores
   const btnClearScores = $<HTMLButtonElement>('#btn-clear-scores')
   btnClearScores.addEventListener('click', () => {
-    clearScoreCache()
-    setStatus('Cached scores cleared')
+    void clearScoreCache().then(() => setStatus('Cached scores cleared'))
   })
 
   // Refresh

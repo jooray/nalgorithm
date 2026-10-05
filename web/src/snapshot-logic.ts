@@ -194,27 +194,36 @@ export interface KeyValueStore {
   removeItem(key: string): void
 }
 
-/** Fit a snapshot under the caps. Posts are in rank order, so the tail goes first. */
+const encoder = new TextEncoder()
+const bytesOf = (value: unknown): number => encoder.encode(JSON.stringify(value)).length
+
+/**
+ * Fit a snapshot under the caps. Posts are in rank order, so the tail goes first.
+ * Each post (and each profile it brings) is measured once, in encoded bytes.
+ */
 export function trimLocalSnapshot(
   snap: LocalSnapshot,
   maxBytes = LOCAL_MAX_BYTES,
   maxPosts = LOCAL_MAX_POSTS,
   collectKeep: (posts: StoredPost[]) => Set<string> = () => new Set(Object.keys(snap.profiles))
 ): LocalSnapshot {
-  let posts = snap.posts.slice(0, maxPosts)
-  const build = (p: StoredPost[]): LocalSnapshot => {
-    const keep = collectKeep(p)
-    return { ...snap, posts: p, profiles: Object.fromEntries(Object.entries(snap.profiles).filter(([k]) => keep.has(k))) }
+  const posts = snap.posts.slice(0, maxPosts)
+  let total = bytesOf({ ...snap, posts: [], profiles: {} })
+  let kept = 0
+  const people = new Set<string>()
+  for (const post of posts) {
+    const added = [...collectKeep([post])].filter((k) => !people.has(k) && k in snap.profiles)
+    const size = bytesOf(post) + 1 + added.reduce((n, k) => n + bytesOf(k) + bytesOf(snap.profiles[k]) + 2, 0)
+    if (total + size > maxBytes) break
+    total += size
+    kept++
+    for (const k of added) people.add(k)
   }
-  let out = build(posts)
-  while (posts.length > 0 && JSON.stringify(out).length > maxBytes) {
-    posts = posts.slice(0, Math.floor(posts.length * 0.8))
-    out = build(posts)
-  }
-  return out
+  const keep = collectKeep(posts.slice(0, kept))
+  return { ...snap, posts: posts.slice(0, kept), profiles: Object.fromEntries(Object.entries(snap.profiles).filter(([k]) => keep.has(k))) }
 }
 
-function validSnapshot(v: unknown): v is LocalSnapshot {
+export function validSnapshot(v: unknown): v is LocalSnapshot {
   if (!v || typeof v !== 'object') return false
   const s = v as Partial<LocalSnapshot>
   return s.v === 1 && typeof s.createdAt === 'number' && Array.isArray(s.posts) && typeof s.profiles === 'object' && s.profiles !== null

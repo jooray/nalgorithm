@@ -10,15 +10,15 @@
 import { generateDigest, synthesizeSpeech, type ProfileData, type ScoredPost } from 'nalgorithm'
 import type { AppSettings } from './settings.js'
 import { loadSettings } from './settings.js'
-import { addToHistory, loadHistory } from './digest-history.js'
+import { addDigestToHistory, identityKey, loadDigestHistory } from './local-data.js'
 import { makeLocalDigest, readDigest, wordCount, type DigestRecord } from './digest-model.js'
 import { addDigest, setDigests, showGenerating, type DigestBackend } from './digest-view.js'
-import { safeStorage } from './player.js'
 import { snapshotOf } from './profiles.js'
 import { clientRenderOptions } from './render.js'
 
-export function loadLocalDigests(): DigestRecord[] {
-  return loadHistory(safeStorage(), readDigest)
+/** The digests written in this browser for one identity, newest first. */
+export function loadLocalDigests(identity: string): Promise<DigestRecord[]> {
+  return loadDigestHistory('byok', identity, readDigest)
 }
 
 /**
@@ -80,9 +80,11 @@ export async function writeDigest(
     topN: settings.digestTopN,
     profiles: snapshotOf(profiles),
   })
-  addToHistory(safeStorage(), readDigest, record)
-  addDigest(record)
-  const summary = `${record.notes?.length ?? 0} notes, ${wordCount(record.text)} words, ${model}`
+  const kept = await addDigestToHistory('byok', settings.npub, readDigest, record)
+  // Written for the identity that asked; if Tune names another one now, it waits in that history.
+  if (identityKey(loadSettings().npub) === identityKey(settings.npub)) addDigest(record)
+  const unsaved = kept ? '' : ' This device could not save it, so it stays only until you close the page.'
+  const summary = `${record.notes?.length ?? 0} notes, ${wordCount(record.text)} words, ${model}.${unsaved}`
   return failure
     ? `Digest failed part-way (${failure}). Kept the ${wordCount(record.text)} words that arrived.`
     : `Digest ready: ${summary}`
