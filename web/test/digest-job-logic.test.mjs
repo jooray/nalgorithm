@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ANOTHER_DIGEST_HINT,
-  deliveredDuringRun,
+  readyDuringRun,
   IDLE_STATUS,
   clock,
   estimateText,
@@ -60,7 +60,8 @@ test('nextJobStep: only a running-to-finished change is news', () => {
   assert.deepEqual(nextJobStep(false, IDLE_STATUS), { kind: 'none' })
   assert.deepEqual(nextJobStep(false, finished('sent')), { kind: 'none' }, 'an old finished run seen on load is not announced')
   assert.deepEqual(nextJobStep(true, running()), { kind: 'none' })
-  assert.deepEqual(nextJobStep(true, finished('sent')), { kind: 'arrived' })
+  assert.deepEqual(nextJobStep(true, finished('sent')), { kind: 'arrived', dmPending: false })
+  assert.deepEqual(nextJobStep(true, finished('delivery_pending')), { kind: 'arrived', dmPending: true }, 'a written digest whose DM is pending is not a failure')
   const failed = nextJobStep(true, finished('failed'))
   assert.equal(failed.kind, 'failed')
   assert.equal(failed.action, 'retry')
@@ -140,8 +141,8 @@ test('empty list, digest requested: polling the status announces it once and fin
 
 test('a digest made after the run began ends the progress display, even before the job is marked finished', () => {
   const running = { running: true, startedAt: 1000, lastDurationSeconds: null, lastStatus: null, finishedAt: null }
-  assert.equal(deliveredDuringRun(running, [{ createdAt: 1200 }]), true)
-  assert.equal(deliveredDuringRun(running, [{ createdAt: 900 }]), false, 'an older digest does not count')
-  assert.equal(deliveredDuringRun(running, []), false)
-  assert.equal(deliveredDuringRun({ ...running, running: false }, [{ createdAt: 1200 }]), false)
+  assert.equal(readyDuringRun(running, [{ createdAt: 1200 }]), true)
+  assert.equal(readyDuringRun(running, [{ createdAt: 900 }]), false, 'an older digest does not count')
+  assert.equal(readyDuringRun(running, []), false)
+  assert.equal(readyDuringRun({ ...running, running: false }, [{ createdAt: 1200 }]), false)
 })

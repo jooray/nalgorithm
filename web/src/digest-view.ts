@@ -206,6 +206,10 @@ export function digestIds(): string[] {
   return digests.map((d) => d.id)
 }
 
+export function currentDigests(): readonly DigestRecord[] {
+  return digests
+}
+
 export function stopPlayback(): void {
   player?.load(null)
 }

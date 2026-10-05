@@ -60,7 +60,8 @@ export async function claimDigestJob(db: Db, npub: string, now: number): Promise
 /** Release the slot. Only a successful run updates the duration estimate. */
 export async function finishDigestJob(db: Db, npub: string, startedAt: number, status: string, now: number, owner?: string): Promise<void> {
   const owned = owner ? ' AND owner = ?' : ''
-  if (status === 'sent') {
+  // A digest that was written counts toward the estimate even if its DM is still pending.
+  if (status === 'sent' || status === 'delivery_pending') {
     await db.run('UPDATE digest_jobs SET running = 0, finished_at = ?, last_status = ?, last_duration = ? WHERE npub = ? AND started_at = ?' + owned, [
       now,
       status,

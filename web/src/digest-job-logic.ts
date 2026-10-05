@@ -61,8 +61,8 @@ export const ANOTHER_DIGEST_HINT = 'Writes a new one from your latest notes.'
 export type JobStep =
   /** Nothing changed that the reader needs to hear about. */
   | { kind: 'none' }
-  /** A run was in progress and ended well: fetch the list and show the new digest. */
-  | { kind: 'arrived' }
+  /** A run was in progress and ended with a digest: fetch the list and show it. `dmPending`: its DM did not go through yet. */
+  | { kind: 'arrived'; dmPending: boolean }
   /** A run was in progress and ended without a digest. */
   | { kind: 'failed'; message: string; action: 'retry' | 'pay' | 'settings' }
 
@@ -89,7 +89,8 @@ export function failureFor(lastStatus: string | null): { message: string; action
 /** Compare the previous and the newest status. Only a running-to-finished change is news. */
 export function nextJobStep(wasRunning: boolean, now: DigestStatus): JobStep {
   if (!wasRunning || now.running) return { kind: 'none' }
-  if (now.lastStatus === 'sent') return { kind: 'arrived' }
+  if (now.lastStatus === 'sent') return { kind: 'arrived', dmPending: false }
+  if (now.lastStatus === 'delivery_pending') return { kind: 'arrived', dmPending: true }
   return { kind: 'failed', ...failureFor(now.lastStatus) }
 }
 
@@ -131,9 +132,16 @@ export function findArrived<T extends { id: string }>(knownIds: Iterable<string>
 
 /**
  * The digest row is saved before its DM goes out, so the list can show the new digest
- * while the job still says "running". Once a digest made after the run began is in the
- * list, the reader has it, and the progress display has nothing left to say.
+ * while the job still says "running". The reader can play it already; whether the DM
+ * was accepted is only known when the job finishes.
  */
-export function deliveredDuringRun(status: DigestStatus, list: readonly { createdAt: number }[]): boolean {
+export function readyDuringRun(status: DigestStatus, list: readonly { createdAt: number }[]): boolean {
   return status.running && status.startedAt !== null && list.some((d) => d.createdAt >= (status.startedAt as number))
+}
+
+/** What to say once the digest is in the list. */
+export function arrivalText(stage: 'ready' | 'sent' | 'dm_pending'): string {
+  if (stage === 'ready') return 'Your digest is ready here. Sending it to your DMs…'
+  if (stage === 'dm_pending') return 'Your digest is ready here. Its DM has not gone through yet; the server will try again.'
+  return 'Your digest has arrived.'
 }

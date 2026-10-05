@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { collectPostPubkeys } from 'nalgorithm'
 import type { PipelineLogger, ScoredPost } from 'nalgorithm'
@@ -265,11 +266,20 @@ export function createApp(deps: AppDeps) {
 
     if (method === 'GET' && path === '/digests') {
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 10) || 10, 1), 30)
+      // `summary=1` leaves out the show notes, the bulk of the list; a polling client fetches them per digest.
+      const summary = url.searchParams.get('summary') === '1'
       const rows = await db.all<DigestRow>(
-        'SELECT id, created_at, body, audio_url, notes, duration_s FROM digests WHERE npub = ? ORDER BY created_at DESC LIMIT ?',
+        `SELECT id, created_at, body, audio_url, ${summary ? 'NULL AS notes' : 'notes'}, duration_s FROM digests WHERE npub = ? ORDER BY created_at DESC LIMIT ?`,
         [npub, limit],
       )
-      return send(res, 200, { digests: rows.map(publicDigest) })
+      const body = { digests: rows.map((r) => (summary ? { ...publicDigest(r), notes: undefined } : publicDigest(r))) }
+      // An unchanged list answers 304 with no body, so status polls move almost nothing.
+      const etag = `"${createHash('sha256').update(JSON.stringify(body)).digest('base64url').slice(0, 27)}"`
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-store' })
+        return void res.end()
+      }
+      return send(res, 200, body, { ETag: etag })
     }
 
     const digestMatch = method === 'GET' ? /^\/digests\/(\d{1,15})$/.exec(path) : null
@@ -359,6 +369,11 @@ export function createApp(deps: AppDeps) {
       // Reading the snapshot never ranks and never touches the daily cap.
       if (latest) {
         if (!previous) return send(res, 200, { snapshot: null, entitlement: state })
+        // `since`: the client already has this ranking, so only say whether it is still current.
+        const since = Number(url.searchParams.get('since'))
+        if (Number.isFinite(since) && since > 0 && previous.createdAt <= since) {
+          return send(res, 200, { snapshot: null, unchanged: true, createdAt: previous.createdAt, settingsChanged: previous.sig !== sig, entitlement: state })
+        }
         return send(res, 200, { snapshot: answer(previous, previous.posts.map((p) => ({ ...p, isNew: false })), true), entitlement: state })
       }
 

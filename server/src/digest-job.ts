@@ -55,13 +55,17 @@ export interface DigestDeps {
   synthesize?: typeof libSynthesize
 }
 
-export type DigestStatus = 'sent' | 'no_prompt' | 'not_entitled' | 'billing_unavailable' | 'capped' | 'no_posts' | 'failed'
+/** `delivery_pending`: the digest is written and saved in the app, but its DM has not been accepted yet. */
+export type DigestStatus = 'sent' | 'delivery_pending' | 'no_prompt' | 'not_entitled' | 'billing_unavailable' | 'capped' | 'no_posts' | 'failed'
 
 export interface DigestOutcome {
   status: DigestStatus
   detail?: string
   hasAudio?: boolean
 }
+
+/** How long an undelivered digest is resent instead of writing a new one. */
+export const PENDING_RETRY_SECONDS = 6 * 3600
 
 const dayStamp = (sec: number): string => new Date(sec * 1000).toISOString().slice(0, 10)
 
@@ -136,6 +140,9 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   if (state.state === 'unknown') return { status: 'billing_unavailable' }
   if (state.state !== 'active' && state.state !== 'trial') return { status: 'not_entitled' }
 
+  // A recent digest whose DM did not go through is delivered again rather than paid for twice.
+  // An older one stays readable in the app; today's run writes a new digest instead of resending it.
+  await db.run("UPDATE digests SET status = 'undelivered' WHERE npub = ? AND status = 'delivery_pending' AND created_at < ?", [npub, now - PENDING_RETRY_SECONDS])
   const pending = await db.get<{ id: number; created_at: number; body: string; audio_url: string | null; notes: string | null }>(
     "SELECT id, created_at, body, audio_url, notes FROM digests WHERE npub = ? AND status = 'delivery_pending' ORDER BY created_at DESC LIMIT 1", [npub])
   if (pending) return deliverDigest(deps, npub, pending.id, pending.created_at, pending.body, pending.audio_url, parseNotes(pending.notes))
@@ -179,19 +186,18 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
 
     try {
       opts.signal?.throwIfAborted()
+      // Without somewhere to upload it, audio could not reach anyone: do not pay for it.
       if (deps.upload) {
-      const audio = await synth(
-        { ...llm, model: deps.models.ttsModel, voice: schedule.voice ?? deps.models.ttsVoice, format: 'mp3' },
-        text,
-      )
-      if (deps.upload) {
+        const audio = await synth(
+          { ...llm, model: deps.models.ttsModel, voice: schedule.voice ?? deps.models.ttsVoice, format: 'mp3' },
+          text,
+        )
         try {
           audioUrl = (await deps.upload(audio)).url
           durationSeconds = mp3DurationSeconds(audio)
         } catch (err) {
           log.warn(`digest audio upload failed for ${npub.slice(0, 8)}: ${(err as Error).message}`)
         }
-      }
       }
     } catch (err) {
       log.warn(`digest speech failed for ${npub.slice(0, 8)}: ${(err as Error).message}`)
@@ -234,7 +240,7 @@ async function deliverDigest(deps: DigestDeps, npub: string, digestId: number, c
     tier,
     detail,
   ])
-  if (!delivered) return { status: 'failed', detail: 'Ready in the app; DM relay delivery is pending. ' + (detail ?? ''), hasAudio: audioUrl !== null }
+  if (!delivered) return { status: 'delivery_pending', detail: detail ?? 'not delivered', hasAudio: audioUrl !== null }
   await db.run("UPDATE digests SET status = 'ok' WHERE id = ? AND npub = ?", [digestId, npub])
   return { status: 'sent', hasAudio: audioUrl !== null }
 }
@@ -242,7 +248,7 @@ async function deliverDigest(deps: DigestDeps, npub: string, digestId: number, c
 /** Advance a schedule after a run: retry soon after a transient failure, otherwise wait for tomorrow. */
 export async function recordRun(db: Db, npub: string, outcome: DigestOutcome, nowSec: number): Promise<Schedule> {
   const s = await loadSchedule(db, npub)
-  const transient = outcome.status === 'failed' || outcome.status === 'billing_unavailable'
+  const transient = outcome.status === 'failed' || outcome.status === 'billing_unavailable' || outcome.status === 'delivery_pending'
   const attempts = transient ? s.attempts + 1 : 0
   const retry = transient && attempts < 3
   const next: Schedule = {

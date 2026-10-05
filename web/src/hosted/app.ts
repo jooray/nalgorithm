@@ -45,7 +45,8 @@ import {
 import {
   IDLE_STATUS,
   findArrived,
-  deliveredDuringRun,
+  readyDuringRun,
+  arrivalText,
   firstDigestKey,
   nextJobStep,
   progressText,
@@ -62,6 +63,7 @@ import {
   stopPlayback,
   digestCount,
   digestIds,
+  currentDigests,
   setDigestJobRunning,
   type DigestBackend,
 } from '../digest-view.js'
@@ -339,6 +341,7 @@ function resetFeedState(): void {
   stopJobTimers()
   job = IDLE_STATUS
   jobWasRunning = false
+  readyDuringJob = null
   digestsKnown = false
   setDigestJobRunning(false)
 }
@@ -533,9 +536,9 @@ async function liveCheck(): Promise<void> {
 /** The stored ranking from the server. It never ranks and never uses the daily cap. */
 async function syncLatest(): Promise<void> {
   try {
-    const latest = await getLatestFeed()
+    const latest = await getLatestFeed(fetchedAt)
     settingsChanged = latest?.settingsChanged === true
-    if (!latest || (latest.createdAt ?? 0) <= (fetchedAt ?? 0)) return
+    if (!latest || 'unchanged' in latest || (latest.createdAt ?? 0) <= (fetchedAt ?? 0)) return
     setEntitlement(latest.entitlement)
     applyFeed(latest, { manual: false })
   } catch (err) {
@@ -1017,35 +1020,65 @@ async function loadDigestSection(): Promise<void> {
   }
 }
 
+/** The server's digest list as last read on this page, with the answers' ETags, for one account. */
+let listState: { owner: string; list: DigestRecord[] | null; etag?: string; summaryEtag?: string } = { owner: '', list: null }
+/** One read in flight at a time: triggers that coincide (tab shown, job poll, return to the app) share it. */
+let listRead: { owner: string; summary: boolean; promise: Promise<DigestRecord[]> } | null = null
+
+/**
+ * Read the list from the server. A background read asks for the summary (no show notes) and
+ * only with the ETag of the last answer, so an unchanged list is a body-less 304.
+ */
+function readServerList(owner: string, summary: boolean): Promise<DigestRecord[]> {
+  if (listRead && listRead.owner === owner && (listRead.summary === summary || !listRead.summary)) return listRead.promise
+  if (listState.owner !== owner) listState = { owner, list: null }
+  const state = listState
+  const promise = (async () => {
+    const answer = await getDigests(DIGEST_FEED_LIMIT, { summary, etag: state.list ? (summary ? state.summaryEtag : state.etag) : undefined })
+    if (summary) state.summaryEtag = answer.etag
+    else state.etag = answer.etag
+    if (answer.unchanged && state.list) return state.list
+    const fresh = answer.unchanged ? [] : answer.digests
+    // A list that omits the notes must not wipe notes already fetched.
+    const known = new Map((state.list ?? (await loadDigestHistory('hosted', owner, readDigest))).map((d) => [d.id, d]))
+    state.list = fresh.map((d) => (d.notes === undefined && known.get(d.id)?.notes ? { ...d, notes: known.get(d.id)!.notes } : d))
+    return state.list
+  })().finally(() => {
+    if (listRead?.promise === promise) listRead = null
+  })
+  listRead = { owner, summary, promise }
+  return promise
+}
+
+/** What a redraw would change: order, audio and length; show notes load on their own. */
+const listShape = (list: readonly DigestRecord[]): string => list.map((d) => `${d.id}|${d.audioUrl ?? ''}|${d.durationSeconds ?? ''}`).join()
+
 /**
  * Newest digests from the server, cached so the tab opens offline. `quiet` is for
- * background refreshes: no spinner, no error card, and nothing redrawn when nothing changed.
- * Returns the list, or null when it could not be read.
+ * background refreshes: no spinner, no error card, the summary list only, and nothing
+ * redrawn when nothing changed. Returns the list, or null when it could not be read.
  */
 async function loadDigests(quiet = false): Promise<DigestRecord[] | null> {
   const owner = userNpub
   if (!owner) return null
-  const cached = await loadDigestHistory('hosted', owner, readDigest)
   if (!quiet) setListLoading(true)
   lastListLoad = Date.now()
   try {
-    const fresh = await getDigests(DIGEST_FEED_LIMIT)
+    const before = listState.owner === owner ? listState.list : null
+    const list = await readServerList(owner, quiet)
     // Signed out or another account meanwhile: this list is not theirs to see.
     if (userNpub !== owner) return null
-    // A list that omits the notes must not wipe notes already fetched.
-    const known = new Map(cached.map((d) => [d.id, d]))
-    const list = fresh.map((d) => (d.notes === undefined && known.get(d.id)?.notes ? { ...d, notes: known.get(d.id)!.notes } : d))
-    void saveDigestHistory('hosted', owner, list)
+    if (list !== before) void saveDigestHistory('hosted', owner, list)
     digestsKnown = true
-    const same = list.length === digestCount() && list.every((d, i) => d.id === digestIds()[i])
-    if (!quiet || !same) setDigests(list)
+    if (!quiet || listShape(list) !== listShape(currentDigests())) setDigests(list)
     return list
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       showLogin(describeError(err).message)
       return null
     }
-    if (quiet) return null
+    if (quiet || userNpub !== owner) return null
+    const cached = await loadDigestHistory('hosted', owner, readDigest)
     if (cached.length > 0 && digestCount() === 0) setDigests(cached)
     setListError(
       cached.length > 0
@@ -1057,6 +1090,21 @@ async function loadDigests(quiet = false): Promise<DigestRecord[] | null> {
   } finally {
     if (!quiet) setListLoading(false)
   }
+}
+
+/** Show notes fetched for one digest are kept with the list on this device, for offline reading. */
+async function loadFullDigest(d: DigestRecord): Promise<DigestRecord | null> {
+  const owner = userNpub
+  const full = await getDigest(d.id)
+  if (!full || !owner || userNpub !== owner) return full
+  if (listState.owner === owner && listState.list) {
+    listState.list = listState.list.map((x) => (x.id === full.id ? { ...x, notes: full.notes } : x))
+  }
+  const stored = await loadDigestHistory('hosted', owner, readDigest)
+  if (stored.some((x) => x.id === full.id)) {
+    void saveDigestHistory('hosted', owner, stored.map((x) => (x.id === full.id ? { ...x, notes: full.notes } : x)))
+  }
+  return full
 }
 
 // ─── Digest on demand ────────────────────────────────────────────────────────
@@ -1079,9 +1127,12 @@ function stopJobTimers(): void {
   jobPoll = jobTick = undefined
 }
 
+/** The digest of the running job that is already in the list while its DM is being sent. */
+let readyDuringJob: string | null = null
+
 /** Both places that show the running digest: the Digests tab line and the Tune line. */
 function paintJob(): void {
-  const text = job.running ? progressText(job, nowSec()) : ''
+  const text = !job.running ? '' : readyDuringJob ? arrivalText('ready') : progressText(job, nowSec())
   if (job.running) setMakeStatus(text)
   setText('#digest-now-status', text)
 }
@@ -1090,11 +1141,16 @@ function paintJob(): void {
 async function refreshDigestStatus(): Promise<void> {
   if (!userNpub) return
   try {
-    let status = await getDigestStatus()
-    if (status.running) {
-      // The list can have the new digest before the job is marked finished (the DM is sent in between).
+    const status = await getDigestStatus()
+    if (status.running && !readyDuringJob) {
+      // The list can have the new digest before the job is finished (the DM is sent in between):
+      // it can be played now, but delivery is only known once the job ends.
       const list = await loadDigests(true)
-      if (list && deliveredDuringRun(status, list)) status = { ...status, running: false, lastStatus: 'sent', finishedAt: nowSec() }
+      if (list && readyDuringRun(status, list)) {
+        const fresh = findArrived(knownBeforeRun, list) ?? list[0]
+        readyDuringJob = fresh.id
+        setDigests(list, { select: fresh.id })
+      }
     }
     applyDigestStatus(status)
   } catch (err) {
@@ -1111,14 +1167,16 @@ function applyDigestStatus(status: DigestStatus): void {
   setDigestJobRunning(status.running, status.startedAt)
 
   if (status.running) {
-    // Status every 10 s even in the background (the browser slows timers there); a tick draws the elapsed time.
-    if (jobPoll === undefined) jobPoll = window.setInterval(() => void refreshDigestStatus(), JOB_POLL_MS)
+    // Status every 10 s while the page is in view; a hidden tab reads nothing and catches up when shown.
+    if (jobPoll === undefined) jobPoll = window.setInterval(() => document.visibilityState === 'visible' && void refreshDigestStatus(), JOB_POLL_MS)
     if (jobTick === undefined) jobTick = window.setInterval(() => document.visibilityState === 'visible' && paintJob(), 1000)
     paintJob()
     return
   }
   stopJobTimers()
-  if (step.kind === 'arrived') void announceArrival()
+  const shownEarly = readyDuringJob
+  readyDuringJob = null
+  if (step.kind === 'arrived') void announceArrival(step.dmPending, shownEarly)
   else if (step.kind === 'failed') {
     setMakeStatus(step.message, true)
     setText('#digest-now-status', step.message, true)
@@ -1132,12 +1190,17 @@ function applyDigestStatus(status: DigestStatus): void {
   }
 }
 
-/** The digest finished: load it, put it in the hero player (no autoplay), say so once where the reader is. */
-async function announceArrival(): Promise<void> {
+/**
+ * The digest finished: load it, put it in the hero player (no autoplay), say so once where the
+ * reader is. A digest already shown while its DM was sent is not selected again.
+ */
+async function announceArrival(dmPending: boolean, shownEarly: string | null): Promise<void> {
   const list = await loadDigests(true)
-  const fresh = findArrived(knownBeforeRun, list ?? []) ?? list?.[0]
-  if (fresh) setDigests(list ?? [], { select: fresh.id })
-  const text = 'Your digest has arrived.'
+  if (!shownEarly) {
+    const fresh = findArrived(knownBeforeRun, list ?? []) ?? list?.[0]
+    if (fresh) setDigests(list ?? [], { select: fresh.id })
+  }
+  const text = arrivalText(dmPending ? 'dm_pending' : 'sent')
   setText('#digest-now-status', text)
   if (currentTab() === 'digest') setMakeStatus(text)
   else toast(text)
@@ -1235,9 +1298,7 @@ const hostedBackend: DigestBackend = {
     setMakeStatus('Asking for a digest…')
     await requestDigest()
   },
-  async loadFull(d) {
-    return getDigest(d.id)
-  },
+  loadFull: loadFullDigest,
   renderOptions(profiles) {
     return {
       profiles,

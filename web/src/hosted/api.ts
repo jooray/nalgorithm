@@ -79,11 +79,18 @@ function endpoint(path: string): string {
 }
 export function digestAudioUrl(id: string): string { return endpoint(`digests/${encodeURIComponent(id)}/audio`) }
 
+/** A conditional GET: `etag` in, and out with the server's answer; `notModified` when it was 304. */
+interface Conditional {
+  etag?: string
+  notModified?: boolean
+}
+
 async function request<T>(
   method: 'GET' | 'POST' | 'PUT',
   path: string,
   body?: unknown,
-  timeoutMs = DEFAULT_TIMEOUT_MS
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  conditional?: Conditional
 ): Promise<T> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -93,7 +100,7 @@ async function request<T>(
       method,
       credentials: 'same-origin',
       // The server requires a JSON content type on every write, bodyless or not.
-      headers: method === 'GET' ? undefined : { 'Content-Type': 'application/json' },
+      headers: method === 'GET' ? (conditional?.etag ? { 'If-None-Match': conditional.etag } : undefined) : { 'Content-Type': 'application/json' },
       body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
       signal: controller.signal,
     })
@@ -102,6 +109,12 @@ async function request<T>(
     throw new ApiError(0, timedOut ? 'The server took too long to answer.' : (err as Error).message, 'network')
   } finally {
     clearTimeout(timer)
+  }
+
+  if (conditional) {
+    conditional.notModified = res.status === 304
+    conditional.etag = res.headers.get('ETag') ?? undefined
+    if (res.status === 304) return null as T
   }
 
   let data: unknown = null
@@ -168,9 +181,18 @@ export function getFeed(limit = 100, force = false): Promise<FeedResponse> {
   return request<FeedResponse>('GET', `feed?limit=${limit}${force ? '&force=1' : ''}`, undefined, FEED_TIMEOUT_MS)
 }
 
-/** The last ranking the server stored for this person, or null. Never ranks, never uses the daily cap. */
-export async function getLatestFeed(): Promise<FeedResponse | null> {
-  const res = await request<{ snapshot: Omit<FeedResponse, 'entitlement'> | null; entitlement: Entitlement }>('GET', 'feed/latest')
+/**
+ * The last ranking the server stored for this person, or null. Never ranks, never uses the daily cap.
+ * With `since` (the ranking already on this device), an unchanged one answers without its posts.
+ */
+export async function getLatestFeed(
+  since?: number | null
+): Promise<FeedResponse | { unchanged: true; settingsChanged: boolean; entitlement: Entitlement } | null> {
+  const res = await request<{ snapshot: Omit<FeedResponse, 'entitlement'> | null; unchanged?: boolean; settingsChanged?: boolean; entitlement: Entitlement }>(
+    'GET',
+    `feed/latest${since ? `?since=${since}` : ''}`
+  )
+  if (res.unchanged) return { unchanged: true, settingsChanged: res.settingsChanged === true, entitlement: res.entitlement }
   return res.snapshot ? { ...res.snapshot, entitlement: res.entitlement } : null
 }
 
@@ -204,10 +226,20 @@ export function putSchedule(
 }
 
 /** The newest digests with the notes each was written from (when the server sends them). */
-export async function getDigests(limit: number): Promise<DigestRecord[]> {
-  const res = await request<{ digests: unknown[] }>('GET', `digests?limit=${limit}`)
-  if (!Array.isArray(res.digests)) return []
-  return res.digests.map(readDigest).filter((d): d is DigestRecord => d !== null)
+/**
+ * The newest digests. `summary` leaves out the show notes (fetched per digest
+ * with `getDigest`); `etag` is the answer last seen, and an unchanged list
+ * comes back as `unchanged` with no body to parse.
+ */
+export async function getDigests(
+  limit: number,
+  opts: { summary?: boolean; etag?: string } = {}
+): Promise<{ unchanged: true; etag?: string } | { unchanged: false; digests: DigestRecord[]; etag?: string }> {
+  const conditional: Conditional = { etag: opts.etag }
+  const res = await request<{ digests: unknown[] } | null>('GET', `digests?limit=${limit}${opts.summary ? '&summary=1' : ''}`, undefined, DEFAULT_TIMEOUT_MS, conditional)
+  if (conditional.notModified || !res) return { unchanged: true, etag: conditional.etag ?? opts.etag }
+  const digests = Array.isArray(res.digests) ? res.digests.map(readDigest).filter((d): d is DigestRecord => d !== null) : []
+  return { unchanged: false, digests, etag: conditional.etag }
 }
 
 /** One digest with its show notes. Null when the server has no such digest. */

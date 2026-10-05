@@ -408,6 +408,8 @@ export function lastStatusText(status: string | null | undefined): string {
   switch (status) {
     case 'sent':
       return 'Last digest: sent.'
+    case 'delivery_pending':
+      return 'Last digest: ready in the app, but its DM has not gone through yet. It will try again.'
     case 'no_prompt':
       return 'Last digest: not made, because you have not written a prompt yet. Add one in the Prompt section.'
     case 'not_entitled':

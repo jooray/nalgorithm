@@ -1,7 +1,7 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { openDb } from '../dist/db.js'
-import { composeMessage, effectiveFormat, recordRun, runDigest } from '../dist/digest-job.js'
+import { composeMessage, effectiveFormat, recordRun, runDigest, PENDING_RETRY_SECONDS } from '../dist/digest-job.js'
 import { createScheduler, explain } from '../dist/scheduler.js'
 import { applySchedulePatch, DEFAULT_SCHEDULE, loadSchedule, saveSchedule } from '../dist/schedule.js'
 import { saveSettings, DEFAULT_SETTINGS } from '../dist/settings.js'
@@ -26,7 +26,7 @@ const post = (id, score) => ({ id, type: 'original', author: 'b'.repeat(64), con
 function rig(db, over = {}) {
   const calls = { feed: 0, write: [], synth: [], upload: [], dm: [], consume: [], trials: 0 }
   const deps = {
-    db, log: silent, now: () => T0,
+    db, log: silent, now: () => over.now ?? T0,
     models: { apiBaseUrl: 'https://llm.test', apiKey: 'k', digestModel: 'dm', digestFallbackModel: 'fm', humanizerModel: 'hm', ttsModel: 'tm', ttsVoice: 'af_sky' },
     billing: {
       async entitlement() { return over.state ?? { state: 'active', until: T0 + 86400 * 5 } },
@@ -163,13 +163,23 @@ test('a feed failure is reported without a digest or a DM', async () => {
 test('pending relay delivery reuses the saved digest without models, TTS or another billing unit', async () => {
   const db = await freshDb(); await withPrompt(db)
   const failed = rig(db, { dmThrows: true })
-  assert.equal((await runDigest(failed.deps, NPUB)).status, 'failed')
+  assert.equal((await runDigest(failed.deps, NPUB)).status, 'delivery_pending')
   const original = await db.get('SELECT id FROM digests WHERE npub = ?', [NPUB])
   const retry = rig(db)
   assert.equal((await runDigest(retry.deps, NPUB)).status, 'sent')
   assert.equal(retry.calls.feed + retry.calls.write.length + retry.calls.synth.length + retry.calls.consume.length, 0)
   assert.equal(retry.calls.dm[0].opts.idempotencyKey, `digest:${original.id}`)
   assert.equal((await db.all('SELECT id FROM digests WHERE npub = ?', [NPUB])).length, 1)
+})
+
+test('an old undelivered digest stays readable but does not replace a new day\'s digest', async () => {
+  const db = await freshDb(); await withPrompt(db)
+  await runDigest(rig(db, { dmThrows: true }).deps, NPUB)
+  const later = rig(db, { now: T0 + PENDING_RETRY_SECONDS + 60 })
+  assert.equal((await runDigest(later.deps, NPUB)).status, 'sent')
+  assert.equal(later.calls.write.length, 1, 'a new digest was written')
+  const rows = await db.all('SELECT status FROM digests WHERE npub = ? ORDER BY id', [NPUB])
+  assert.deepEqual(rows.map((r) => r.status), ['undelivered', 'ok'])
 })
 
 test('text-only server does not pay for undeliverable speech', async () => {
@@ -179,11 +189,11 @@ test('text-only server does not pay for undeliverable speech', async () => {
   assert.equal(calls.synth.length, 0)
 })
 
-test('a DM that is not delivered is recorded as failed, including a partial multi-part delivery', async () => {
+test('a DM that is not delivered is recorded as pending delivery, including a partial multi-part delivery', async () => {
   for (const over of [{ dmThrows: true }, { dmResult: [{ delivered: true }, { delivered: false, detail: 'rejected by all relays' }] }]) {
     const db = await freshDb(); await withPrompt(db)
     const { deps } = rig(db, over)
-    assert.equal((await runDigest(deps, NPUB)).status, 'failed')
+    assert.equal((await runDigest(deps, NPUB)).status, 'delivery_pending')
     assert.equal(Number((await db.get('SELECT delivered FROM deliveries WHERE npub = ?', [NPUB])).delivered), 0)
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM digests WHERE npub = ?', [NPUB])).n > 0, true, 'the digest is kept even if delivery failed')
   }

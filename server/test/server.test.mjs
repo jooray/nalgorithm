@@ -440,6 +440,12 @@ test('snapshot: /feed saves the ranking and /feed/latest returns it with its age
     assert.equal(data.snapshot.settingsChanged, false)
     assert.equal(feedCalls.length, 1, 'latest never runs the feed')
     assert.equal(billing.consumed.length, 1, 'latest never consumes the cap')
+
+    const unchanged = await (await json(`/feed/latest?since=${T0}`, { token: body.token })).json()
+    assert.equal(unchanged.unchanged, true, 'a client that has this ranking gets no posts back')
+    assert.equal(unchanged.snapshot, null)
+    assert.equal(unchanged.settingsChanged, false)
+    assert.equal((await (await json(`/feed/latest?since=${T0 - 1}`, { token: body.token })).json()).snapshot.posts.length, 2)
   }, { clock })
 })
 
@@ -714,6 +720,27 @@ test('HTTP: digests list is per user and newest first; digest/now needs a runner
     assert.equal((await res.json()).message, 'queued')
     assert.deepEqual(asked, [npub], 'runs for the session npub, never one from the request')
   }, { runDigestNow: async (npub) => { asked.push(npub); return 'queued' } })
+})
+
+test('HTTP: a summary list leaves out notes, and an unchanged list answers 304 with no body', async () => {
+  await withApp(async ({ base, login, npub, db }) => {
+    const { body } = await login()
+    const auth = { Authorization: `Bearer ${body.token}` }
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status, notes) VALUES (?, ?, ?, ?, ?, ?)', [npub, T0 - 10, 'one', null, 'ok', JSON.stringify([{ id: 'n'.repeat(64), pubkey: npub }])])
+    const full = await fetch(base + '/digests', { headers: auth })
+    assert.equal((await full.json()).digests[0].notes.length, 1)
+    const first = await fetch(base + '/digests?summary=1', { headers: auth })
+    const etag = first.headers.get('etag')
+    assert.ok(etag)
+    assert.equal('notes' in (await first.json()).digests[0], false)
+    const again = await fetch(base + '/digests?summary=1', { headers: { ...auth, 'If-None-Match': etag } })
+    assert.equal(again.status, 304)
+    assert.equal(await again.text(), '')
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', [npub, T0, 'two', null, 'ok'])
+    const changed = await fetch(base + '/digests?summary=1', { headers: { ...auth, 'If-None-Match': etag } })
+    assert.equal(changed.status, 200)
+    assert.equal((await changed.json()).digests.length, 2)
+  })
 })
 
 test('HTTP: digests carry the exact audio length, null for older rows', async () => {
