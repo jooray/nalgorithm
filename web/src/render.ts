@@ -45,6 +45,7 @@ import { postsToRedraw, unresolvedPeople } from './lazy-profiles.js'
 import type { Event as NostrEvent } from 'nostr-tools/pure'
 import { openSheet } from './sheet.js'
 import { relativeTime } from './time.js'
+import { readImeta, type MediaMeta } from 'nalgorithm'
 import { disposeTree } from './lifecycle.js'
 import { addRule, hideNote, isFilteredOut, isSaved, muteAuthor, onFeedbackChange, readFeedback, saveNote, unsaveNote } from './feedback.js'
 import { showToast } from './toast.js'
@@ -370,7 +371,8 @@ function renderAvatar(pubkey: string, options: RenderOptions, className: string)
     container.classList.add('post-avatar-fallback')
   }
 
-  if (profile?.picture && safeLink(profile.picture)) {
+  // Data saver: an initial instead of a request to the avatar's host.
+  if (profile?.picture && safeLink(profile.picture) && !options.dataSaver) {
     const img = document.createElement('img')
     img.src = profile.picture
     img.alt = ''
@@ -514,10 +516,12 @@ function renderNoteContent(post: DisplayPost, options: RenderOptions, into: HTML
   into.appendChild(content)
   options.linkPreviews?.(post.content, into)
 
-  const media = extractMedia(post.content, post.rawEvent?.tags ?? [])
+  // Hosted posts carry `media` (the server's imeta summary); BYOK reads the raw tags.
+  const meta = (post as DisplayPost & { media?: MediaMeta[] }).media ?? readImeta(post.rawEvent?.tags)
+  const media = extractMedia(post.content, meta)
   if (media.length > 0) {
     const mediaContainer = el('div', 'post-media')
-    for (const m of media) mediaContainer.appendChild(renderMedia(m))
+    for (const m of media) mediaContainer.appendChild(renderMedia(m, options))
     into.appendChild(mediaContainer)
   }
 
@@ -972,7 +976,7 @@ function renderEmbeddedPost(post: EmbeddedPost, options: RenderOptions): HTMLEle
   const media = extractMedia(post.content, [])
   if (media.length > 0) {
     const mediaContainer = el('div', 'post-media')
-    for (const m of media) mediaContainer.appendChild(renderMedia(m))
+    for (const m of media) mediaContainer.appendChild(renderMedia(m, options))
     container.appendChild(mediaContainer)
   }
 
@@ -984,6 +988,10 @@ function renderEmbeddedPost(post: EmbeddedPost, options: RenderOptions): HTMLEle
 interface MediaItem {
   type: 'image' | 'video'
   url: string
+  width?: number
+  height?: number
+  /** The author's description; never invented here. */
+  alt?: string
 }
 
 /**
@@ -1051,56 +1059,31 @@ function renderContent(content: string, options: RenderOptions): DocumentFragmen
 }
 
 /**
- * Extract media items from post content and imeta tags.
+ * Media items from the note's imeta summary and the media URLs in its text.
  */
-function extractMedia(content: string, tags: string[][]): MediaItem[] {
+function extractMedia(content: string, meta: readonly MediaMeta[]): MediaItem[] {
   const items: MediaItem[] = []
   const seen = new Set<string>()
-
-  // From imeta tags
-  for (const tag of tags) {
-    if (tag[0] !== 'imeta') continue
-    for (const entry of tag.slice(1)) {
-      if (entry.startsWith('url ')) {
-        const url = entry.slice(4).trim()
-        if (!seen.has(url)) {
-          seen.add(url)
-          items.push({
-            type: isVideoUrl(url) ? 'video' : 'image',
-            url,
-          })
-        }
-      }
-    }
+  const known = new Map(meta.map((m) => [m.url, m]))
+  const add = (url: string): void => {
+    if (seen.has(url)) return
+    seen.add(url)
+    const m = known.get(url)
+    const video = m?.mime ? m.mime.startsWith('video/') : isVideoUrl(url)
+    items.push({ type: video ? 'video' : 'image', url, width: m?.width, height: m?.height, alt: m?.alt })
   }
-
-  // From content URLs
-  const urlMatches = content.match(/https?:\/\/[^\s]+/g) ?? []
-  for (const url of urlMatches) {
+  for (const m of meta) add(m.url)
+  for (const url of content.match(/https?:\/\/[^\s]+/g) ?? []) {
     const clean = url.replace(/[)>]+$/, '') // Strip trailing punctuation
-    if (isMediaUrl(clean) && !seen.has(clean)) {
-      seen.add(clean)
-      items.push({
-        type: isVideoUrl(clean) ? 'video' : 'image',
-        url: clean,
-      })
-    }
+    if (isMediaUrl(clean)) add(clean)
   }
-
   return items
-}
-
-/**
- * Extract media from content only (no tags — for embedded posts).
- */
-function extractMediaFromContent(content: string): MediaItem[] {
-  return extractMedia(content, [])
 }
 
 /**
  * Render a media item (image or video).
  */
-function renderMedia(item: MediaItem): HTMLElement {
+function renderMedia(item: MediaItem, options: RenderOptions): HTMLElement {
   if (item.type === 'video') {
     // Click-to-load rather than a <video src> with preload="metadata".
     //
@@ -1147,14 +1130,61 @@ function renderMedia(item: MediaItem): HTMLElement {
     return holder
   }
 
+  return options.dataSaver ? imagePlaceholder(item) : renderImage(item)
+}
+
+/** Data saver: nothing is requested from the image host until the reader asks. */
+function imagePlaceholder(item: MediaItem): HTMLElement {
+  const holder = el('button', 'media-placeholder') as HTMLButtonElement
+  holder.type = 'button'
+  let host = ''
+  try {
+    host = new URL(item.url).hostname
+  } catch {
+    // shown without a host
+  }
+  holder.textContent = item.alt ? `Load image: ${item.alt}` : `Load image${host ? ` from ${host}` : ''}`
+  if (item.width && item.height) holder.style.aspectRatio = `${item.width} / ${item.height}`
+  holder.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const image = renderImage(item)
+    holder.replaceWith(image)
+    image.querySelector('a')?.focus()
+  })
+  return holder
+}
+
+/**
+ * An image in its own proportions: the space is reserved when the size is known, a tall
+ * image is shown whole (letterboxed) rather than cropped, and it links to the full file.
+ */
+function renderImage(item: MediaItem): HTMLElement {
+  const figure = el('figure', 'post-image')
+  const link = document.createElement('a')
+  const safe = safeLink(item.url)
+  if (safe) {
+    link.href = safe
+    link.target = '_blank'
+    link.rel = 'noopener'
+  }
+  link.setAttribute('aria-label', item.alt ? `Open full image: ${item.alt}` : 'Open full image')
   const img = document.createElement('img')
   img.src = item.url
-  img.alt = 'Post media'
+  // The author's description when there is one; otherwise say plainly that none was given.
+  img.alt = item.alt ?? 'Image without a description'
   img.loading = 'lazy'
-  img.onerror = () => {
-    img.style.display = 'none'
+  img.decoding = 'async'
+  if (item.width && item.height) {
+    img.width = item.width
+    img.height = item.height
+    img.style.aspectRatio = `${item.width} / ${item.height}`
   }
-  return img
+  img.onerror = () => {
+    figure.replaceChildren(statusLine('This image could not be loaded.'))
+  }
+  link.appendChild(img)
+  figure.appendChild(link)
+  return figure
 }
 
 // ─── Utility helpers ─────────────────────────────────────────────────────────

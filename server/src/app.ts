@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { collectPostPubkeys } from 'nalgorithm'
+import { collectPostPubkeys, readImeta } from 'nalgorithm'
 import type { PipelineLogger, ScoredPost } from 'nalgorithm'
 import { AuthError, createSession, getSession, issueChallenge, revokeSession, verifyLogin, SESSION_TTL_SECONDS } from './auth.js'
 import type { BillingClient } from './billing-client.js'
@@ -141,6 +141,8 @@ function publicPost(p: ScoredPost): Record<string, unknown> {
     score: p.score,
     justification: p.justification,
     defaultScore: p.defaultScore,
+    // Tag-only media (imeta) would vanish with the raw event; send its safe, bounded summary.
+    media: readImeta(p.rawEvent?.tags as string[][] | undefined),
   }
 }
 

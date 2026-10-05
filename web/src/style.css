@@ -1434,14 +1434,42 @@ select:focus {
   margin-top: 10px;
 }
 
+.post-image {
+  margin: 0;
+}
+
+.post-image a {
+  display: block;
+  border-radius: var(--radius-sm);
+}
+
+/* Whole, in proportion: reserved space when the size is known, letterboxed when tall. */
 .post-media img,
 .post-video {
   display: block;
   width: 100%;
-  max-height: 420px;
+  height: auto;
+  max-height: 560px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
-  object-fit: cover;
+  object-fit: contain;
+}
+
+.media-placeholder {
+  display: flex;
+  width: 100%;
+  min-height: 72px;
+  max-height: 560px;
+  padding: 12px 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
 }
 
 .video-placeholder {

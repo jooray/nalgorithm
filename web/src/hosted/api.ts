@@ -8,7 +8,7 @@
 
 import { verifyEvent } from 'nostr-tools/pure'
 import type { SignFn } from '../nostr-login.js'
-import type { ScoredPost } from 'nalgorithm'
+import type { MediaMeta, ScoredPost } from 'nalgorithm'
 import { readDigest, type DigestRecord } from '../digest-model.js'
 import { readDigestStatus, type DigestStatus } from '../digest-job-logic.js'
 import {
@@ -51,7 +51,7 @@ export interface FeedResponse {
   fetched: number
   hoursBack: number
   /** Trimmed to what the renderer needs; the raw event stays on the server. */
-  posts: Array<Omit<ScoredPost, 'rawEvent'> & { isNew?: boolean }>
+  posts: Array<Omit<ScoredPost, 'rawEvent'> & { isNew?: boolean; media?: MediaMeta[] }>
   profiles: Record<string, FeedProfile>
   learnedPrompt?: string
   /** Unix seconds of the run this ranking came from. */

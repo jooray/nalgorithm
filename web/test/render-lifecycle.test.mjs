@@ -52,3 +52,22 @@ test('show next moves focus to the first newly shown note', async () => {
   assert.equal(focused,container.querySelectorAll('.note')[50])
   assert.equal(container.querySelector('.feed-more'),null)
 })
+
+test('images keep their proportions and description, and data saver requests nothing until asked', async () => {
+  const {exports:r,document}=await domModule('src/render.ts');const container=document.getElementById('feed-list')
+  const tags=[['imeta','url https://img.example/tall.png','dim 600x1800','alt A long comic strip']]
+  r.renderFeed([post(1,{content:'look',rawEvent:{kind:1,tags}}),post(2,{content:'hosted',media:[{url:'https://img.example/h.jpg',width:4,height:3}]})],container,{detail:false})
+  const imgs=container.querySelectorAll('img:not([aria-hidden])')
+  const tall=[...container.querySelectorAll('.post-image img')]
+  assert.equal(tall.length,2,'tag-only media shows in both modes')
+  assert.equal(tall[0].getAttribute('alt'),'A long comic strip')
+  assert.equal(tall[0].getAttribute('width'),'600');assert.equal(tall[0].getAttribute('height'),'1800')
+  assert.equal(tall[1].getAttribute('alt'),'Image without a description')
+  assert.ok(imgs.length>=2)
+  r.renderFeed([post(1,{content:'look',rawEvent:{kind:1,tags}})],container,{detail:false,dataSaver:true})
+  assert.equal(container.querySelectorAll('.post-image img').length,0,'nothing requested from the image host')
+  const placeholder=container.querySelector('.media-placeholder')
+  assert.match(placeholder.textContent,/Load image: A long comic strip/)
+  placeholder.click()
+  assert.equal(container.querySelectorAll('.post-image img').length,1)
+})
