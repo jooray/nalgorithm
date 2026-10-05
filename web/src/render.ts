@@ -286,6 +286,11 @@ async function lazyResolveProfiles(container: HTMLElement): Promise<void> {
 
 // ─── People ──────────────────────────────────────────────────────────────────
 
+/** A person's profile in the reader's chosen client, for links outside the feed. */
+export function profileLink(pubkey: string, options: RenderOptions): string {
+  return profileHref(pubkey, options)
+}
+
 function profileHref(pubkey: string, options: RenderOptions): string {
   const url = buildProfileUrl(options.profileUrlTemplate ?? '', {
     npub: npubOf(pubkey),

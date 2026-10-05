@@ -338,11 +338,30 @@ export const DIGEST_VOICES: ReadonlyArray<{ id: string; label: string }> = VOICE
     names.map((n) => ({ id: prefix + n, label: `${n[0].toUpperCase()}${n.slice(1)} (${kind})` }))
 )
 
+/** Voices with a listenable sample on the server (its SAMPLE_VOICES), offered first. */
+export const SAMPLE_VOICE_IDS: readonly string[] = ['af_bella', 'af_heart', 'af_sky', 'bf_emma', 'am_michael', 'bm_george']
+
+/**
+ * The delivery format, asked as "which app reads your DMs". The server's automatic choice
+ * is the format of the reader's last message to the digest account, else legacy, which
+ * nearly every client can read.
+ */
 export const DM_FORMATS: ReadonlyArray<{ value: DmFormat | ''; label: string }> = [
-  { value: '', label: 'Follow my last message' },
-  { value: 'nip17', label: 'Modern (NIP-17)' },
-  { value: 'nip04', label: 'Legacy (kind 4)' },
+  { value: '', label: 'Not sure: pick automatically' },
+  { value: 'nip04', label: 'Primal, Damus or another app with older DMs' },
+  { value: 'nip17', label: 'Amethyst, 0xchat, Coracle, Nostur or another app with private DMs' },
 ]
+
+export const DM_FORMAT_HINT =
+  'Automatic uses the format of your last message to the digest account, otherwise the older format that almost every app can read. Private DMs (NIP-17) also hide who is talking to whom, but some apps cannot show them.'
+
+/** One line for the Digests tab: is daily delivery on, and when is the next one. */
+export function scheduleLine(s: Pick<Schedule, 'enabled' | 'nextRunAt' | 'tz'> | null): string {
+  if (!s) return ''
+  if (!s.enabled) return 'Daily delivery is off. Digests come only when you ask.'
+  if (s.nextRunAt === null || !isValidTimeZone(s.tz)) return 'Daily delivery is on.'
+  return `Daily delivery is on. Next: ${formatInZone(s.nextRunAt, s.tz)} (${s.tz}).`
+}
 
 /** Whether the browser knows this IANA time zone. */
 export function isValidTimeZone(tz: unknown): tz is string {

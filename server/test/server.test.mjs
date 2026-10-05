@@ -211,7 +211,7 @@ function fakeBilling(initial = { state: 'active', until: T0 + 86400 }) {
   return b
 }
 
-async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, makeDigestNow, jobs, clock = { t: T0 } } = {}) {
+async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, makeDigestNow, jobs, voiceSample, clock = { t: T0 } } = {}) {
   const db = await freshDb()
   const feedCalls = []
   const runner = feed ?? (async (npub, settings) => {
@@ -225,7 +225,7 @@ async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, makeDi
       ],
     }
   })
-  const server = createServer(createApp({ db, billing, feed: runner, publicUrl: PUBLIC, secureCookie: false, log: silent, now: () => clock.t, runDigestNow: makeDigestNow ? makeDigestNow(db) : runDigestNow, jobs }))
+  const server = createServer(createApp({ db, billing, feed: runner, publicUrl: PUBLIC, secureCookie: false, log: silent, now: () => clock.t, runDigestNow: makeDigestNow ? makeDigestNow(db) : runDigestNow, jobs, voiceSample }))
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${server.address().port}`
   const sk = generateSecretKey()
@@ -740,6 +740,27 @@ test('HTTP: a summary list leaves out notes, and an unchanged list answers 304 w
     const changed = await fetch(base + '/digests?summary=1', { headers: { ...auth, 'If-None-Match': etag } })
     assert.equal(changed.status, 200)
     assert.equal((await changed.json()).digests.length, 2)
+  })
+})
+
+test('HTTP: voice samples are a fixed shortlist, made once per voice, and failures are not cached', async () => {
+  const made = []
+  let fail = true
+  await withApp(async ({ json, login }) => {
+    const { body } = await login()
+    assert.equal((await json('/voices/af_bella/sample')).status, 401)
+    assert.equal((await json('/voices/af_bella/sample', { token: body.token })).status, 503, 'a failed sample says so')
+    const first = await json('/voices/af_bella/sample', { token: body.token })
+    assert.equal(first.status, 200)
+    assert.equal(first.headers.get('content-type'), 'audio/mpeg')
+    assert.equal((await first.arrayBuffer()).byteLength, 3)
+    assert.equal((await json('/voices/af_bella/sample', { token: body.token })).status, 200)
+    assert.deepEqual(made, ['af_bella', 'af_bella'], 'one failed and one good call; the third answer came from memory')
+    assert.equal((await json('/voices/af_nicole/sample', { token: body.token })).status, 404, 'voices off the shortlist cost nothing')
+  }, { voiceSample: async (voice) => { made.push(voice); if (fail) { fail = false; throw new Error('tts down') } return new Uint8Array([1, 2, 3]) } })
+  await withApp(async ({ json, login }) => {
+    const { body } = await login()
+    assert.equal((await json('/voices/af_bella/sample', { token: body.token })).status, 503)
   })
 })
 

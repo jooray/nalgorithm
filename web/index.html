@@ -126,6 +126,16 @@
             <button id="btn-make-list" class="btn btn-small" type="button"></button>
           </div>
           <p id="make-again-hint" class="field-hint hidden"></p>
+          <p class="schedule-line hosted-only"><span id="digest-schedule-line"></span> <button id="btn-schedule-open" class="link-btn hidden" type="button">Set daily delivery</button></p>
+          <div id="schedule-nudge" class="state-card nudge hosted-only hidden" role="region" aria-labelledby="schedule-nudge-title">
+            <h2 id="schedule-nudge-title">Have this ready tomorrow at <span id="schedule-nudge-time">07:30</span>?</h2>
+            <p id="schedule-nudge-text"></p>
+            <div class="nudge-actions">
+              <button id="btn-nudge-schedule" class="btn btn-primary btn-small" type="button">Set daily delivery</button>
+              <button id="btn-nudge-later" class="btn btn-ghost btn-small" type="button">Not now</button>
+            </div>
+            <p id="schedule-nudge-status" class="form-status" role="status"></p>
+          </div>
           <div id="make-bar-list" class="indet hidden" role="progressbar" aria-label="Writing your digest"></div>
           <p id="list-status" class="form-status" role="status"></p>
           <div id="list-loading" class="state-row hidden" role="status"><span class="spinner"></span><span>Loading your digests…</span></div>
@@ -390,13 +400,14 @@
             <h2 id="digest-title">Daily voice digest</h2>
             <p class="field-hint" id="digest-dm-note"></p>
             <p class="field-hint">
-              Sent by <a id="digest-bot-link" href="#">the digest account</a>. Follow it so your client shows the messages:
+              Sent by the digest account. Follow it so your app shows the messages:
+              <a id="digest-bot-link" href="#" target="_blank" rel="noopener">open the digest account</a>, or copy its npub:
               <code id="digest-bot-npub" class="identity-npub"></code>
               <button id="btn-digest-copy" class="btn btn-small" type="button">Copy npub</button>
             </p>
             <label class="check">
               <input type="checkbox" id="digest-enabled">
-              <span>Send me a digest every day</span>
+              <span>Send me a digest every day<small>Off by default. The DM is encrypted, but the audio file it links to is uploaded to public file hosts: anyone who has the link can play it.</small></span>
             </label>
             <div class="field-row">
               <div>
@@ -410,10 +421,14 @@
               </div>
             </div>
             <label for="digest-voice">Voice</label>
-            <select id="digest-voice"></select>
-            <label for="digest-format">Delivery format</label>
+            <div class="inline-field">
+              <select id="digest-voice"></select>
+              <button id="btn-voice-sample" class="btn btn-small" type="button">Play sample</button>
+            </div>
+            <p id="voice-sample-status" class="field-hint" role="status"></p>
+            <label for="digest-format">Which app reads your DMs?</label>
             <select id="digest-format"></select>
-            <p class="field-hint">Choose legacy for clients such as Primal or Damus that cannot read modern DMs.</p>
+            <p id="digest-format-hint" class="field-hint"></p>
             <button id="btn-digest-save" class="btn btn-secondary btn-full" type="button">Save digest schedule</button>
             <p id="digest-schedule-status" class="form-status" role="status"></p>
             <p id="digest-last-status" class="field-hint" role="status"></p>

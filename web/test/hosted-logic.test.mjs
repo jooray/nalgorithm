@@ -22,6 +22,7 @@ import {
   isValidTimeZone,
   lastStatusText,
   nextRunText,
+  scheduleLine,
   safeAudioUrl,
   validateScheduleForm,
 } from '../src/hosted/logic.ts'
@@ -217,6 +218,13 @@ test('nextRunText', () => {
   assert.equal(nextRunText({ enabled: true, nextRunAt: sec, tz: 'Europe/Bratislava' }), 'Next digest: Thu 1 Oct, 07:30')
   assert.match(nextRunText({ enabled: false, nextRunAt: null, tz: 'UTC' }), /off/)
   assert.equal(nextRunText({ enabled: true, nextRunAt: null, tz: 'UTC' }), '')
+})
+
+test('scheduleLine: truthful about delivery being off, and explicit about the next run and its zone', () => {
+  const sec = Math.floor(Date.parse('2026-10-01T05:30:00Z') / 1000)
+  assert.equal(scheduleLine(null), '')
+  assert.match(scheduleLine({ enabled: false, nextRunAt: null, tz: 'UTC' }), /off\. Digests come only when you ask/)
+  assert.equal(scheduleLine({ enabled: true, nextRunAt: sec, tz: 'Europe/Bratislava' }), 'Daily delivery is on. Next: Thu 1 Oct, 07:30 (Europe/Bratislava).')
 })
 
 test('lastStatusText covers every server status', () => {

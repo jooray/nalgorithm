@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { configureProviderBudget, providerBudgetStats, type PipelineLogger } from 'nalgorithm'
+import { configureProviderBudget, providerBudgetStats, synthesizeSpeech, type PipelineLogger } from 'nalgorithm'
 import { createApp } from './app.js'
 import { createBillingClient } from './billing-client.js'
 import { createBot, createDbSeenStore } from './bot.js'
@@ -140,6 +140,9 @@ const previews = createPreviewService({
   skipHosts: [config.publicUrl, config.webUrl].map((u) => new URL(u).hostname),
 })
 
+/** The same sentence in every voice, so a listener compares voices, not texts. */
+const SAMPLE_TEXT = 'Good morning. This is how your nalgorithm digest sounds in this voice. Here is what mattered on Nostr today.'
+
 const app = createApp({
   db,
   billing,
@@ -150,6 +153,11 @@ const app = createApp({
   runDigestNow,
   previews,
   jobs,
+  voiceSample: (voice) =>
+    synthesizeSpeech(
+      { apiBaseUrl: config.venice.apiBaseUrl, apiKey: config.venice.apiKey, model: config.venice.ttsModel, voice, format: 'mp3', signal: AbortSignal.timeout(60_000) },
+      SAMPLE_TEXT
+    ),
 })
 
 // Old cached scores are useless after 30 days; prune once a day.

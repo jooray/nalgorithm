@@ -69,12 +69,16 @@ export const PENDING_RETRY_SECONDS = 6 * 3600
 
 const dayStamp = (sec: number): string => new Date(sec * 1000).toISOString().slice(0, 10)
 
-/** Format for replies and digests: the user's explicit choice, else what they last wrote to us, else modern. */
+/**
+ * The DM format for this reader: their explicit choice, else the format of their last
+ * message to the bot, else legacy. Legacy (kind 4) is the one that clients such as Primal
+ * and Damus can read as well as the modern ones, so a first digest is never invisible.
+ */
 export async function effectiveFormat(db: Db, npub: string, schedule?: Schedule): Promise<DmFormat> {
   const s = schedule ?? (await loadSchedule(db, npub))
   if (s.dmFormat) return s.dmFormat
   const peer = await db.get<{ dm_kind: string }>('SELECT dm_kind FROM peers WHERE npub = ?', [npub])
-  return peer?.dm_kind === 'nip04' ? 'nip04' : 'nip17'
+  return peer?.dm_kind === 'nip17' ? 'nip17' : 'nip04'
 }
 
 /** The message text: link first (so it is in the first part of a long DM), then the digest. */

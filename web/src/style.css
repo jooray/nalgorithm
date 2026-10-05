@@ -3007,3 +3007,45 @@ body[data-mode='hosted']:has(#hosted-startup:not(.hidden)) #views::before { disp
 .starter:hover {
   color: var(--text);
 }
+
+/* Daily delivery on the Digests tab, and the one nudge after a first listen. */
+.schedule-line {
+  margin: 4px 0 10px;
+  color: var(--text-2);
+  font-size: 0.9375rem;
+}
+
+.link-btn {
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.nudge {
+  margin: 8px 0 16px;
+}
+
+.nudge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.inline-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-field select {
+  flex: 1;
+  min-width: 0;
+}

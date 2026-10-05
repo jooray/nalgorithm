@@ -37,7 +37,15 @@ export interface AppDeps {
   previews?: PreviewService
   /** In-flight work, so a shutdown can wait for it. Absent means nothing is tracked. */
   jobs?: JobTracker
+  /** A short spoken sample in one of `SAMPLE_VOICES`. Absent means samples answer 503. */
+  voiceSample?: (voice: string) => Promise<Uint8Array>
 }
+
+/**
+ * The voices with a listenable sample: a fixed shortlist, so samples cost at most one
+ * speech call per voice per process, whatever is asked for.
+ */
+export const SAMPLE_VOICES = ['af_bella', 'af_heart', 'af_sky', 'bf_emma', 'am_michael', 'bm_george'] as const
 
 const COOKIE = 'nalgorithm_session'
 const MAX_BODY = 64 * 1024
@@ -144,6 +152,7 @@ export function createApp(deps: AppDeps) {
   const running = new Set<string>()
   let audioActive = 0
   const audioHits = new Map<string, number[]>()
+  const samples = new Map<string, Promise<Uint8Array>>()
 
   function sessionToken(req: IncomingMessage): string | undefined {
     const auth = req.headers.authorization
@@ -303,6 +312,29 @@ export function createApp(deps: AppDeps) {
       const row = await db.get<DigestRow>('SELECT id, created_at, body, audio_url, notes, duration_s FROM digests WHERE id = ? AND npub = ?', [Number(digestMatch[1]), npub])
       if (!row) throw new HttpError(404, 'digest not found')
       return send(res, 200, publicDigest(row))
+    }
+
+    const sampleMatch = method === 'GET' ? /^\/voices\/([a-z_]{4,24})\/sample$/.exec(path) : null
+    if (sampleMatch) {
+      const voice = sampleMatch[1]
+      if (!(SAMPLE_VOICES as readonly string[]).includes(voice)) throw new HttpError(404, 'no sample for this voice')
+      if (!deps.voiceSample) throw new HttpError(503, 'voice samples are not available on this server')
+      let sample = samples.get(voice)
+      if (!sample) {
+        sample = deps.voiceSample(voice)
+        samples.set(voice, sample)
+        // A failure is not cached: the next listener asks again.
+        sample.catch(() => samples.delete(voice))
+      }
+      let audio: Uint8Array
+      try {
+        audio = await sample
+      } catch (err) {
+        log.warn(`voice sample ${voice} failed: ${(err as Error).message}`)
+        throw new HttpError(503, 'the sample could not be made right now')
+      }
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audio.length, 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff' })
+      return void res.end(Buffer.from(audio))
     }
 
     if (method === 'GET' && path === '/digest/status') return send(res, 200, await digestJobStatus(db, npub, nowSec()))

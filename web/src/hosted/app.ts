@@ -15,7 +15,7 @@
 
 import { collectPostPubkeys, pubkeyToHex, type ProfileData, type ScoredPost } from 'nalgorithm'
 import { adoptSigner, forgetSigner, setActorProvider } from '../signer.js'
-import { renderFeed, clearFeed, aggregateBoosts, clientRenderOptions } from '../render.js'
+import { renderFeed, clearFeed, aggregateBoosts, clientRenderOptions, profileLink } from '../render.js'
 import { attachLinkPreviews } from './previews.js'
 import { initPromptStarters } from '../prompt-starters.js'
 import { previewsEnabled } from './previews-logic.js'
@@ -54,7 +54,7 @@ import {
   shouldRequestFirstDigest,
   type DigestStatus,
 } from '../digest-job-logic.js'
-import { validateTemplate } from '../client-url.js'
+import { clientLabel, validateTemplate } from '../client-url.js'
 import {
   initDigestView,
   setDigests,
@@ -66,6 +66,7 @@ import {
   digestIds,
   currentDigests,
   setDigestJobRunning,
+  onFirstListen,
   type DigestBackend,
 } from '../digest-view.js'
 import { readDigest, type DigestRecord } from '../digest-model.js'
@@ -89,6 +90,7 @@ import {
   logout,
   putSchedule,
   putSettings,
+  voiceSampleUrl,
   type FeedResponse,
 } from './api.js'
 import {
@@ -97,6 +99,9 @@ import {
   DIGEST_ON_ITS_WAY,
   DIGEST_VOICES,
   DM_FORMATS,
+  DM_FORMAT_HINT,
+  SAMPLE_VOICE_IDS,
+  scheduleLine,
   MAX_PROMPT_CHARS,
   PLANS,
   daysForSats,
@@ -107,6 +112,7 @@ import {
   formatDays,
   formatSats,
   isHttpUrl,
+  isValidTimeZone,
   lastStatusText,
   nextRunText,
   parseWholeNumber,
@@ -344,6 +350,8 @@ function resetFeedState(): void {
   job = IDLE_STATUS
   jobWasRunning = false
   readyDuringJob = null
+  schedule = null
+  show('#schedule-nudge', false)
   digestsKnown = false
   setDigestJobRunning(false)
 }
@@ -960,7 +968,8 @@ function initDigestForm(closeSettings: () => void): void {
   closeSettingsPanel = closeSettings
   $('#digest-dm-note').textContent = DIGEST_DM_NOTE
   $('#digest-bot-npub').textContent = DIGEST_BOT_NPUB
-  $<HTMLAnchorElement>('#digest-bot-link').href = `nostr:${DIGEST_BOT_NPUB}`
+  paintBotLink()
+  document.addEventListener('nalgorithm:settings-saved', paintBotLink)
   $('#btn-digest-copy').addEventListener('click', () => {
     const button = $('#btn-digest-copy')
     navigator.clipboard.writeText(DIGEST_BOT_NPUB).then(
@@ -976,11 +985,30 @@ function initDigestForm(closeSettings: () => void): void {
     }, 2000)
   })
 
+  // The voices with a sample come first; the rest stay available without one.
   const voice = $<HTMLSelectElement>('#digest-voice')
   voice.append(new Option('Default', ''))
-  for (const v of DIGEST_VOICES) voice.append(new Option(v.label, v.id))
+  const sampled = document.createElement('optgroup')
+  sampled.label = 'With a sample'
+  const more = document.createElement('optgroup')
+  more.label = 'More voices'
+  for (const id of SAMPLE_VOICE_IDS) {
+    const v = DIGEST_VOICES.find((x) => x.id === id)
+    if (v) sampled.append(new Option(v.label, v.id))
+  }
+  for (const v of DIGEST_VOICES) if (!SAMPLE_VOICE_IDS.includes(v.id)) more.append(new Option(v.label, v.id))
+  voice.append(sampled, more)
+  voice.addEventListener('change', paintSampleButton)
+  $('#btn-voice-sample').addEventListener('click', playVoiceSample)
+  paintSampleButton()
   const format = $<HTMLSelectElement>('#digest-format')
   for (const f of DM_FORMATS) format.append(new Option(f.label, f.value))
+  $('#digest-format-hint').textContent = DM_FORMAT_HINT
+
+  $('#btn-schedule-open').addEventListener('click', openScheduleSettings)
+  $('#btn-nudge-schedule').addEventListener('click', () => void acceptScheduleNudge())
+  $('#btn-nudge-later').addEventListener('click', dismissScheduleNudge)
+  onFirstListen(() => maybeScheduleNudge())
 
   try {
     const zones = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone') ?? []
@@ -993,9 +1021,120 @@ function initDigestForm(closeSettings: () => void): void {
   $('#btn-digest-now').addEventListener('click', () => void sendDigestNow())
 }
 
+/** The schedule as last read or saved, for the Digests tab line and the nudge. */
+let schedule: Schedule | null = null
+
 function showScheduleInfo(s: Schedule): void {
+  schedule = s
   setText('#digest-last-status', lastStatusText(s.lastStatus))
   setText('#digest-schedule-status', nextRunText(s))
+  $('#digest-schedule-line').textContent = scheduleLine(s)
+  $('#btn-schedule-open').classList.toggle('hidden', s.enabled)
+  if (s.enabled) show('#schedule-nudge', false)
+}
+
+/** "Follow the digest account": in the reader's chosen client, with the npub to copy beside it. */
+function paintBotLink(): void {
+  const settings = loadSettings()
+  const link = $<HTMLAnchorElement>('#digest-bot-link')
+  link.href = profileLink(pubkeyToHex(DIGEST_BOT_NPUB), clientRenderOptions(settings))
+  link.textContent = `open the digest account in ${clientLabel(settings.clientPreset)}`
+}
+
+function openScheduleSettings(): void {
+  showTab('tune')
+  const box = $<HTMLInputElement>('#digest-enabled')
+  box.scrollIntoView({ block: 'center' })
+  box.focus()
+}
+
+// ─── voice samples ───────────────────────────────────────────────────────────
+
+let sampleAudio: HTMLAudioElement | null = null
+
+function paintSampleButton(): void {
+  const id = $<HTMLSelectElement>('#digest-voice').value
+  const has = id === '' || SAMPLE_VOICE_IDS.includes(id)
+  const button = $<HTMLButtonElement>('#btn-voice-sample')
+  button.disabled = !has
+  setText('#voice-sample-status', has ? '' : 'No sample for this voice. The ones listed first have one.')
+}
+
+/** A short fixed sentence in the chosen voice. It is made once per voice on the server; no digest is written. */
+function playVoiceSample(): void {
+  const id = $<HTMLSelectElement>('#digest-voice').value || 'af_sky'
+  if (!SAMPLE_VOICE_IDS.includes(id)) return
+  sampleAudio?.pause()
+  const audio = new Audio(voiceSampleUrl(id))
+  sampleAudio = audio
+  setText('#voice-sample-status', 'Loading the sample…')
+  audio.addEventListener('playing', () => setText('#voice-sample-status', 'Playing a short sample.'), { once: true })
+  audio.addEventListener('ended', () => setText('#voice-sample-status', ''), { once: true })
+  audio.addEventListener('error', () => setText('#voice-sample-status', 'The sample could not play right now. The voice still works for digests.', true), { once: true })
+  void audio.play().catch((err: Error) => {
+    if (err.name !== 'AbortError') setText('#voice-sample-status', 'The sample could not play right now. The voice still works for digests.', true)
+  })
+}
+
+// ─── the one schedule nudge ──────────────────────────────────────────────────
+
+const NUDGE_TIME = '07:30'
+const nudgeKey = (npub: string): string => `nalgorithm_schedule_nudge_${identityKey(npub) ?? npub}`
+
+function browserZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
+
+/** After the first real listen, once per account: offer daily delivery. It is never turned on without this press. */
+function maybeScheduleNudge(): void {
+  if (!userNpub || !schedule || schedule.enabled) return
+  try {
+    if (safeStorage()?.getItem(nudgeKey(userNpub))) return
+  } catch {
+    // Unreadable storage: offer it this once anyway.
+  }
+  const zone = isValidTimeZone(digestTz) ? digestTz : browserZone()
+  $('#schedule-nudge-time').textContent = NUDGE_TIME
+  $('#schedule-nudge-text').textContent =
+    `I write it at ${NUDGE_TIME} ${zone} and send it by Nostr DM, in a format almost every app can read. ` +
+    'The DM is encrypted, but the audio link in it is public: anyone with the link can play it. Change the time, voice or app in Tune.'
+  setText('#schedule-nudge-status', '')
+  show('#schedule-nudge')
+}
+
+function dismissScheduleNudge(): void {
+  show('#schedule-nudge', false)
+  try {
+    if (userNpub) safeStorage()?.setItem(nudgeKey(userNpub), 'dismissed')
+  } catch {
+    // Not remembered: it may be offered once more on a later visit.
+  }
+}
+
+async function acceptScheduleNudge(): Promise<void> {
+  const button = $<HTMLButtonElement>('#btn-nudge-schedule')
+  button.disabled = true
+  setText('#schedule-nudge-status', 'Saving…')
+  try {
+    const zone = isValidTimeZone(digestTz) ? digestTz : browserZone()
+    const saved = await putSchedule({ enabled: true, time: NUDGE_TIME, tz: zone })
+    digestTz = saved.tz
+    $<HTMLInputElement>('#digest-enabled').checked = true
+    $<HTMLInputElement>('#digest-time').value = saved.time
+    $<HTMLInputElement>('#digest-tz').value = saved.tz
+    showScheduleInfo(saved)
+    dismissScheduleNudge()
+    toast(scheduleLine(saved))
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return showLogin(describeError(err).message)
+    setText('#schedule-nudge-status', err instanceof ApiError ? describeError(err).message : (err as Error).message, true)
+  } finally {
+    button.disabled = false
+  }
 }
 
 async function loadDigestSection(): Promise<void> {
@@ -1295,7 +1434,7 @@ const hostedBackend: DigestBackend = {
   makeLabel: 'Send me a digest now',
   makeAnotherLabel: 'Send me another digest now',
   emptyText:
-    'Every morning I write a digest of what the people you follow posted, voice it, and send it by Nostr DM. It lands here too. Nothing plays until you press play.',
+    'I write a spoken digest of what the people you follow posted. It lands here and by Nostr DM. Turn on daily delivery in Tune to have one every morning. Nothing plays until you press play.',
   async make() {
     setMakeStatus('Asking for a digest…')
     await requestDigest()

@@ -62,14 +62,14 @@ test('happy path: speech-tuned digest with humanizer, audio uploaded, DM has the
   assert.equal(w.digest.profiles.get('b'.repeat(64)).name, 'bob')
   assert.equal(calls.synth[0].cfg.voice, 'af_sky'); assert.equal(calls.synth[0].cfg.format, 'mp3')
   const sent = calls.dm[0]
-  assert.equal(sent.to, NPUB); assert.equal(sent.opts.format, 'nip17')
+  assert.equal(sent.to, NPUB); assert.equal(sent.opts.format, 'nip04', 'no known client: the widely readable format')
   const lines = sent.text.split('\n')
   assert.match(lines[0], /^Your nalgorithm digest, /); assert.equal(lines[1], 'https://cdn.test/abc.mp3')
   assert.ok(sent.text.includes('Good morning, nostrich!'))
   const d = await db.get('SELECT * FROM digests WHERE npub = ?', [NPUB])
   assert.equal(d.audio_url, 'https://cdn.test/abc.mp3'); assert.equal(d.status, 'ok')
   const del = await db.get('SELECT * FROM deliveries WHERE npub = ?', [NPUB])
-  assert.equal(Number(del.delivered), 1); assert.equal(del.tier, 'inbox'); assert.equal(del.protocol, 'nip17')
+  assert.equal(Number(del.delivered), 1); assert.equal(del.tier, 'inbox'); assert.equal(del.protocol, 'nip04')
 })
 
 test('the exact audio length is measured from the MP3 and stored; unreadable audio stores null', async () => {
@@ -93,8 +93,10 @@ test('the user\'s voice and DM format choices are honoured', async () => {
 
 test('DM format follows the last protocol the user wrote in when they made no explicit choice', async () => {
   const db = await freshDb()
-  assert.equal(await effectiveFormat(db, NPUB), 'nip17')
-  await db.run('INSERT INTO peers (npub, dm_kind, last_seen_at) VALUES (?, ?, ?)', [NPUB, 'nip04', T0])
+  assert.equal(await effectiveFormat(db, NPUB), 'nip04', 'unknown client: legacy, which Primal, Damus and modern clients all read')
+  await db.run('INSERT INTO peers (npub, dm_kind, last_seen_at) VALUES (?, ?, ?)', [NPUB, 'nip17', T0])
+  assert.equal(await effectiveFormat(db, NPUB), 'nip17', 'a reader who wrote in modern DMs gets modern ones')
+  await db.run("UPDATE peers SET dm_kind = 'nip04' WHERE npub = ?", [NPUB])
   assert.equal(await effectiveFormat(db, NPUB), 'nip04')
   await saveSchedule(db, { ...DEFAULT_SCHEDULE(NPUB), dmFormat: 'nip17' })
   assert.equal(await effectiveFormat(db, NPUB), 'nip17', 'explicit choice wins')

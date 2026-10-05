@@ -167,7 +167,10 @@ export function initDigestView(b: DigestBackend): void {
   initNotesTabs()
   initMini()
 
-  player.onChange((s) => paint(s))
+  player.onChange((s) => {
+    paint(s)
+    noteListening(s)
+  })
   document.addEventListener('nalgorithm:settings-saved', () => { if (loadSettings().cacheAudio) void refreshAudioCache() })
   onTabShown((tab) => { if (tab === 'digest') { lastShell = ''; paint(player.current) } })
   renderAll()
@@ -208,6 +211,24 @@ export function digestIds(): string[] {
 
 export function currentDigests(): readonly DigestRecord[] {
   return digests
+}
+
+/**
+ * Called once per page when the reader has listened to a digest for real: half of it,
+ * or to the end. The hosted schedule nudge waits for this, not for the first play press.
+ */
+let listenedListener: ((digestId: string) => void) | null = null
+let listenedFired = false
+export function onFirstListen(cb: (digestId: string) => void): void {
+  listenedListener = cb
+}
+function noteListening(s: PlayerState): void {
+  if (listenedFired || !listenedListener || !s.source || s.dur <= 0) return
+  if (!s.played && s.pos < s.dur * 0.5) return
+  const d = selected()
+  if (!d) return
+  listenedFired = true
+  listenedListener(d.id)
 }
 
 export function stopPlayback(): void {

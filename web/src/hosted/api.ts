@@ -225,7 +225,11 @@ export function putSchedule(
   return request<Schedule>('PUT', 'schedule', patch)
 }
 
-/** The newest digests with the notes each was written from (when the server sends them). */
+/** Where a voice's short sample plays from (only the shortlisted voices have one). */
+export function voiceSampleUrl(voice: string): string {
+  return endpoint(`voices/${encodeURIComponent(voice)}/sample`)
+}
+
 /**
  * The newest digests. `summary` leaves out the show notes (fetched per digest
  * with `getDigest`); `etag` is the answer last seen, and an unchanged list
