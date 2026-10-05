@@ -22,10 +22,10 @@ Source audit: `AUDIT-GPT61.md`. Started 2026-10-05. No intermediate deployments.
 | Shared pipeline/provider budget and durable jobs/delivery | F12, F14, F15, F41 | Core jobs/outbox implemented; retention and diagnostics continue |
 | Safe updates, drafts and navigation | F16, F33, F37 | Implemented; atomic deployment integration remains for release |
 | Offline/download audio and efficient playback | F19, F23, F24 | Implemented; IndexedDB and playback logic regressions pass |
-| Stable rendering, storage and payloads | F20, F21, F22 | Pending |
-| Activation, schedule, ordering and private feedback | F25, F27, F28, F29 | Pending |
-| Media, responsive design, device privacy and visual refinement | F30, F31, F34, F40 | Pending |
-| Documentation, fixtures, tests and observability | F36, F38 | Pending |
+| Stable rendering, storage and payloads | F20, F21, F22 | Implemented; DOM, IndexedDB and API regressions pass |
+| Activation, schedule, ordering and private feedback | F25, F27, F28, F29 | Implemented; logic, DOM and server regressions pass |
+| Media, responsive design, device privacy and visual refinement | F30, F31, F34, F40 | Implemented; DOM/server regressions pass, live layout pending |
+| Documentation, fixtures, tests and observability | F36, F38 | Implemented; retention and diagnostics added |
 | Final release and coordinated deployment | All | Pending |
 
 Each group will record changes, tests, limitations and commit references. A finding is not marked complete merely because a recommendation was documented. Real-device/provider/payment checks that cannot be performed safely will remain explicit limitations.
@@ -99,3 +99,38 @@ Each group will record changes, tests, limitations and commit references. A find
 - Resume records are parsed once and shared between player/history, playback only paints the visible player/mini, history paints on meaningful state changes, and unchanged icons/time strings are not rewritten. Waveform caches dimensions/theme colors.
 - Added test-only IndexedDB and DOM fixtures dependencies. Production dependency audit reports zero vulnerabilities; npm flags three development dependency advisories for review before release.
 - Verification: web/server builds and 170 web tests pass, including newest-three binary eviction/isolation/size tests. Actual airplane-mode/lock-screen playback still needs a live device.
+
+### Stable rendering, storage and payloads (d92bda2, 7a08700, a2c3a19)
+
+- Feed cards are reconciled in place by note id and content signature: score, name and avatar changes patch the existing card, so focus and loaded video survive progressive ranking. 50 cards at a time with an accessible Show next that moves focus to the first new note. While the reader is scrolled, rescoring keeps their reading order, but only when the "new" set is unchanged; a real refresh lays out afresh. One top-match edge, also announced in the card label. Mark subscriptions and preview observers are disposed with their cards and sheets.
+- Feed snapshots and digest histories are IndexedDB records per mode and canonical identity; score day buckets are written per batch, in order, off the main thread. Existing localStorage data migrates on first read and the old key is removed only after a successful write; a legacy mode-global history is adopted only by the identity it belonged to. Snapshot trimming measures encoded bytes once per post. An unsaved BYOK digest says so.
+- Hosted paints the last verified account's cache only until `/me` answers; another account or no session clears it first. BYOK identity changes in Tune clear the screen, and a run in flight saves only to its own identity.
+- `GET /digests?summary=1` omits show notes and answers 304 to a matching ETag; background reads use it and coincident triggers share one request. Show notes load per digest and are kept on the device. `GET /feed/latest?since=` answers without posts when unchanged. Job polling pauses in hidden tabs.
+- A digest seen in the list while its job runs is offered as ready, not delivered. An undelivered DM now finishes as `delivery_pending` (not `failed`), is resent for six hours, and an older one no longer blocks a new day's digest.
+
+### Activation, scheduling, ordering and private feedback (bb72f12, af4bf60, fb08608, 4a8ef02, f6e6ff5)
+
+- Mode gate: "Try without an API key" (recommended) and "Use my own model" (free), switching keeps both setups, link to the sample. Landing pricing buttons open their mode (`?mode=`), which is remembered. Landing claims corrected: daily DM delivery is hosted and opt-in, BYOK digests are on request, providers may charge. Sample player shows Pause only once playing, falls back to the transcript, seeks with Home/End.
+- Unconfigured BYOK lists the three essentials with the next one marked; Finish setup focuses it. Both prompt fields have editable starters. A one-time note after the first ranking explains the scores (BYOK adds Try a digest).
+- Daily delivery: after the first real listen (half a digest or to the end), one offer per account with zone, readable format and public-audio disclosure; never enabled otherwise. The Digests tab states whether delivery is on and the next run with its zone. "Which app reads your DMs?" replaces the protocol question; an unknown client now gets legacy DMs that Primal, Damus and modern apps read. Shortlisted voices have a server-made sample (one fixed sentence per voice per process; no digest written). The digest account opens in the chosen client.
+- Status lines state coverage, window and order, and when the newest-500 cap applied. Why this? opens the note at its explanation, which calls the score the model's estimate against the reader's words and says it read the first 500 characters.
+- The 3/6/10-minute digest length now reaches the writer in both modes as an upper bound; hosted stores it server-side. BYOK digests no longer use learned taste with learning off.
+- Private feedback per identity: More like this, Less like this (also hides), Hide note, Hide a person's notes, Save for later; each with Undo, none published. More/less rules steer future ranking as explicit context after learned preferences (both modes; hosted via settings), so they apply with learning off and keep cached scores. Tune lists rules, hidden people and hidden notes with reversal; saved notes open from the feed header. Learned taste can be inspected and reset in both modes; a reset keeps which likes were already read.
+
+### Media, responsive design, device privacy and visual refinement (7ebf98a, 7076ee0, 47b2068)
+
+- Shared imeta contract (url, size, alt, type); the hosted server sends it with each post so tag-only media shows in both modes. Images reserve space when sized, show tall media whole, use the author's description or say there is none, decode asynchronously and link to the full file. Tap to load remote media now actually withholds images and avatars until asked.
+- Tune explains per mode what is kept where and what goes to providers, relays, media hosts and billing. Export settings omits the model key unless separately ticked and never includes signer secrets. Disconnect signer; Clear this device (all storage, session storage, IndexedDB; hosted also signs out). Hosted Download my data (`GET /account/export`) and Delete my hosted data (`POST /account/delete`, the bot's transactional erasure), with in-place confirmations naming what stays (public audio, billing records). App shell has a CSP allowing scripts only from its own origin.
+- Long menus scroll within a capped height, the new-notes pill only moves below the mini player when it shows, narrow cards keep full-height touch targets.
+
+### Reliability details, docs and diagnostics (b2b2310, 828bae7, 4646cde, 7e9aaf3)
+
+- Browser profile and relay-list caches are bounded (relay misses retried after ten minutes). Server retention prunes operational records daily in one tested routine; readers' data stays until they delete it.
+- README and server README describe both modes, the current address, signer behaviour, new endpoints, DM fallback and retention, without local paths.
+- One log line per hosted feed and digest run with phase times and counts, an 8-character key prefix and no content.
+- Development advisories (vite, postcss, nanoid) resolved within range; `npm audit` reports none.
+- Reviewed: sheet history replacement, activity gates and single-flight learning; no change needed.
+
+### Still not verified
+
+No live browser session was available (BrowserOS neo had no window/profile earlier in the work). Layout at real widths, 200% text, virtual keyboards, screen readers, offline/airplane playback, update activation during blocked work and the CSP in a real browser remain unverified beyond DOM fixtures. No real provider, payment, relay or DM delivery was exercised.
