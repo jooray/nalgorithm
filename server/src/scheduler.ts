@@ -66,6 +66,11 @@ export function createScheduler(deps: SchedulerDeps) {
         log.warn(`digest crashed for ${npub.slice(0, 8)}: ${(err as Error).message}`)
         outcome = { status: 'failed', detail: (err as Error).message }
       }
+      // The reader deleted their data while this ran: saving the schedule would bring it back.
+      if (!(await db.get('SELECT npub FROM schedules WHERE npub = ?', [npub]))) {
+        log.info(`digest for ${npub.slice(0, 8)}: ${outcome.status}; account deleted meanwhile`)
+        return
+      }
       const after = await recordRun(db, npub, outcome, now())
       const message = explain(outcome.status, false)
       const repeat = before.lastStatus === outcome.status

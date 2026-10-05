@@ -14,13 +14,28 @@ export function configureProviderBudget(config: Pick<LLMConfig, 'apiBaseUrl' | '
   budget.limit = Math.max(1, Math.min(10, options.concurrency))
   budget.rpm = Math.max(1, options.requestsPerMinute)
 }
+/** The shared queue is full: the provider is busy, so retrying now only lengthens the queue. */
+export class ProviderBusy extends Error {
+  constructor() { super('The model queue is full. Try again shortly.'); this.name = 'ProviderBusy' }
+}
 /** Shared across scoring, writing, learning, editing and TTS for the same key. */
 export async function withProviderSlot<T>(config: Pick<LLMConfig, 'apiBaseUrl' | 'apiKey'> & { signal?: AbortSignal }, work: () => Promise<T>): Promise<T> {
   const b = budgetFor(config)
   config.signal?.throwIfAborted()
   if (b.active >= b.limit) {
-    if (b.queue.length >= 64) throw new Error('The model queue is full. Try again shortly.')
-    await new Promise<void>((resolve) => b.queue.push(resolve))
+    if (b.queue.length >= 64) throw new ProviderBusy()
+    // An aborted caller leaves the queue at once instead of holding a place until a slot frees.
+    const signal = config.signal
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = (): void => {
+        const i = b.queue.indexOf(wake)
+        if (i >= 0) b.queue.splice(i, 1)
+        reject(signal!.reason)
+      }
+      const wake = (): void => { signal?.removeEventListener('abort', onAbort); resolve() }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      b.queue.push(wake)
+    })
   } else b.active++
   try {
     config.signal?.throwIfAborted()

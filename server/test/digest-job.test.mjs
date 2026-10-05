@@ -33,7 +33,7 @@ function rig(db, over = {}) {
       async startTrial() { calls.trials++; return { state: 'trial', until: T0 + 3 * 86400 } },
       async consume(npub, kind, units, key) { calls.consume.push({ kind, key }); return over.consume ?? { allowed: true } },
     },
-    feed: async () => { calls.feed++; if (over.feedThrows) throw new Error('relays down'); return { fetched: 3, profiles: { ['b'.repeat(64)]: { name: 'bob' } }, learnedPrompt: 'learned', posts: over.posts ?? [post('p1', 9), post('p2', 8), post('p3', 7)] } },
+    feed: async (_n, _s, _st, _sig, _f, charge) => { await charge?.(); calls.feed++; if (over.feedThrows) throw new Error('relays down'); return { fetched: 3, profiles: { ['b'.repeat(64)]: { name: 'bob' } }, learnedPrompt: 'learned', posts: over.posts ?? [post('p1', 9), post('p2', 8), post('p3', 7)] } },
     writeDigest: async (o) => { calls.write.push(o); return over.text ?? 'Good morning, nostrich! Here is your digest.' },
     synthesize: async (cfg, text) => { calls.synth.push({ cfg, text }); if (over.synthThrows) throw new Error('tts down'); return over.audioBytes ?? new Uint8Array([1, 2, 3]) },
     upload: over.noUpload ? undefined : async (audio) => { calls.upload.push(audio); if (over.uploadThrows) throw new Error('blossom down'); return { url: 'https://cdn.test/abc.mp3', server: 'https://cdn.test', sha256: 'abc' } },
@@ -288,4 +288,39 @@ test('scheduler: user-actionable outcomes are notified once, not every day; a cr
   await saveSchedule(db, { ...(await loadSchedule(db, NPUB)), nextRunAt: T0 })
   await crash.tick()
   assert.equal((await loadSchedule(db, NPUB)).lastStatus, 'failed')
+})
+
+test('a busy feed is not charged, and an abort during speech still saves and sends the text digest', async () => {
+  const db = await freshDb(); await withPrompt(db)
+  const busy = rig(db)
+  busy.deps.feed = async () => { throw new Error('A ranking for this reader is already running.') }
+  assert.equal((await runDigest(busy.deps, NPUB, { manual: true })).status, 'failed')
+  assert.equal(busy.calls.consume.length, 0, 'the claim failed before the charge')
+
+  const controller = new AbortController()
+  const { deps, calls } = rig(db)
+  deps.synthesize = async () => { controller.abort(new Error('deadline')); throw new Error('deadline') }
+  const out = await runDigest(deps, NPUB, { manual: true, signal: controller.signal })
+  assert.deepEqual(out, { status: 'sent', hasAudio: false })
+  assert.equal(calls.consume.length, 1)
+  const d = await db.get('SELECT body, audio_url, status FROM digests WHERE npub = ? ORDER BY id DESC LIMIT 1', [NPUB])
+  assert.deepEqual([d.audio_url, d.status], [null, 'ok'])
+  assert.ok(calls.dm[0].text.includes('Good morning'))
+})
+
+test('a feed answered from a run already paid for still charges the digest before writing', async () => {
+  const db = await freshDb(); await withPrompt(db)
+  const { deps, calls } = rig(db, { consume: { allowed: false, reason: 'cap_reached' } })
+  deps.feed = async () => ({ fetched: 1, profiles: {}, posts: [post('p1', 9)] })
+  assert.equal((await runDigest(deps, NPUB)).status, 'capped')
+  assert.equal(calls.write.length, 0)
+})
+
+test('scheduler: a reader who deleted their data during the run does not get their schedule back', async () => {
+  const db = await freshDb()
+  await saveSchedule(db, { ...DEFAULT_SCHEDULE(NPUB), enabled: true, nextRunAt: T0 - 1 })
+  const dm = { sent: [], async send(to, text) { this.sent.push(text); return [{ delivered: true }] } }
+  const sched = createScheduler({ db, log: silent, now: () => T0, dm, run: async () => { await db.run('DELETE FROM schedules WHERE npub = ?', [NPUB]); return { status: 'failed' } } })
+  await sched.tick()
+  assert.equal(await db.get('SELECT npub FROM schedules WHERE npub = ?', [NPUB]), undefined)
 })

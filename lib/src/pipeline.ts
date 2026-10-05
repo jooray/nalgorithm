@@ -162,6 +162,9 @@ Summary:`,
   return currentPrompt ?? ''
 }
 
+/** How far back catch-up between the watermark and now may reach. */
+export const LEARN_MAX_AGE_SECONDS = 30 * 86_400
+
 export interface RefreshLearnedOptions {
   fetcher: Fetcher
   store: PipelineStore
@@ -194,8 +197,15 @@ export async function refreshLearnedPrompt(opts: RefreshLearnedOptions): Promise
     learnedPrompt = cached.prompt
   }
 
-  const sinceTimestamp = cached?.lastLikeTimestamp ? Math.max(0, cached.lastLikeTimestamp - 300) : undefined
   const fetchedAt = Math.floor(now() / 1000)
+  // Catch-up never reaches further back than this, so a reader returning after months
+  // does not pay for their whole history one page an hour.
+  const floor = Math.max(0, fetchedAt - LEARN_MAX_AGE_SECONDS)
+  const sinceTimestamp = cached?.lastLikeTimestamp ? Math.max(floor, cached.lastLikeTimestamp - 300) : undefined
+  // The first run reads only the newest page and starts the watermark there: older likes
+  // are history, not worth a model call per 200 of them.
+  const firstRun = sinceTimestamp === undefined
+  const backfillUntil = sinceTimestamp !== undefined && cached?.backfillUntil !== undefined && cached.backfillUntil >= sinceTimestamp ? cached.backfillUntil : undefined
   log.info(
     sinceTimestamp
       ? `Fetching likes since ${new Date(sinceTimestamp * 1000).toISOString()}...`
@@ -204,11 +214,11 @@ export async function refreshLearnedPrompt(opts: RefreshLearnedOptions): Promise
   const fetchedLikes = await fetcher.getLikes(pubkeyHex, {
     limit: 200,
     ...(sinceTimestamp !== undefined ? { since: sinceTimestamp } : {}),
-    ...(cached?.backfillUntil !== undefined ? { until: cached.backfillUntil } : {}),
+    ...(backfillUntil !== undefined ? { until: backfillUntil } : {}),
   })
   const processed = new Set(cached?.processedReactionIds ?? [])
   const likes = fetchedLikes.filter((like) => !processed.has(like.reactionId ?? like.id))
-  const fullPage = (fetchedLikes.reactionCount ?? fetchedLikes.length) >= 200
+  const fullPage = !firstRun && (fetchedLikes.reactionCount ?? fetchedLikes.length) >= 200
   const latestReactionTimestamp = Math.max(cached?.latestReactionTimestamp ?? cached?.lastLikeTimestamp ?? 0, ...fetchedLikes.map((l) => l.reactedAt ?? fetchedAt))
   const checkpoint = {
     lastLikeTimestamp: fullPage ? cached?.lastLikeTimestamp : latestReactionTimestamp,

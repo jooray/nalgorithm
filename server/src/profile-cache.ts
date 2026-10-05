@@ -34,16 +34,21 @@ function rowToProfile(r: Row): ProfileData {
  * fetcher. Results are written back; pubkeys that still do not resolve are
  * remembered as missing for ten minutes. A stale row is returned when the refetch
  * fails, so a flaky relay never makes a known name disappear.
+ * `onCached` gets every name the cache knows (stale ones too) before the relays are asked.
  */
 export async function loadProfilesCached(
   db: Db,
   fetcher: { getProfiles(pubkeys: string[]): Promise<Map<string, ProfileData>> },
   pubkeys: string[],
-  now: number = nowSec()
+  now: number = nowSec(),
+  onCached?: (cached: Map<string, ProfileData>) => void
 ): Promise<Map<string, ProfileData>> {
   const out = new Map<string, ProfileData>()
   const unique = [...new Set(pubkeys)]
-  if (unique.length === 0) return out
+  if (unique.length === 0) {
+    onCached?.(out)
+    return out
+  }
 
   const rows = new Map<string, Row>()
   try {
@@ -65,6 +70,14 @@ export async function loadProfilesCached(
     if (row && row.missing === 0 && now - row.fetched_at < PROFILE_TTL_SECONDS) out.set(pk, rowToProfile(row))
     else if (row && row.missing === 1 && now - row.fetched_at < PROFILE_MISSING_TTL_SECONDS) continue
     else toFetch.push(pk)
+  }
+  if (onCached) {
+    const known = new Map(out)
+    for (const pk of toFetch) {
+      const stale = rows.get(pk)
+      if (stale && stale.missing === 0) known.set(pk, rowToProfile(stale))
+    }
+    onCached(known)
   }
   if (toFetch.length === 0) return out
 

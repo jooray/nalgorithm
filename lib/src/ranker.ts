@@ -10,8 +10,9 @@
  *   question per post and reads the score off the returned distribution.
  */
 
-import { chatCompletionWithRetry, ProviderError } from './llm.js'
+import { chatCompletionWithRetry } from './llm.js'
 import { createPacer, decisionCompletionWithRetry } from './decision.js'
+import { ProviderBusy } from './provider-budget.js'
 import type { DecisionScoreQuestion } from './decision.js'
 import type {
   RankerConfig,
@@ -562,6 +563,16 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 /**
+ * Errors that no other batch can get past: a bad key or an unknown model, or a full
+ * provider queue. A 400 or 413 belongs to one batch (an odd post, a too-long prompt),
+ * so it costs that batch its scores, not the whole run.
+ */
+function failsEveryBatch(err: unknown): boolean {
+  const status = (err as { status?: number }).status
+  return err instanceof ProviderBusy || status === 401 || status === 403 || status === 404
+}
+
+/**
  * Create a Ranker instance.
  */
 export function createRanker(config: RankerConfig): Ranker {
@@ -614,8 +625,7 @@ export function createRanker(config: RankerConfig): Ranker {
         debugError = `Decision response answered ${scoreMap.size}/${posts.length} questions`
       }
     } catch (err) {
-      const status = (err as { status?: number }).status
-      if (status && status < 500 && status !== 429) throw err
+      if (failsEveryBatch(err)) throw err
       debugError = `Decision call failed: ${(err as Error).message}`
     }
 
@@ -678,7 +688,7 @@ export function createRanker(config: RankerConfig): Ranker {
         debugError = result?.error ?? 'Validation returned no scores'
       }
     } catch (err) {
-      if (err instanceof ProviderError && !err.retryable) throw err
+      if (failsEveryBatch(err)) throw err
       debugError = `LLM call failed: ${(err as Error).message}`
     }
 

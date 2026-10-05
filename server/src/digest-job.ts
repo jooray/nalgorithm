@@ -156,8 +156,15 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   // A scheduled digest counts once per day however often it is retried; a manual
   // one is unique each time so the daily cap limits how many can be asked for.
   const key = opts.manual ? `digest:${npub}:m:${randomBytes(6).toString('hex')}` : `digest:${npub}:s:${dayStamp(now)}`
-  const cap = await billing.consume(npub, 'digest', 1, key)
-  if (!cap.allowed) return { status: cap.reason === 'billing_unavailable' ? 'billing_unavailable' : 'capped' }
+  // Charged once the feed run holds the reader's claim (so a busy feed costs nothing), or,
+  // when the feed answers from a run already paid for, right after it and before writing.
+  let cap: { allowed: boolean; reason?: string } | undefined
+  const refused = new Error('digest not allowed')
+  const charge = async (): Promise<void> => {
+    cap = await billing.consume(npub, 'digest', 1, key)
+    if (!cap.allowed) throw refused
+  }
+  const capOutcome = (): DigestOutcome => ({ status: cap?.reason === 'billing_unavailable' ? 'billing_unavailable' : 'capped' })
 
   const schedule = await loadSchedule(db, npub)
   const store = createStore(db, npub, () => now)
@@ -173,7 +180,8 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
     at = Date.now()
   }
   try {
-    const feed = await deps.feed(npub, settings, store, opts.signal)
+    const feed = await deps.feed(npub, settings, store, opts.signal, false, charge)
+    if (!cap) await charge()
     lap('feed')
     if (feed.posts.length === 0) return { status: 'no_posts' }
 
@@ -219,9 +227,10 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
       log.warn(`digest speech failed for ${npub.slice(0, 8)}: ${(err as Error).message}`)
     }
   } catch (err) {
+    if (err === refused) return capOutcome()
     return { status: 'failed', detail: (err as Error).message }
   }
-  opts.signal?.throwIfAborted()
+  // An abort during speech still saves and sends the text digest: it is written and paid for.
   lap(audioUrl ? 'speech and upload' : 'no audio')
   log.info(`digest ${npub.slice(0, 8)}: ${marks.join(', ')}; ${notes.length} notes, ${text.split(/\s+/).length} words`)
 

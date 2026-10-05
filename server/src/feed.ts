@@ -4,8 +4,8 @@ import type { Db } from './db.js'
 import { loadProfilesCached } from './profile-cache.js'
 import type { ServerConfig } from './config.js'
 import type { UserSettings } from './settings.js'
-import { randomBytes } from 'node:crypto'
 import { insertIgnore } from './database.js'
+import { newJobOwner } from './digest-jobs.js'
 
 export interface FeedResult {
   posts: ScoredPost[]
@@ -15,12 +15,20 @@ export interface FeedResult {
   learnedPrompt?: string
 }
 
-/** What the HTTP layer needs from a feed run. Injected so tests skip relays and models. */
-export type FeedRunner = (npub: string, settings: UserSettings, store: PipelineStore, signal?: AbortSignal, fresh?: boolean) => Promise<FeedResult>
+/**
+ * What the HTTP layer needs from a feed run. Injected so tests skip relays and models.
+ * `charge` is called once the run holds the reader's pipeline claim and before anything
+ * costs money; a throw stops the run. It is not called when the answer is the result of
+ * a run that just finished or is still running for the same reader and settings, which
+ * that run's caller already paid for.
+ */
+export type FeedRunner = (npub: string, settings: UserSettings, store: PipelineStore, signal?: AbortSignal, fresh?: boolean, charge?: () => Promise<void>) => Promise<FeedResult>
 export class FeedBusy extends Error {}
 
 /** Cap on posts fetched per run, so a huge follow list cannot run up cost. */
 export const MAX_POSTS = 500
+/** How long a finished ranking waits for relay profiles not yet in the cache. */
+const PROFILE_WAIT_MS = 3_000
 const learning = new Map<string, Promise<unknown>>()
 
 /** Whether background learning is running for this npub (it writes the learned row when it ends). */
@@ -37,14 +45,14 @@ export async function loadFeedProfiles(
   fetcher: { getProfiles(pubkeys: string[]): Promise<Map<string, ProfileData>> },
   posts: Parameters<typeof collectPostPubkeys>[0],
   cap?: number,
-  db?: Db
+  db?: Db,
+  onCached?: (cached: Map<string, ProfileData>) => void
 ): Promise<Map<string, ProfileData>> {
   const pubkeys = collectPostPubkeys(posts, cap)
-  return db ? loadProfilesCached(db, fetcher, pubkeys) : fetcher.getProfiles(pubkeys)
+  return db ? loadProfilesCached(db, fetcher, pubkeys, undefined, onCached) : fetcher.getProfiles(pubkeys)
 }
 
 export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?: Db): FeedRunner {
-  const pending = new Map<string, Promise<FeedResult>>()
   const recent = new Map<string, { at: number; result: FeedResult }>()
   const run: FeedRunner = async (npub, settings, store, signal) => {
     const fetcher = createFetcher({ relays: config.relays, signal })
@@ -63,10 +71,16 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
       lap(`${posts.length} posts`)
       if (posts.length === 0) { report('no posts'); return { posts: [], profiles: {}, fetched: 0 } }
 
+      // Cached profiles are in hand at once; the relay lookup for the rest runs alongside scoring.
       const profiles = new Map<string, ProfileData>()
-      enrichment = loadFeedProfiles(fetcher, posts, undefined, db).then((found) => {
-        for (const [pk, profile] of found) profiles.set(pk, profile)
-      }).catch((err) => log.warn(`profile enrichment unavailable: ${(err as Error).message}`))
+      let cachedReady = (): void => {}
+      const cached = new Promise<void>((resolve) => (cachedReady = resolve))
+      const fill = (found: Map<string, ProfileData>): void => { for (const [pk, profile] of found) profiles.set(pk, profile) }
+      enrichment = loadFeedProfiles(fetcher, posts, undefined, db, (found) => { fill(found); cachedReady() })
+        .then(fill)
+        .catch((err) => log.warn(`profile enrichment unavailable: ${(err as Error).message}`))
+        .finally(cachedReady)
+      await cached
 
       const learned = settings.learnFromLikes ? await store.getLearned() : null
       const learnedPrompt = learned?.prompt
@@ -96,7 +110,11 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
       })
 
       lap('scoring')
-      report(`${scored.filter((p) => p.defaultScore).length} unranked`)
+      // Cached scores can finish before the relays answer: give them a short, bounded wait.
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([enrichment, new Promise((resolve) => (timer = setTimeout(resolve, PROFILE_WAIT_MS)))])
+      clearTimeout(timer)
+      report(`${scored.filter((p) => p.defaultScore).length} unranked, ${profiles.size} profiles`)
       return {
         posts: sortByRelevance(scored),
         profiles: Object.fromEntries(profiles),
@@ -107,13 +125,38 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
       void enrichment.finally(() => fetcher.destroy())
     }
   }
-  return (npub, settings, store, signal, fresh = false) => {
+  /**
+   * A caller's view of a shared run: it gives up at its own deadline, and the run
+   * stops only when every caller has given up, so a digest that joins a web
+   * request's run is not cut off at the request's shorter deadline.
+   */
+  const join = (shared: Shared, signal?: AbortSignal): Promise<FeedResult> => {
+    if (!signal) {
+      shared.unbounded = true
+      return shared.work
+    }
+    shared.waiting++
+    return new Promise<FeedResult>((resolve, reject) => {
+      const giveUp = (): void => {
+        if (--shared.waiting === 0 && !shared.unbounded) shared.controller.abort(signal.reason)
+        reject(signal.reason)
+      }
+      if (signal.aborted) return giveUp()
+      signal.addEventListener('abort', giveUp, { once: true })
+      shared.work.then(resolve, reject).finally(() => signal.removeEventListener('abort', giveUp))
+    })
+  }
+  interface Shared { work: Promise<FeedResult>; controller: AbortController; waiting: number; unbounded: boolean }
+  const pending = new Map<string, Shared>()
+
+  return (npub, settings, store, signal, fresh = false, charge) => {
     const key = `${npub}:${rankingContext({ ...settings, model: config.venice.scoringModel, scorer: 'decision' })}:${settings.hoursBack}`
     const active = pending.get(key)
-    if (active) return active
+    if (active) return join(active, signal)
     const hit = recent.get(key)
     if (!fresh && hit && Date.now() - hit.at < 120_000) return Promise.resolve(hit.result)
-    const owner = randomBytes(16).toString('hex')
+    const owner = newJobOwner()
+    const controller = new AbortController()
     const work = (async () => {
       let heartbeat: ReturnType<typeof setInterval> | undefined
       if (db) {
@@ -127,7 +170,9 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
         heartbeat.unref()
       }
       try {
-        const result = await run(npub, settings, store, signal)
+        // Charged only once the claim is held, so a busy answer never costs a unit.
+        await charge?.()
+        const result = await run(npub, settings, store, controller.signal)
         if (recent.size >= 64) recent.delete(recent.keys().next().value!)
         recent.set(key, { at: Date.now(), result })
         return result
@@ -136,7 +181,8 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
         if (db) await db.run('DELETE FROM pipeline_jobs WHERE npub = ? AND owner = ?', [npub, owner]).catch(() => {})
       }
     })().finally(() => pending.delete(key))
-    pending.set(key, work)
-    return work
+    const shared: Shared = { work, controller, waiting: 0, unbounded: false }
+    pending.set(key, shared)
+    return join(shared, signal)
   }
 }

@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { hostname } from 'node:os'
 import { configureProviderBudget, providerBudgetStats, synthesizeSpeech, type PipelineLogger } from 'nalgorithm'
 import { createApp } from './app.js'
 import { createBillingClient } from './billing-client.js'
@@ -7,7 +8,7 @@ import { uploadAudio } from './blossom.js'
 import { loadConfig } from './config.js'
 import { openDb, pruneOperational, pruneScores } from './db.js'
 import { explain, createScheduler } from './scheduler.js'
-import { createDigestNow, interruptRunningJobs, runInSlot } from './digest-jobs.js'
+import { configureJobOwner, createDigestNow, interruptRunningJobs, runInSlot } from './digest-jobs.js'
 import { createJobTracker } from './drain.js'
 import { effectiveFormat, runDigest } from './digest-job.js'
 import type { DmSender, DmSendOutcome } from './digest-job.js'
@@ -33,7 +34,9 @@ const feed = createFeedRunner(config, log, db)
 let runDigestNow: ((npub: string) => Promise<string>) | undefined
 const jobs = createJobTracker()
 const nowSec = (): number => Math.floor(Date.now() / 1000)
-// A row still marked running belongs to a process that died.
+// A claim this server made before a restart belongs to a process that died; release it now
+// rather than when its lease runs out. Two processes on one host listen on different ports.
+configureJobOwner(`${hostname()}:${config.port}`)
 await interruptRunningJobs(db, nowSec())
 
 let stopIntake = async (): Promise<void> => {}
@@ -188,7 +191,7 @@ async function shutdown(signal: string): Promise<void> {
   if (jobs.active > 0) log.info(`waiting up to ${DRAIN_MS / 1000}s for ${jobs.active} running job(s)`)
   if (!(await jobs.drain(DRAIN_MS))) {
     log.warn(`${jobs.active} job(s) still running after ${DRAIN_MS / 1000}s: stopping anyway`)
-    await interruptRunningJobs(db, nowSec()).catch(() => {})
+    await interruptRunningJobs(db, nowSec(), true).catch(() => {})
   }
   // Let the last responses leave the socket.
   await new Promise((r) => setTimeout(r, 250))

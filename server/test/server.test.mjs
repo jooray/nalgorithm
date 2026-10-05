@@ -29,7 +29,7 @@ async function freshDb() {
   const url = process.env.TEST_DATABASE_URL
   if (!url) return openDb(':memory:')
   shared ??= await openDb(url)
-  for (const t of ['link_previews', 'peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'feed_snapshots', 'digest_jobs', 'scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
+  for (const t of ['link_previews', 'peers', 'deliveries', 'digests', 'schedules', 'seen_wraps', 'feed_snapshots', 'digest_jobs', 'pipeline_jobs', 'scores', 'learned', 'nonces', 'sessions', 'settings', 'accounts']) await shared.exec(`DELETE FROM ${t}`)
   return shared
 }
 
@@ -215,7 +215,8 @@ function fakeBilling(initial = { state: 'active', until: T0 + 86400 }) {
 async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, makeDigestNow, jobs, voiceSample, clock = { t: T0 } } = {}) {
   const db = await freshDb()
   const feedCalls = []
-  const runner = feed ?? (async (npub, settings) => {
+  const runner = feed ?? (async (npub, settings, _store, _signal, _fresh, charge) => {
+    await charge?.()
     feedCalls.push({ npub, settings })
     return {
       fetched: 3,
@@ -322,7 +323,7 @@ test('HTTP: feed for an active user returns trimmed posts and only relevant prof
 test('HTTP: profiles cover boosted, quoted and mentioned authors, and nobody else', async () => {
   const H = (c) => c.repeat(64)
   const mention = nip19.npubEncode(H('d'))
-  const feed = async () => ({
+  const feed = async (_n, _s, _st, _sig, _f, charge) => (await charge?.(), {
     fetched: 2,
     profiles: Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((c) => [H(c), { name: `n${c}` }])),
     posts: [
@@ -407,7 +408,7 @@ test('HTTP: a second concurrent feed run for the same npub is refused', async ()
     assert.equal((await second.json()).code, 'in_progress')
     release()
     assert.equal((await first).status, 200)
-  }, { feed: async () => { await gate; return { fetched: 0, profiles: {}, posts: [] } } })
+  }, { feed: async (_n, _s, _st, _sig, _f, charge) => { await charge?.(); await gate; return { fetched: 0, profiles: {}, posts: [] } } })
 })
 
 // ─── feed snapshots ──────────────────────────────────────────────────────────
@@ -474,7 +475,8 @@ test('snapshot: /feed/latest follows the paywall and billing rules, and never st
 test('snapshot: isNew flags posts that were not in the previous snapshot', async () => {
   const clock = { t: T0 }
   let round = 0
-  const feed = async (npub) => {
+  const feed = async (npub, _s, _st, _sig, _f, charge) => {
+    await charge?.()
     round++
     const base = [{ id: 'p1', type: 'original', author: npub, content: 'a', createdAt: T0, score: 9 }]
     if (round > 1) base.push({ id: 'p2', type: 'original', author: npub, content: 'b', createdAt: T0, score: 5 })
@@ -616,7 +618,7 @@ test('digest slot: a stale claim can be taken over, a failed run keeps the old d
   const db = await freshDb()
   const n = 'a'.repeat(64)
   const first = await claimDigestJob(db, n, T0)
-  assert.equal(first.claimed, true); assert.equal(first.startedAt, T0); assert.equal(first.owner.length, 32)
+  assert.equal(first.claimed, true); assert.equal(first.startedAt, T0); assert.match(first.owner, /^[0-9a-f]{16}\/[0-9a-f]{8}\/[0-9a-f]{16}$/)
   assert.deepEqual(await claimDigestJob(db, n, T0 + 5), { claimed: false, startedAt: T0 })
   await finishDigestJob(db, n, T0, 'sent', T0 + 60)
   let st = await digestJobStatus(db, n, T0 + 61)
@@ -637,6 +639,27 @@ test('digest slot: a stale claim can be taken over, a failed run keeps the old d
   assert.equal(await interruptRunningJobs(db, T0 + 1500), 1)
   st = await digestJobStatus(db, n, T0 + 1501)
   assert.deepEqual([st.running, st.lastStatus], [false, 'interrupted'])
+})
+
+test('restart: claims of an earlier boot of this server are released at once, other servers keep their lease', async () => {
+  const { claimDigestJob, digestJobStatus, interruptRunningJobs, newJobOwner } = await import('../dist/digest-jobs.js')
+  const db = await freshDb()
+  const [mine, other, current] = ['1', '2', '3'].map((c) => c.repeat(64))
+  const instance = newJobOwner().split('/')[0]
+  const deadBoot = `${instance}/00000000/${'0'.repeat(16)}`
+  for (const [npub, owner] of [[mine, deadBoot], [other, `${'f'.repeat(16)}/00000000/${'0'.repeat(16)}`]]) {
+    await db.run('INSERT INTO digest_jobs (npub, started_at, running, lease_at, owner) VALUES (?, ?, 1, ?, ?)', [npub, T0, T0, owner])
+    await db.run('INSERT INTO pipeline_jobs (npub, owner, lease_until) VALUES (?, ?, ?)', [npub, owner, T0 + 600])
+  }
+  assert.equal((await claimDigestJob(db, current, T0)).claimed, true)
+  assert.equal(await interruptRunningJobs(db, T0 + 1), 1, 'only the dead boot\'s digest, seconds after it renewed its lease')
+  assert.equal((await digestJobStatus(db, mine, T0 + 2)).lastStatus, 'interrupted')
+  assert.equal((await digestJobStatus(db, other, T0 + 2)).running, true, 'another server\'s fresh lease stays')
+  assert.equal((await digestJobStatus(db, current, T0 + 2)).running, true, 'this boot\'s own job stays')
+  assert.deepEqual((await db.all('SELECT npub FROM pipeline_jobs ORDER BY npub')).map((r) => r.npub), [other])
+  // A forced exit: this boot's jobs die with it.
+  assert.equal(await interruptRunningJobs(db, T0 + 3, true), 1)
+  assert.equal((await digestJobStatus(db, current, T0 + 4)).running, false)
 })
 
 test('drain: waits for running jobs, refuses new ones after stop, and gives up at the timeout', async () => {
@@ -829,5 +852,32 @@ test('HTTP: digests carry their notes (empty for old rows); GET /digests/:id is 
     assert.equal((await json('/digests/999999', { token: body.token })).status, 404)
     assert.equal((await json('/digests/abc', { token: body.token })).status, 404)
     assert.equal((await json(`/digests/${fresh}`)).status, 401)
+  })
+})
+
+test('HTTP: a ranking busy elsewhere answers 429 without a unit; a full model queue answers 503', async () => {
+  const { FeedBusy } = await import('../dist/feed.js')
+  const { ProviderBusy } = await import('nalgorithm')
+  let fail = () => new FeedBusy('A ranking for this reader is already running.')
+  await withApp(async ({ json, login, billing }) => {
+    const { body } = await login()
+    await setPrompt(json, body.token)
+    let res = await json('/feed?force=1', { token: body.token })
+    assert.equal(res.status, 429)
+    assert.equal((await res.json()).code, 'in_progress')
+    assert.equal(billing.consumed.length, 0, 'the claim failed before the charge')
+    fail = () => new ProviderBusy()
+    res = await json('/feed?force=1', { token: body.token })
+    assert.equal(res.status, 503)
+    assert.equal((await res.json()).code, 'busy')
+  }, { feed: async (_n, _s, _st, _sig, _f, charge) => { const err = fail(); if (err instanceof ProviderBusy) await charge?.(); throw err } })
+})
+
+test('HTTP: audio whose file host cannot be fetched answers 502, not 500', async () => {
+  await withApp(async ({ json, login, npub, db }) => {
+    const { body } = await login()
+    const { lastInsertId } = await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', [npub, T0, 'x', 'http://127.0.0.1:1/a.mp3', 'ok'])
+    const res = await json(`/digests/${lastInsertId}/audio`, { token: body.token })
+    assert.equal(res.status, 502)
   })
 })

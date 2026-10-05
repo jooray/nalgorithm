@@ -394,7 +394,14 @@ export function createFetcher(config: FetcherConfig): Fetcher {
     }
     if (options.until != null) filter.until = options.until
     const reactions = await query(relays, filter)
-    const page = { reactionCount: reactions.length, nextUntil: reactions.length ? Math.min(...reactions.map((r) => r.created_at)) - 1 : undefined }
+    // Each relay stops at `limit` on its own, so one may reach further back than another, and the
+    // oldest merged event would skip what the shallower relay did not send. The limit-th newest
+    // merged event is no older than the oldest event of any relay that hit the limit, so the next
+    // page starts there (inclusive; processed reaction IDs drop the overlap).
+    const times = reactions.map((r) => r.created_at).sort((a, b) => b - a)
+    const boundary = times.length ? times[Math.min(limit, times.length) - 1] : undefined
+    const nextUntil = boundary === undefined ? undefined : Math.min(boundary, (options.until ?? Infinity) - 1)
+    const page = { reactionCount: reactions.length, nextUntil }
 
     // Extract liked event IDs (only positive reactions)
     const likedEventIds: string[] = []

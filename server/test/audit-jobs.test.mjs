@@ -15,7 +15,7 @@ test('feed slot is claimed before awaiting billing, so concurrent requests consu
     const gate = new Promise(r=>release=r), inside = new Promise(r=>entered=r)
     const app = createApp({ db, publicUrl:'https://example.test/app/api', secureCookie:true, now:()=>now, log:{info(){},warn(){}},
       billing:{async entitlement(){return {state:'active'}},async consume(){consumed++;entered();await gate;return {allowed:true}}},
-      feed:async()=>{runs++;return {posts:[],profiles:{},fetched:0}},
+      feed:async(_n,_s,_st,_sig,_f,charge)=>{await charge?.();runs++;return {posts:[],profiles:{},fetched:0}},
     })
     const request = () => ({method:'GET',url:'/feed?force=1',headers:{authorization:`Bearer ${session.token}`}})
     const status = []

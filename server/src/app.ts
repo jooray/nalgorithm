@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { collectPostPubkeys, readImeta } from 'nalgorithm'
+import { ProviderBusy, collectPostPubkeys, readImeta } from 'nalgorithm'
 import type { PipelineLogger, ScoredPost } from 'nalgorithm'
 import { AuthError, createSession, getSession, issueChallenge, revokeSession, verifyLogin, SESSION_TTL_SECONDS } from './auth.js'
 import type { BillingClient } from './billing-client.js'
@@ -15,7 +15,7 @@ import type { JobTracker } from './drain.js'
 import type { FeedRunner } from './feed.js'
 import { FeedBusy, learningInProgress } from './feed.js'
 import { PreviewError } from './preview/service.js'
-import { safeFetch } from './preview/ssrf.js'
+import { PreviewFetchError, safeFetch } from './preview/ssrf.js'
 import type { PreviewService } from './preview/service.js'
 import { ScheduleError, applySchedulePatch, loadSchedule, saveSchedule } from './schedule.js'
 import type { Schedule } from './schedule.js'
@@ -353,7 +353,11 @@ export function createApp(deps: AppDeps) {
       if (audioActive >= 2) throw new HttpError(429, 'Audio downloads are busy. Try again shortly.')
       audioActive++
       try {
-      const audio = await safeFetch(row.audio_url, { maxBytes: 60 * 1024 * 1024, truncate: false, timeoutMs: 60_000, accept: 'audio/mpeg', acceptType: (type) => type.startsWith('audio/') || type === 'application/octet-stream' })
+      const audio = await safeFetch(row.audio_url, { maxBytes: 60 * 1024 * 1024, truncate: false, timeoutMs: 60_000, accept: 'audio/mpeg', acceptType: (type) => type.startsWith('audio/') || type === 'application/octet-stream' }).catch((err) => {
+        // The file host is down, slow or answers something else: its failure, not ours.
+        if (err instanceof PreviewFetchError) throw new HttpError(502, 'the audio file could not be fetched right now')
+        throw err
+      })
       res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audio.body.length, 'Cache-Control': 'private, no-store', 'Content-Disposition': `attachment; filename="nalgorithm-${audioMatch[1]}.mp3"`, 'X-Content-Type-Options': 'nosniff' })
       return void res.end(audio.body)
       } finally { audioActive-- }
@@ -472,16 +476,18 @@ export function createApp(deps: AppDeps) {
       const endJob = deps.jobs?.begin() ?? (() => {})
       running.add(npub)
       try {
-        // One unit per real run, as before. Served-from-snapshot answers above
-        // never reach this line, so they are free.
-        const cap = await billing.consume(npub, 'feed', 1, `feed:${npub}:${nowSec()}`)
-        if (!cap.allowed) {
+        // One unit per real run, charged by the runner once it holds the reader's claim.
+        // Served-from-snapshot answers above, and the runner's answer from a run of the same
+        // reader and settings that just finished or is still going, are already paid for.
+        const charge = async (): Promise<void> => {
+          const cap = await billing.consume(npub, 'feed', 1, `feed:${npub}:${nowSec()}`)
+          if (cap.allowed) return
           if (cap.reason === 'billing_unavailable') throw new HttpError(503, 'billing is unavailable, try again shortly', { code: 'billing_unavailable' })
           throw new HttpError(429, 'daily limit reached, try again tomorrow', { code: 'daily_cap' })
         }
 
         try {
-          const result = await deps.feed(npub, settings, createStore(db, npub, nowSec), AbortSignal.timeout(180_000), force)
+          const result = await deps.feed(npub, settings, createStore(db, npub, nowSec), AbortSignal.timeout(180_000), force, charge)
           const posts = result.posts.slice(0, limit).map(publicPost)
           // Authors plus anyone mentioned in the text, so mentions render as names.
           const authors = new Set(collectPostPubkeys(result.posts.slice(0, limit), Infinity))
@@ -509,6 +515,7 @@ export function createApp(deps: AppDeps) {
       if (err instanceof HttpError) return send(res, err.status, { error: err.message, ...err.extra })
       if (err instanceof DigestRunning) return send(res, 409, { error: 'a digest is already being made for you', code: 'digest_running', startedAt: err.startedAt })
       if (err instanceof FeedBusy) return send(res, 429, { error: err.message, code: 'in_progress' })
+      if (err instanceof ProviderBusy) return send(res, 503, { error: 'ranking is busy, try again shortly', code: 'busy' })
       if (err instanceof ShuttingDown) return send(res, 503, { error: err.message, code: 'shutting_down' })
       if (err instanceof PreviewError) return send(res, err.status, { error: err.message })
       if (err instanceof BillingUnavailable) return send(res, 503, { error: 'billing is unavailable, try again shortly', code: 'billing_unavailable' })

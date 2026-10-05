@@ -14,7 +14,7 @@
  */
 
 import type { LLMConfig } from './types.js'
-import { withProviderSlot } from './provider-budget.js'
+import { ProviderBusy, withProviderSlot } from './provider-budget.js'
 
 const DEFAULT_TIMEOUT_MS = 60_000
 
@@ -146,7 +146,7 @@ export async function decisionCompletionWithRetry(
     } catch (err) {
       lastErr = err as Error
       const status = (err as { status?: number }).status
-      const retryable = status === undefined || status === 429 || status >= 500
+      const retryable = !(err instanceof ProviderBusy) && (status === undefined || status === 429 || status >= 500)
       if (!retryable || attempt === maxAttempts) break
       // A 429 here means someone else is spending the same key's budget, so
       // wait out a real fraction of the window instead of hammering it.

@@ -152,9 +152,19 @@ async function migrate(db: Db): Promise<void> {
   await addColumn(db, 'digests', 'notes', 'TEXT NULL')
   // Exact length of the audio, measured from its frames. Older digests have none.
   await addColumn(db, 'digests', 'duration_s', `${ddl.real(db.dialect)} NULL`)
-  await addColumn(db, 'learned', 'processed_reactions', 'TEXT NULL')
+  // Up to 2000 reaction IDs as JSON, about 134 KB: past MariaDB's 64 KB TEXT.
+  await addColumn(db, 'learned', 'processed_reactions', db.dialect === 'sqlite' ? 'TEXT NULL' : 'MEDIUMTEXT NULL')
+  if (db.dialect === 'mariadb') {
+    const column = await db.get<{ type: string }>(
+      "SELECT DATA_TYPE AS type FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'learned' AND COLUMN_NAME = 'processed_reactions'",
+    )
+    if (column && String(column.type).toLowerCase() === 'text') await db.exec('ALTER TABLE learned MODIFY COLUMN processed_reactions MEDIUMTEXT NULL')
+  }
   await addColumn(db, 'digest_jobs', 'lease_at', 'BIGINT NULL')
   await addColumn(db, 'digest_jobs', 'owner', `${ddl.text(db.dialect, 64)} NULL`)
+  // The daily retention prunes these by age alone; without an index each prune reads the whole table.
+  await db.exec('CREATE INDEX IF NOT EXISTS deliveries_created ON deliveries (created_at)')
+  await db.exec('CREATE INDEX IF NOT EXISTS dm_outbox_created ON dm_outbox (created_at)')
 }
 
 const CHUNK = 500

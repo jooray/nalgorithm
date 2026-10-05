@@ -81,3 +81,33 @@ test('profile cache: a throwing fetcher gives the cached part and does not throw
   assert.equal(got.get(A).name, 'Alice')
   assert.ok(!got.has(B))
 })
+
+test('profile cache: cached names, stale ones too, are handed over before the relays answer', async () => {
+  const db = await openDb(':memory:')
+  await loadProfilesCached(db, fetcherOf({ [A]: { name: 'Alice' }, [B]: { name: 'Bob' } }), [A, B], 1000)
+  let release
+  const slow = { async getProfiles() { await new Promise((r) => (release = r)); return new Map() } }
+  let early
+  const done = loadProfilesCached(db, slow, [A, B, C], 1000 + PROFILE_TTL_SECONDS + 10, (cached) => { early = cached })
+  await new Promise((r) => setTimeout(r, 10))
+  assert.deepEqual([...early.keys()].sort(), [A, B], 'both stale but known, handed over while the relays are asked')
+  release()
+  await done
+})
+
+test('retention prunes by age through an index, and 2000 processed reaction IDs round-trip', async () => {
+  const { createStore } = await import('../dist/db.js')
+  const db = await openDb(process.env.TEST_DATABASE_URL ?? ':memory:')
+  try {
+    if (db.dialect === 'sqlite') {
+      const names = (await db.all("SELECT name FROM sqlite_master WHERE type = 'index'")).map((r) => r.name)
+      assert.ok(names.includes('deliveries_created') && names.includes('dm_outbox_created'))
+    }
+    const npub = 'e'.repeat(64)
+    const store = createStore(db, npub)
+    const ids = Array.from({ length: 2000 }, (_, i) => i.toString(16).padStart(64, '0'))
+    await store.putLearned({ prompt: 'p', updatedAt: 't', processedReactionIds: ids })
+    assert.equal((await store.getLearned()).processedReactionIds.length, 2000)
+    await db.run('DELETE FROM learned WHERE npub = ?', [npub])
+  } finally { await db.close() }
+})

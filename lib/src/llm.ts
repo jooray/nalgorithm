@@ -3,7 +3,7 @@
  */
 
 import type { ChatMessage, LLMConfig } from './types.js'
-import { withProviderSlot } from './provider-budget.js'
+import { ProviderBusy, withProviderSlot } from './provider-budget.js'
 
 /** Fail a stalled request rather than hanging a scheduled run forever. */
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -289,7 +289,7 @@ export async function chatCompletionWithRetry(
       return await chatCompletion(config, messages, jsonMode, temperature)
     } catch (err) {
       lastErr = err as Error
-      if (err instanceof ProviderError && !err.retryable) break
+      if ((err instanceof ProviderError && !err.retryable) || err instanceof ProviderBusy) break
       if (attempt < maxAttempts) {
         const delay = err instanceof ProviderError && err.retryAfterMs ? err.retryAfterMs : baseDelayMs * Math.pow(2, attempt - 1)
         console.warn(`LLM call failed (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms:`, lastErr.message)

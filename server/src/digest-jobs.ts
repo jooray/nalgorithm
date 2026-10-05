@@ -2,10 +2,30 @@ import type { PipelineLogger } from 'nalgorithm'
 import { insertIgnore } from './database.js'
 import type { Db } from './db.js'
 import type { JobTracker } from './drain.js'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 
 /** A claim older than this is treated as dead (a crash or a stuck model call). */
 export const DIGEST_JOB_STALE_SECONDS = 600
+
+/**
+ * Job owners are `<instance>/<boot>/<job>`. The instance names this server (host and
+ * port: two live processes cannot share both), the boot this run of it. At startup
+ * every claim of this instance from an earlier boot belongs to a process that is gone,
+ * so it is released at once instead of blocking the reader until its lease runs out.
+ * Claims of other instances keep their lease. Without `configureJobOwner` the
+ * instance is random, so nothing is ever mistaken for this process's own.
+ */
+let instance = randomBytes(8).toString('hex')
+const boot = randomBytes(4).toString('hex')
+
+export function configureJobOwner(identity: string): void {
+  instance = createHash('sha256').update(identity).digest('hex').slice(0, 16)
+}
+
+/** A fresh owner for one claim (digest or pipeline). Fits the 64-character owner columns. */
+export function newJobOwner(): string {
+  return `${instance}/${boot}/${randomBytes(8).toString('hex')}`
+}
 
 /** Thrown when a digest is already being made for this npub. */
 export class DigestRunning extends Error {
@@ -42,7 +62,7 @@ export type Claim = { claimed: true; startedAt: number; owner: string } | { clai
  * A refused claim carries the start time of the run that holds the slot.
  */
 export async function claimDigestJob(db: Db, npub: string, now: number): Promise<Claim> {
-  const owner = randomBytes(16).toString('hex')
+  const owner = newJobOwner()
   const inserted = await db.run(insertIgnore(db, 'digest_jobs', ['npub', 'started_at', 'running', 'lease_at', 'owner']), [npub, now, 1, now, owner])
   if (inserted.changes === 1) return { claimed: true, startedAt: now, owner }
   const taken = await db.run('UPDATE digest_jobs SET running = 1, started_at = ?, lease_at = ?, owner = ?, finished_at = NULL WHERE npub = ? AND (running = 0 OR COALESCE(lease_at, started_at) <= ?)', [
@@ -89,12 +109,20 @@ export async function digestJobStatus(db: Db, npub: string, now: number): Promis
 }
 
 /**
- * Mark every running job as interrupted. Used at startup (a running row then
- * belongs to a process that died) and on a forced exit after the drain timed
- * out, so a dead job is never reported as still running.
+ * Mark dead jobs as interrupted and release dead pipeline claims: those whose
+ * lease ran out, and those of this instance from an earlier boot. Used at startup,
+ * and with `thisBoot` on a forced exit after the drain timed out, when this boot's
+ * own jobs are about to die too. A dead job is never reported as still running.
  */
-export async function interruptRunningJobs(db: Db, now: number): Promise<number> {
-  return (await db.run("UPDATE digest_jobs SET running = 0, finished_at = ?, last_status = 'interrupted' WHERE running = 1 AND COALESCE(lease_at, started_at) <= ?", [now, now - DIGEST_JOB_STALE_SECONDS])).changes
+export async function interruptRunningJobs(db: Db, now: number, thisBoot = false): Promise<number> {
+  const mine = `${instance}/%`
+  const current = thisBoot ? '' : `${instance}/${boot}/%`
+  const digests = await db.run(
+    "UPDATE digest_jobs SET running = 0, finished_at = ?, last_status = 'interrupted' WHERE running = 1 AND (COALESCE(lease_at, started_at) <= ? OR (owner LIKE ? AND owner NOT LIKE ?))",
+    [now, now - DIGEST_JOB_STALE_SECONDS, mine, current],
+  )
+  await db.run('DELETE FROM pipeline_jobs WHERE lease_until < ? OR (owner LIKE ? AND owner NOT LIKE ?)', [now, mine, current])
+  return digests.changes
 }
 
 function renewLease(db: Db, npub: string, owner: string, now: () => number): () => void {
