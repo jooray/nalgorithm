@@ -141,3 +141,15 @@ No live browser session was available (BrowserOS neo had no window/profile earli
 - Not changed: audio cached offline before this release under a raw-npub owner key is not migrated (no release had shipped that cache).
 - Release 0.17.0: fresh build; 41 library, 181 web and 233 server tests pass (disposable SQLite, mock relays); `npm audit` clean. Deployed in order: hosted server (API answers, new routes present), web app (two-phase: assets kept, then shell; version.json and assets verified, shell no-cache), landing (mode links present).
 - Live browser acceptance was not possible: BrowserOS neo still reports no window/profile. Real-browser checks of the CSP, layout, offline playback and update activation remain open.
+
+### Second review (2026-10-05, after 0.17.0; not yet released)
+
+Independent review of the whole audit range plus a real-browser pass (headless Chromium against the live app and landing at 1280 and 360 px: no horizontal overflow, onboarding and mode gate render as intended).
+
+- Real browser: the CSP source `http://[::1]:*` is invalid and was logged as an error on every load; removed, and setup no longer accepts `[::1]`. The Undo/Retry toast was inert behind an open modal sheet (confirmed in Chromium); it now goes inside the sheet. View headings no longer draw a focus ring after a mouse click.
+- Updates: a pause while buffering held updates for the life of the page and Reload now did nothing; fixed, plus a one-hour cap (reload when hidden). The new service worker is fetched and activated on reload, and a waiting one activates on load. Ranking/payment holds use tokens instead of a LIFO stack.
+- Storage: IndexedDB helpers never reject and reopen a dropped connection; BYOK startup and hosted sign-out survive storage failure; Clear this device reloads other tabs; drafts follow BYOK identity switches.
+- Feedback: undo is scoped to its identity and to its own action; rule removals sync across devices (pending until the server confirms); focus after hide/mute stays on a card; skip link fixed; best order merges new scores below the note being read.
+- Server/lib: charging after the pipeline claim and not for reused results; boot-scoped claim release on restart; bounded profile wait; batch-local 400/413; abortable provider queue with a typed busy error; text digest kept on speech abort; learning first run reads one page and catch-up is capped at 30 days; MariaDB MEDIUMTEXT for processed reactions; prune indexes.
+- Verification: full build; 47 library, 186 web and 243 server tests pass.
+- Still open: hosted feed is one long request (no progressive stages); F20 "N new above" pill; quoted-note imeta and video descriptions; data saver for hosted link previews; landing copy still says "each morning" while daily DMs are opt-in; real-device checks (iOS PWA, screen readers, offline playback).
