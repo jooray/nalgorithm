@@ -14,6 +14,7 @@ import { ShuttingDown } from './drain.js'
 import type { JobTracker } from './drain.js'
 import type { FeedRunner } from './feed.js'
 import { FeedBusy, learningInProgress } from './feed.js'
+import type { FeedProgress } from './scoring-line.js'
 import { PreviewError } from './preview/service.js'
 import { PreviewFetchError, safeFetch } from './preview/ssrf.js'
 import type { PreviewService } from './preview/service.js'
@@ -40,6 +41,8 @@ export interface AppDeps {
   jobs?: JobTracker
   /** A short spoken sample in one of `SAMPLE_VOICES`. Absent means samples answer 503. */
   voiceSample?: (voice: string) => Promise<Uint8Array>
+  /** What the reader's feed run is doing (fetching, waiting in line, ranking). Absent means always idle. */
+  feedProgress?: (npub: string) => FeedProgress | null
 }
 
 /**
@@ -392,6 +395,8 @@ export function createApp(deps: AppDeps) {
     }
 
     if (method === 'GET' && path === '/digest/status') return send(res, 200, await digestJobStatus(db, npub, nowSec()))
+    // Polled by the app while its feed request is pending; cheap, and never ranks or charges.
+    if (method === 'GET' && path === '/feed/progress') return send(res, 200, deps.feedProgress?.(npub) ?? { state: 'idle' })
 
     if (method === 'POST' && path === '/digest/now') {
       if (!deps.runDigestNow) throw new HttpError(503, 'digests are not available on this server', { code: 'digests_unavailable' })

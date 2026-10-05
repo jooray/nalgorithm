@@ -231,3 +231,11 @@ test('coverageText: says what was ranked, from which window, in which order, and
   assert.match(coverageText({ shown: 100, ranked: 500, hoursBack: 24, order: 'best' }), /only the newest 500 posts were ranked/)
   assert.match(coverageText({ shown: 10, ranked: 20, hoursBack: 24, order: 'best', unranked: 3 }), /3 not ranked yet/)
 })
+
+test('a busy server keeps the last ranking and says it will try again', async () => {
+  const { quietNotice } = await import('../src/snapshot-logic.ts')
+  const q = quietNotice(503, 'busy')
+  assert.match(q.text, /busy/)
+  assert.equal(q.pauseSeconds, 60)
+  assert.match(quietNotice(503).text, /unavailable/)
+})

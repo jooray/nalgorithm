@@ -6,6 +6,7 @@ import type { ServerConfig } from './config.js'
 import type { UserSettings } from './settings.js'
 import { insertIgnore } from './database.js'
 import { newJobOwner } from './digest-jobs.js'
+import { createScoringLine, type FeedProgress } from './scoring-line.js'
 
 export interface FeedResult {
   posts: ScoredPost[]
@@ -29,6 +30,11 @@ export class FeedBusy extends Error {}
 export const MAX_POSTS = 500
 /** How long a finished ranking waits for relay profiles not yet in the cache. */
 const PROFILE_WAIT_MS = 3_000
+/**
+ * Runs that score at once. Each sends one request at a time, so two of them use two of
+ * the provider's three slots and leave one for digest writing and speech.
+ */
+const SCORING_RUNS = 2
 const learning = new Map<string, Promise<unknown>>()
 
 /** Whether background learning is running for this npub (it writes the learned row when it ends). */
@@ -52,9 +58,14 @@ export async function loadFeedProfiles(
   return db ? loadProfilesCached(db, fetcher, pubkeys, undefined, onCached) : fetcher.getProfiles(pubkeys)
 }
 
-export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?: Db): FeedRunner {
+export type FeedRunnerWithProgress = FeedRunner & { progress: (npub: string) => FeedProgress | null }
+
+export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?: Db): FeedRunnerWithProgress {
   const recent = new Map<string, { at: number; result: FeedResult }>()
+  const line = createScoringLine(SCORING_RUNS)
   const run: FeedRunner = async (npub, settings, store, signal) => {
+    const startedAt = Math.floor(Date.now() / 1000)
+    line.report(npub, { state: 'fetching', startedAt })
     const fetcher = createFetcher({ relays: config.relays, signal })
     let enrichment: Promise<unknown> = Promise.resolve()
     // One line per run for the operator: phase times and counts, never content or the full key.
@@ -107,6 +118,13 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
         learnedPrompt: withFeedback(learnedPrompt, settings.feedback ?? []),
         profiles,
         modelLabel: config.venice.scoringModel,
+        beforeScoring: async (total) => {
+          line.report(npub, { state: 'queued', ahead: 0, startedAt })
+          const leave = await line.enter(npub, signal)
+          line.report(npub, { state: 'ranking', scored: 0, total, startedAt })
+          return leave
+        },
+        onProgress: (scored, total) => line.report(npub, { state: 'ranking', scored, total, startedAt }),
       })
 
       lap('scoring')
@@ -122,6 +140,7 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
         learnedPrompt,
       }
     } finally {
+      line.report(npub, null)
       void enrichment.finally(() => fetcher.destroy())
     }
   }
@@ -149,7 +168,7 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
   interface Shared { work: Promise<FeedResult>; controller: AbortController; waiting: number; unbounded: boolean }
   const pending = new Map<string, Shared>()
 
-  return (npub, settings, store, signal, fresh = false, charge) => {
+  const runner: FeedRunner = (npub, settings, store, signal, fresh = false, charge) => {
     const key = `${npub}:${rankingContext({ ...settings, model: config.venice.scoringModel, scorer: 'decision' })}:${settings.hoursBack}`
     const active = pending.get(key)
     if (active) return join(active, signal)
@@ -185,4 +204,5 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
     pending.set(key, shared)
     return join(shared, signal)
   }
+  return Object.assign(runner, { progress: (npub: string) => line.progress(npub) })
 }

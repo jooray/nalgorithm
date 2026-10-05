@@ -86,6 +86,7 @@ import {
   getDigest,
   getDigests,
   getDigestStatus,
+  getFeedProgress,
   getFeed,
   getLatestFeed,
   getMe,
@@ -117,6 +118,7 @@ import {
   defaultTimeZone,
   describeDigestNowError,
   describeError,
+  describeProgress,
   entitlementView,
   formatDays,
   formatSats,
@@ -131,6 +133,7 @@ import {
   validateScheduleForm,
   type DmFormat,
   type Entitlement,
+  type FeedProgress,
   type PlanId,
   type Schedule,
 } from './logic.js'
@@ -727,21 +730,26 @@ async function runFeed(opts: { manual?: boolean } = {}): Promise<void> {
   const finishRanking = beginActivity('ranking')
   releaseRanking = finishRanking
 
-  let timer: ReturnType<typeof setInterval> | undefined
-  if (quiet) {
-    setBackgroundBusy('Ranking new posts…')
-  } else {
-    show('#hosted-loading')
-    const started = Date.now()
-    const label = $('#hosted-loading-text')
-    const tick = (): void => {
-      const s = Math.round((Date.now() - started) / 1000)
-      label.textContent = `Ranking your feed. This can take up to a minute (${s}s so far).`
-      setStatusLoading('Ranking your feed…')
+  // The feed request answers only when the ranking is done; meanwhile the server says where
+  // the run is (fetching, waiting in line behind other readers, or ranking n of m).
+  let progress: FeedProgress | null = null
+  const started = Date.now()
+  const poll = setInterval(() => {
+    if (document.visibilityState !== 'visible' || epoch !== runEpoch) return
+    getFeedProgress().then((p) => { if (epoch === runEpoch) progress = p }, () => {})
+  }, 2000)
+  const tick = (): void => {
+    const text = describeProgress(progress, Math.round((Date.now() - started) / 1000))
+    if (quiet) {
+      setBackgroundBusy(progress?.state === 'queued' ? text : 'Ranking new posts…')
+    } else {
+      $('#hosted-loading-text').textContent = text
+      setStatusLoading(progress?.state === 'queued' ? 'Waiting in line…' : 'Ranking your feed…')
     }
-    tick()
-    timer = setInterval(tick, 1000)
   }
+  if (!quiet) show('#hosted-loading')
+  tick()
+  const timer: ReturnType<typeof setInterval> = setInterval(tick, 1000)
 
   try {
     const feed = await getFeed(100, manual)
@@ -755,7 +763,8 @@ async function runFeed(opts: { manual?: boolean } = {}): Promise<void> {
   } catch (err) {
     if (epoch === runEpoch) onRunFailed(err, quiet)
   } finally {
-    if (timer !== undefined) clearInterval(timer)
+    clearInterval(timer)
+    clearInterval(poll)
     finishRanking()
     // The account changed meanwhile: resetFeedState already reset the shared state.
     if (epoch !== runEpoch) return
@@ -776,9 +785,41 @@ function onRunFailed(err: unknown, hadFeed: boolean): void {
     if (q.text) setQuietNotice(q.text)
     return
   }
+  // Nothing on screen and the server is only busy: try again by itself, and say when.
+  if (api.status === 503 && api.code === 'busy') return retryWhenFree()
   // Nothing to fall back on, or it needs the reader: the normal affordance. No automatic second try.
   attemptFailed = true
   showFailure(err, () => runFeed({ manual: true }))
+}
+
+let busyRetry: ReturnType<typeof setInterval> | undefined
+
+/** The first ranking met a full server: count down visibly, then try once more. */
+function retryWhenFree(seconds = 30): void {
+  clearInterval(busyRetry)
+  const epoch = runEpoch
+  let left = seconds
+  const text = $('#hosted-notice-text')
+  const button = $<HTMLButtonElement>('#btn-notice-action')
+  const go = (): void => {
+    clearInterval(busyRetry)
+    busyRetry = undefined
+    show('#hosted-notice', false)
+    if (epoch === runEpoch) void runFeed({ manual: true })
+  }
+  const paint = (): void => {
+    text.textContent = `The ranking service is busy with other readers. Trying again in ${left}s.`
+  }
+  button.textContent = 'Try now'
+  button.classList.remove('hidden')
+  button.onclick = go
+  paint()
+  show('#hosted-notice')
+  busyRetry = setInterval(() => {
+    if (epoch !== runEpoch) { clearInterval(busyRetry); busyRetry = undefined; return }
+    if (--left <= 0) go()
+    else paint()
+  }, 1000)
 }
 
 /** Draw a ranking, `fresh` notes first. Also the only place that knows which posts are on screen. */

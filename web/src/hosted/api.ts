@@ -13,7 +13,9 @@ import { readDigest, type DigestRecord } from '../digest-model.js'
 import { readDigestStatus, type DigestStatus } from '../digest-job-logic.js'
 import {
   buildLoginTemplate,
+  readFeedProgress,
   type Entitlement,
+  type FeedProgress,
   type HostedSettings,
   type PlanId,
   type Schedule,
@@ -279,6 +281,11 @@ export async function getDigest(id: string): Promise<DigestRecord | null> {
 export async function digestNow(): Promise<{ message: string; status: DigestStatus }> {
   const res = await request<{ message: string }>('POST', 'digest/now')
   return { message: res.message, status: readDigestStatus(res) }
+}
+
+/** What the reader's feed run is doing right now: fetching, waiting in line or ranking. */
+export async function getFeedProgress(): Promise<FeedProgress> {
+  return readFeedProgress(await request<unknown>('GET', 'feed/progress'))
 }
 
 /** Whether a digest is being written, since when, and how long the last one took. */

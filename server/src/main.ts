@@ -156,6 +156,7 @@ const app = createApp({
   runDigestNow,
   previews,
   jobs,
+  feedProgress: feed.progress,
   voiceSample: (voice) =>
     synthesizeSpeech(
       { apiBaseUrl: config.venice.apiBaseUrl, apiKey: config.venice.apiKey, model: config.venice.ttsModel, voice, format: 'mp3', signal: AbortSignal.timeout(60_000) },

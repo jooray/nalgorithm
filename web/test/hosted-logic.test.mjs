@@ -257,3 +257,16 @@ test('safeAudioUrl only lets http(s) through', () => {
   assert.equal(safeAudioUrl('data:audio/mpeg;base64,AAAA'), null)
   assert.equal(safeAudioUrl(null), null)
 })
+
+test('feed progress reads as a place in line or a count, never a bare spinner', async () => {
+  const { describeProgress, readFeedProgress } = await import('../src/hosted/logic.ts')
+  assert.deepEqual(readFeedProgress({ state: 'queued', ahead: 2.7, startedAt: 9 }), { state: 'queued', ahead: 2, startedAt: 9 })
+  assert.deepEqual(readFeedProgress({ state: 'weird' }), { state: 'idle' })
+  assert.deepEqual(readFeedProgress(null), { state: 'idle' })
+  assert.match(describeProgress({ state: 'queued', ahead: 2, startedAt: 0 }, 12), /2 rankings ahead of yours.*12s/)
+  assert.match(describeProgress({ state: 'queued', ahead: 1, startedAt: 0 }, 3), /1 ranking ahead/)
+  assert.match(describeProgress({ state: 'queued', ahead: 0, startedAt: 0 }, 3), /next in line/)
+  assert.match(describeProgress({ state: 'ranking', scored: 40, total: 120, startedAt: 0 }, 30), /Ranking 40 of 120 new notes/)
+  assert.match(describeProgress({ state: 'fetching', startedAt: 0 }, 2), /Fetching notes/)
+  assert.match(describeProgress(null, 5), /up to a minute \(5s so far\)/)
+})

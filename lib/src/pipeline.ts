@@ -280,6 +280,12 @@ export interface ScoreCachedInput {
   /** Model name, for the log line only. */
   modelLabel?: string
   onProgress?: (scored: number, total: number) => void
+  /**
+   * Awaited before any post is sent to the model, and only when some need scoring:
+   * a server can hold the run in a line here. The returned function is called once
+   * scoring ends, however it ends.
+   */
+  beforeScoring?: (uncached: number) => Promise<(() => void) | void>
 }
 
 /**
@@ -331,25 +337,31 @@ export async function scorePostsCached(
     log.info(
       `Scoring ${uncached.length} posts${input.modelLabel ? ` with ${input.modelLabel}` : ''} (${scorer} scorer)...`,
     )
-    const scored = await ranker.score(uncached, {
-      userPrompt: input.userPrompt,
-      learnedPrompt: input.learnedPrompt,
-      profiles: input.profiles,
-      debug: input.debug,
-      onProgress: (n, total) => {
-        log.info(`  Scored ${n}/${total}`)
-        input.onProgress?.(n, total)
-      },
-      onBatchScored: (batch) => {
-        const entries: Record<string, CachedScore> = {}
-        for (const sp of batch) {
-          if (!sp.defaultScore) entries[keyFor(sp)] = entryFor(sp)
-        }
-        if (Object.keys(entries).length > 0) {
-          pending = pending.then(() => store.putScores(entries))
-        }
-      },
-    })
+    const release = await input.beforeScoring?.(uncached.length)
+    let scored: ScoredPost[]
+    try {
+      scored = await ranker.score(uncached, {
+        userPrompt: input.userPrompt,
+        learnedPrompt: input.learnedPrompt,
+        profiles: input.profiles,
+        debug: input.debug,
+        onProgress: (n, total) => {
+          log.info(`  Scored ${n}/${total}`)
+          input.onProgress?.(n, total)
+        },
+        onBatchScored: (batch) => {
+          const entries: Record<string, CachedScore> = {}
+          for (const sp of batch) {
+            if (!sp.defaultScore) entries[keyFor(sp)] = entryFor(sp)
+          }
+          if (Object.keys(entries).length > 0) {
+            pending = pending.then(() => store.putScores(entries))
+          }
+        },
+      })
+    } finally {
+      release?.()
+    }
     await pending
     for (const sp of scored) newById.set(sp.id, sp)
 

@@ -199,6 +199,7 @@ export function quietNotice(status: number, code?: string): QuietNotice | null {
     return { text: 'Daily limit for ranking reached. Showing your last ranking.', pauseSeconds: 3600 }
   }
   if (status === 429 && code === 'in_progress') return { text: '', pauseSeconds: 60 }
+  if (status === 503 && code === 'busy') return { text: 'Ranking is busy right now. Showing your last ranking; it tries again in a minute.', pauseSeconds: 60 }
   if (status === 503) return { text: 'Ranking is unavailable right now. Showing your last ranking.', pauseSeconds: 300 }
   if (status === 0) return { text: 'Offline. Showing your last ranking.', pauseSeconds: 60 }
   if (status >= 500) return { text: 'Ranking hit a problem. Showing your last ranking.', pauseSeconds: 300 }

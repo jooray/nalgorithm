@@ -246,6 +246,37 @@ export function entitlementView(
   }
 }
 
+// ─── Feed run progress ───────────────────────────────────────────────────────
+
+/** What the server says the reader's feed run is doing (GET /feed/progress). */
+export type FeedProgress =
+  | { state: 'idle' }
+  | { state: 'fetching'; startedAt: number }
+  | { state: 'queued'; ahead: number; startedAt: number }
+  | { state: 'ranking'; scored: number; total: number; startedAt: number }
+
+export function readFeedProgress(raw: unknown): FeedProgress {
+  const r = (raw ?? {}) as Record<string, unknown>
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0)
+  if (r.state === 'fetching') return { state: 'fetching', startedAt: n(r.startedAt) }
+  if (r.state === 'queued') return { state: 'queued', ahead: n(r.ahead), startedAt: n(r.startedAt) }
+  if (r.state === 'ranking') return { state: 'ranking', scored: n(r.scored), total: n(r.total), startedAt: n(r.startedAt) }
+  return { state: 'idle' }
+}
+
+/** One line for the reader: where their run is, so a wait reads as a line, not a hang. */
+export function describeProgress(p: FeedProgress | null, seconds: number): string {
+  const so = `${seconds}s so far`
+  if (!p || p.state === 'idle') return `Ranking your feed. This can take up to a minute (${so}).`
+  if (p.state === 'fetching') return `Fetching notes from the people you follow (${so}).`
+  if (p.state === 'queued') {
+    const line = p.ahead === 0 ? 'You are next in line' : `Waiting in line: ${p.ahead} ${p.ahead === 1 ? 'ranking' : 'rankings'} ahead of yours`
+    return `${line}. Others are being ranked right now (${so}).`
+  }
+  if (p.total === 0) return `Ranking your feed (${so}).`
+  return `Ranking ${p.scored} of ${p.total} new notes (${so}).`
+}
+
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
 /** Turn an API failure into something to say to a person, plus what they can do. */

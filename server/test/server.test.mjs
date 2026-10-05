@@ -212,7 +212,7 @@ function fakeBilling(initial = { state: 'active', until: T0 + 86400 }) {
   return b
 }
 
-async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, makeDigestNow, jobs, voiceSample, clock = { t: T0 } } = {}) {
+async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, makeDigestNow, jobs, voiceSample, feedProgress, clock = { t: T0 } } = {}) {
   const db = await freshDb()
   const feedCalls = []
   const runner = feed ?? (async (npub, settings, _store, _signal, _fresh, charge) => {
@@ -227,7 +227,7 @@ async function withApp(fn, { billing = fakeBilling(), feed, runDigestNow, makeDi
       ],
     }
   })
-  const server = createServer(createApp({ db, billing, feed: runner, publicUrl: PUBLIC, secureCookie: false, log: silent, now: () => clock.t, runDigestNow: makeDigestNow ? makeDigestNow(db) : runDigestNow, jobs, voiceSample }))
+  const server = createServer(createApp({ db, billing, feed: runner, publicUrl: PUBLIC, secureCookie: false, log: silent, now: () => clock.t, runDigestNow: makeDigestNow ? makeDigestNow(db) : runDigestNow, jobs, voiceSample, feedProgress }))
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${server.address().port}`
   const sk = generateSecretKey()
@@ -879,5 +879,19 @@ test('HTTP: audio whose file host cannot be fetched answers 502, not 500', async
     const { lastInsertId } = await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', [npub, T0, 'x', 'http://127.0.0.1:1/a.mp3', 'ok'])
     const res = await json(`/digests/${lastInsertId}/audio`, { token: body.token })
     assert.equal(res.status, 502)
+  })
+})
+
+test('HTTP: /feed/progress says what the reader\'s run is doing, and needs a session', async () => {
+  const asked = []
+  await withApp(async ({ json, login, npub }) => {
+    assert.equal((await json('/feed/progress')).status, 401)
+    const { body } = await login()
+    assert.deepEqual(await (await json('/feed/progress', { token: body.token })).json(), { state: 'queued', ahead: 2, startedAt: 5 })
+    assert.deepEqual(asked, [npub])
+  }, { feedProgress: (npub) => { asked.push(npub); return { state: 'queued', ahead: 2, startedAt: 5 } } })
+  await withApp(async ({ json, login }) => {
+    const { body } = await login()
+    assert.deepEqual(await (await json('/feed/progress', { token: body.token })).json(), { state: 'idle' })
   })
 })
