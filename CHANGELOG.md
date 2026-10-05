@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.18.0 — 2026-10-05
+
+Fixes from a second review of 0.17.0, a visible line for hosted rankings, and a
+shorter first setup. Deploy the hosted server before the web app: the app polls
+the new `GET /feed/progress`. The server migrates `learned.processed_reactions`
+to MEDIUMTEXT on MariaDB and adds two indexes on start.
+
+### Hosted
+- Rankings wait in a visible line: two score at once, the rest in order, and the app says how many are ahead, then "Ranking n of m new notes". Runs whose scores are all cached skip the line. A first ranking that meets a full server counts down and tries again by itself.
+- Charged only for real work: not when the server answers busy, and not again for a result another request just paid for. A timeout while voicing a digest still saves and sends its text.
+- A restart releases its own unfinished jobs at once instead of blocking readers for ten minutes.
+- Rankings from cached scores carry author names again; one bad scoring batch no longer fails the whole run.
+- Learning reads only the newest likes on a first run and never catches up further than 30 days.
+
+### App
+- First BYOK setup shows only your identity, your words and the model connection; everything else waits behind Show all settings.
+- An Undo toast closes at your next action elsewhere and answers Cmd/Ctrl+Z; Undo works over open sheets and only ever undoes its own action, for the account that made it.
+- A more/less rule removed on one device stays removed on the others.
+- Updates can no longer be held back for good by a paused player, and Reload now always reloads; a new service worker takes over without closing every tab.
+- Storage failures (such as iOS dropping the database of a backgrounded app) no longer break sign-out, auto-refresh or Clear this device, and Clear this device also resets the app's other open tabs.
+- Keyboard: focus stays near a hidden note, the skip link no longer switches tabs, and view headings show no stray focus ring.
+
 ## 0.17.0 — 2026-10-05
 
 A release built from a full usability, performance and resource audit. Deploy
