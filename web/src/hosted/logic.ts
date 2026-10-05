@@ -287,7 +287,11 @@ export function describeError(e: { status: number; code?: string; message?: stri
       action: 'retry',
     }
   }
-  if (status === 502) {
+  if (status === 503 && code === 'busy') {
+    return { message: 'Ranking is busy right now. Your last ranking stays; try again in a minute.', action: 'retry' }
+  }
+  // Only the checkout answers 502 itself; a proxy's 502 during a restart is not about payments.
+  if (status === 502 && /payment/i.test(e.message ?? '')) {
     return { message: 'Payments are unavailable right now. Try again shortly.', action: 'retry' }
   }
   if (status === 0) {
