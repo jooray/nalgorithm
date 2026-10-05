@@ -1,4 +1,4 @@
-import { collectPostPubkeys, createFetcher, createRanker, refreshLearnedPrompt, scorePostsCached, sortByRelevance, rankingContext } from 'nalgorithm'
+import { collectPostPubkeys, createFetcher, createRanker, refreshLearnedPrompt, scorePostsCached, sortByRelevance, rankingContext, withFeedback } from 'nalgorithm'
 import type { PipelineLogger, PipelineStore, ProfileData, ScoredPost } from 'nalgorithm'
 import type { Db } from './db.js'
 import { loadProfilesCached } from './profile-cache.js'
@@ -77,7 +77,8 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
       const scored = await scorePostsCached({ ranker, store, scorer: 'decision', log }, posts, {
         context: rankingContext({ ...settings, model: config.venice.scoringModel, scorer: 'decision', apiBaseUrl: config.venice.apiBaseUrl }),
         userPrompt: settings.userPrompt,
-        learnedPrompt,
+        // Feedback is explicit, so it steers even with learning off; like learned taste it is prospective.
+        learnedPrompt: withFeedback(learnedPrompt, settings.feedback ?? []),
         profiles,
         modelLabel: config.venice.scoringModel,
       })

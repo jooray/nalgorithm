@@ -3074,3 +3074,67 @@ body[data-mode='hosted']:has(#hosted-startup:not(.hidden)) #views::before { disp
   font-size: 0.9375rem;
   line-height: 1.45;
 }
+
+.post-menu-label {
+  padding: 8px 14px 4px;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.post-menu-sep {
+  margin: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.view-head #btn-saved {
+  margin-left: auto;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plain-list {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plain-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.plain-list:empty {
+  display: none;
+}
+
+.saved-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.saved-item {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.saved-head {
+  color: var(--text-3);
+  font-size: 0.875rem;
+}
+
+.saved-body {
+  margin: 4px 0 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

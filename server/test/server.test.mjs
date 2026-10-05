@@ -106,8 +106,9 @@ test('store: a large key list is queried in chunks', async () => {
 
 test('settings: validates every field and rejects unknown ones', async () => {
   const ok = applySettings(DEFAULT_SETTINGS, { userPrompt: '  bitcoin and nostr  ', hoursBack: 12, topN: 5, learnFromLikes: false, linkPreviews: false, digestMinutes: 3 })
-  assert.deepEqual(ok, { userPrompt: 'bitcoin and nostr', hoursBack: 12, topN: 5, learnFromLikes: false, linkPreviews: false, digestMinutes: 3 })
-  for (const bad of [{ digestMinutes: 4 }, { digestMinutes: '6' }, { hoursBack: 0 }, { hoursBack: 100 }, { topN: 1.5 }, { userPrompt: 5 }, { userPrompt: 'x'.repeat(2001) }, { learnFromLikes: 'yes' }, { linkPreviews: 'no' }, { apiKey: 'x' }, []]) {
+  assert.deepEqual(ok, { userPrompt: 'bitcoin and nostr', hoursBack: 12, topN: 5, learnFromLikes: false, linkPreviews: false, digestMinutes: 3, feedback: [] })
+  assert.deepEqual(applySettings(DEFAULT_SETTINGS, { feedback: [{ kind: 'less', excerpt: ' price talk ' }] }).feedback, [{ kind: 'less', excerpt: 'price talk' }])
+  for (const bad of [{ feedback: [{ kind: 'meh', excerpt: 'x' }] }, { feedback: [{ kind: 'more', excerpt: '' }] }, { feedback: Array(21).fill({ kind: 'more', excerpt: 'x' }) }, { feedback: 'x' }, { digestMinutes: 4 }, { digestMinutes: '6' }, { hoursBack: 0 }, { hoursBack: 100 }, { topN: 1.5 }, { userPrompt: 5 }, { userPrompt: 'x'.repeat(2001) }, { learnFromLikes: 'yes' }, { linkPreviews: 'no' }, { apiKey: 'x' }, []]) {
     assert.throws(() => applySettings(DEFAULT_SETTINGS, bad), SettingsError, JSON.stringify(bad))
   }
 })
@@ -740,6 +741,21 @@ test('HTTP: a summary list leaves out notes, and an unchanged list answers 304 w
     const changed = await fetch(base + '/digests?summary=1', { headers: { ...auth, 'If-None-Match': etag } })
     assert.equal(changed.status, 200)
     assert.equal((await changed.json()).digests.length, 2)
+  })
+})
+
+test('HTTP: learned taste can be read and reset per user, keeping which likes were already read', async () => {
+  await withApp(async ({ json, login, npub, db }) => {
+    const { body } = await login()
+    assert.deepEqual(await (await json('/learned', { token: body.token })).json(), { prompt: '', updatedAt: null })
+    await db.run('INSERT INTO learned (npub, prompt, updated_at, last_like_ts, processed_reactions) VALUES (?, ?, ?, ?, ?)', [npub, 'likes relays', '2026-09-30T05:00:00.000Z', 5, '{"ids":["r1"]}'])
+    await db.run('INSERT INTO learned (npub, prompt, updated_at) VALUES (?, ?, ?)', ['f'.repeat(64), 'someone else', '2026-09-30T05:00:00.000Z'])
+    assert.equal((await (await json('/learned', { token: body.token })).json()).prompt, 'likes relays')
+    assert.equal((await json('/learned/reset', { method: 'POST', body: {}, token: body.token })).status, 200)
+    const row = await db.get('SELECT prompt, processed_reactions FROM learned WHERE npub = ?', [npub])
+    assert.equal(row.prompt, '')
+    assert.equal(row.processed_reactions, '{"ids":["r1"]}')
+    assert.equal((await db.get('SELECT prompt FROM learned WHERE npub = ?', ['f'.repeat(64)])).prompt, 'someone else')
   })
 })
 

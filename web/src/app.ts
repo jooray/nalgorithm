@@ -13,6 +13,7 @@ import {
   pubkeyToHex,
   collectPostPubkeys,
   scoreCacheKey,
+  withFeedback,
   type FetchedPost,
   type ScoredPost,
   type ProfileData,
@@ -69,7 +70,9 @@ import { byokBackend, loadLocalDigests } from './byok-digest.js'
 import { identityKey, loadFeedSnapshot, saveFeedSnapshot, setLegacyOwner } from './local-data.js'
 import { rememberProfiles, knownProfiles } from './profiles.js'
 import { APP_VERSION } from './version-check.js'
-import { learnIncrementally, activeLearningResult } from './learning.js'
+import { learnIncrementally, activeLearningResult, resetLearned } from './learning.js'
+import { activeRules, setFeedbackIdentity } from './feedback.js'
+import { initFeedbackSection } from './feedback-ui.js'
 
 import { initVersionCheck, setUpdateBlocked } from './version-check.js'
 
@@ -466,7 +469,8 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     }).catch((err) => console.warn('Profile enrichment unavailable:', err))
 
     // 4. Score posts — use cache for previously scored, LLM only for new ones
-    const existingLearnedPrompt = settings.learnFromLikes ? settings.learnedPrompt || undefined : undefined
+    // Private more/less feedback is explicit, so it steers even with learning off.
+    const existingLearnedPrompt = withFeedback(settings.learnFromLikes ? settings.learnedPrompt || undefined : undefined, activeRules())
 
     // Prune old cache entries (>30 days)
     const pruned = await pruneScoreCache()
@@ -654,6 +658,15 @@ document.addEventListener('DOMContentLoaded', () => {
     initHosted()
     return
   }
+
+  // Whose feedback is in effect: the identity set up in Tune.
+  setFeedbackIdentity(() => loadSettings().npub.trim() || null)
+  initFeedbackSection({
+    resetLearned: () => {
+      resetLearned(loadSettings())
+      setLearnedPrompt('')
+    },
+  })
 
   // Whose key note actions sign for: the npub this reader set up.
   setActorProvider(() => {

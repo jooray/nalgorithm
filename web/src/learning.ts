@@ -31,3 +31,15 @@ export function activeLearningResult(settings: AppSettings): boolean {
   const current = loadSettings()
   return current.learnFromLikes && learnedKey(current.npub) === learnedKey(settings.npub)
 }
+
+/**
+ * Forget the learned taste for this identity. Which likes were already read is kept,
+ * so only likes from now on shape a new one.
+ */
+export function resetLearned(settings: AppSettings): void {
+  const key = learnedKey(settings.npub)
+  let state: LearnedState | null = null
+  try { state = JSON.parse(deviceStorage.getItem(key) ?? 'null') } catch { /* corrupt state */ }
+  if (!state) return
+  deviceStorage.setItem(key, JSON.stringify({ ...state, prompt: '', updatedAt: new Date().toISOString() }))
+}

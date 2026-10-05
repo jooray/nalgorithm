@@ -161,6 +161,7 @@
         </div>
         <header class="view-head">
           <h1>Feed</h1>
+          <button id="btn-saved" class="btn btn-small btn-ghost hidden" type="button">Saved</button>
           <button id="btn-refresh" class="btn btn-primary byok-only" type="button" disabled></button>
           <button id="btn-hosted-refresh" class="btn btn-primary hosted-only" type="button"></button>
         </header>
@@ -247,7 +248,10 @@
             <label class="check"><input type="checkbox" id="input-learn" checked><span>Learn from my likes<small>Off uses only your written interests. Previously learned taste is kept for re-enabling.</small></span></label>
             <label for="input-learned-prompt">Learned from your likes</label>
             <textarea id="input-learned-prompt" rows="4" readonly class="readonly-field" placeholder="Will be generated after the first run..."></textarea>
-            <button id="btn-regenerate-learned" class="btn btn-small">Update learned taste</button>
+            <div class="btn-row">
+              <button id="btn-regenerate-learned" class="btn btn-small" type="button">Update learned taste</button>
+              <button class="btn btn-small btn-ghost" type="button" data-reset-learned>Reset learned taste</button>
+            </div>
           </section>
 
           <section class="tune-section">
@@ -390,6 +394,9 @@
               <input type="checkbox" id="hosted-learn" checked>
               <span>Learn from my likes<small>Off ranks using only your written interests. Your learned taste is kept for re-enabling.</small></span>
             </label>
+            <label for="hosted-learned">Learned from your likes</label>
+            <textarea id="hosted-learned" rows="4" readonly class="readonly-field" placeholder="Nothing learned yet. It builds up from notes you like."></textarea>
+            <button class="btn btn-small btn-ghost" type="button" data-reset-learned>Reset learned taste</button>
             <label class="check">
               <input type="checkbox" id="hosted-previews" checked>
               <span>Show link previews<small>Previews are fetched by the server, not by your browser: the sites do not see you, but the server does see which links you look at. Off shows plain links only.</small></span>
@@ -450,6 +457,13 @@
             <label class="check"><input type="checkbox" id="input-cache-audio" checked><span>Keep the newest three digests offline<small>Up to 30 MB on this device. Browsers may evict cached audio; Download MP3 keeps an independent copy.</small></span></label>
             <p id="audio-cache-status" class="field-hint" role="status"></p>
             <button id="btn-clear-audio" class="btn btn-small" type="button">Remove cached audio</button>
+          </section>
+          <section class="tune-section" id="feedback-section" aria-labelledby="feedback-title">
+            <h2 id="feedback-title">Private feedback</h2>
+            <p class="field-hint">From the ••• menu on a note. It stays on this device and is never published. More and Less like this also steer future rankings<span class="hosted-only">, so they are sent to the server with your settings</span>. Public likes are separate.</p>
+            <ul id="feedback-rules" class="plain-list" aria-label="More and less like this"></ul>
+            <ul id="feedback-muted" class="plain-list" aria-label="People whose notes are hidden"></ul>
+            <p id="feedback-hidden" class="field-hint"></p>
           </section>
           <section class="tune-section">
             <h2>Open notes in</h2>

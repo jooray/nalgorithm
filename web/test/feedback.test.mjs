@@ -1,0 +1,45 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { domModule } from './dom-harness.mjs'
+
+const A = 'a'.repeat(64), B = 'b'.repeat(64)
+const post = (n, extra = {}) => ({ id: n.toString(16).padStart(64, '0'), author: A, type: 'original', createdAt: 1000 + n, score: 8, content: `Note number ${n} about relays`, rawEvent: { kind: 1, tags: [] }, ...extra })
+
+// No localStorage in the fixture: the device store keeps everything in memory, as when storage is blocked.
+const setup = () => domModule('test/feedback-entry.ts')
+const plain = (v) => JSON.parse(JSON.stringify(v))
+
+test('hide, mute and undo redraw the feed, are kept per identity, and never touch the network', async () => {
+  const { exports: m, document } = await setup()
+  let who = A
+  m.setFeedbackIdentity(() => who)
+  const container = document.getElementById('feed-list')
+  m.renderFeed([post(1), post(2), post(3, { author: B })], container, { detail: false })
+  assert.equal(container.querySelectorAll('.note').length, 3)
+  const undoHide = m.hideNote(post(1).id)
+  assert.equal(container.querySelectorAll('.note').length, 2, 'a hide redraws at once')
+  const undoMute = m.muteAuthor(B)
+  assert.equal(container.querySelectorAll('.note').length, 1)
+  undoMute(); undoHide()
+  assert.equal(container.querySelectorAll('.note').length, 3, 'undo brings them back')
+  m.hideNote(post(2).id)
+  who = B
+  assert.equal(m.readFeedback().hidden.length, 0, 'another identity has its own feedback')
+})
+
+test('more/less rules are excerpts, one per note, newest first, and reach the ranking prompt', async () => {
+  const { exports: m } = await setup()
+  m.setFeedbackIdentity(() => A)
+  const synced = []
+  m.setRulesSync((rules) => synced.push(rules))
+  m.addRule('less', { id: 'x', content: 'Price is up again https://x.example nostr:npub1abc' })
+  const undo = m.addRule('more', { id: 'y', content: 'A relay release' })
+  m.addRule('less', { id: 'y', content: 'A relay release' })
+  const rules = m.activeRules()
+  assert.deepEqual(plain(rules.map((r) => [r.kind, r.excerpt])), [['less', 'A relay release'], ['less', 'Price is up again']])
+  assert.equal(synced.length, 3, 'each change is offered to the server sync')
+  assert.match(m.withFeedback('likes relays', rules), /Less like this: "Price is up again"/)
+  assert.equal(m.addRule('more', { id: 'z', content: 'https://only.a.link' }), null, 'a note without words teaches nothing')
+  undo()
+  assert.deepEqual(plain(m.activeRules().map((r) => r.kind)), ['less'], 'undo restores the rules as they were before that action')
+})

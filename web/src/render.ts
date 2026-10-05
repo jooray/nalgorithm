@@ -46,6 +46,8 @@ import type { Event as NostrEvent } from 'nostr-tools/pure'
 import { openSheet } from './sheet.js'
 import { relativeTime } from './time.js'
 import { disposeTree } from './lifecycle.js'
+import { addRule, hideNote, isFilteredOut, isSaved, muteAuthor, onFeedbackChange, readFeedback, saveNote, unsaveNote } from './feedback.js'
+import { showToast } from './toast.js'
 
 export interface RenderOptions {
   feedOrder?: 'new' | 'best'
@@ -107,13 +109,21 @@ export function renderFeed(
   options: RenderOptions = {}
 ): void {
   const previous = feedState.get(container)
+  const source = posts
+  // The reader's private hides apply to the feed lists, not to a digest's show notes.
+  if (FEED_LISTS.has(container.id)) {
+    const feedback = readFeedback()
+    posts = posts.filter((p) => !isFilteredOut(p, feedback))
+    watchFeedback()
+  }
   if (posts.length === 0) {
     disposeTree(container)
     container.replaceChildren()
     feedState.delete(container)
     const empty = el('p', 'feed-empty')
-    empty.textContent = 'No posts to display.'
+    empty.textContent = source.length > 0 ? 'Every note here is one you chose to hide. Tune lists your hidden notes and people.' : 'No posts to display.'
     container.appendChild(empty)
+    feedState.set(container, { source, posts: [], allPosts: [], visibleCount: 50, freshKey: '', cards: [], items: new Map(), options })
     return
   }
 
@@ -126,7 +136,7 @@ export function renderFeed(
   const reading = window.scrollY > 80 && !document.getElementById('view-feed')?.classList.contains('hidden')
   const anchor = reading ? previous?.cards.find((card) => card.getBoundingClientRect().bottom > 0) : null
   const anchorTop = anchor?.getBoundingClientRect().top
-  if (previous && reading && previous.freshKey === freshKey && ['feed-list', 'hosted-feed'].includes(container.id)) {
+  if (previous && reading && previous.freshKey === freshKey && FEED_LISTS.has(container.id)) {
     const incoming = new Map(ordered.map((post) => [post.id, post]))
     const kept = previous.allPosts.filter((post) => incoming.has(post.id)).map((post) => incoming.get(post.id)!)
     const keys = new Set(kept.map((post) => post.id))
@@ -187,7 +197,7 @@ export function renderFeed(
       if (!state) return
       const next = state.visibleCount
       state.visibleCount += 50
-      renderFeed(state.allPosts, container, state.options)
+      renderFeed(state.source, container, state.options)
       // Keyboard and screen-reader users continue at the first newly shown note.
       feedState.get(container)?.cards[next]?.focus({ preventScroll: true })
     })
@@ -197,7 +207,7 @@ export function renderFeed(
   // Reconcile in place, instead of detaching reused cards and losing focus/media.
   nodes.forEach((node, i) => { if (container.children[i] !== node) container.insertBefore(node, container.children[i] ?? null) })
   while (container.children.length > nodes.length) { const last = container.lastElementChild!; disposeTree(last); last.remove() }
-  feedState.set(container, { posts: visible, allPosts: ordered, visibleCount: count, freshKey, cards, items, options })
+  feedState.set(container, { source, posts: visible, allPosts: ordered, visibleCount: count, freshKey, cards, items, options })
   if (anchor?.isConnected && anchorTop !== undefined) {
     const shift = anchor.getBoundingClientRect().top - anchorTop
     if (Math.abs(shift) > 1) window.scrollBy({ top: shift, behavior: 'auto' })
@@ -216,6 +226,8 @@ function sectionHeading(text: string): HTMLElement {
 }
 
 interface FeedState {
+  /** What the caller gave, before the reader's hides. */
+  source: DisplayPost[]
   allPosts: DisplayPost[]
   visibleCount: number
   freshKey: string
@@ -243,6 +255,21 @@ function patchPeople(card: HTMLElement, options: RenderOptions): void {
 
 /** The latest render of each feed container, so a late profile redraws the current cards. */
 const feedState = new WeakMap<HTMLElement, FeedState>()
+
+const FEED_LISTS = new Set(['feed-list', 'hosted-feed'])
+let watching = false
+/** A hide, mute or undo redraws the feed lists on screen at once. */
+function watchFeedback(): void {
+  if (watching) return
+  watching = true
+  onFeedbackChange(() => {
+    for (const id of FEED_LISTS) {
+      const container = document.getElementById(id)
+      const state = container ? feedState.get(container) : undefined
+      if (container && state) renderFeed(state.source, container, state.options)
+    }
+  })
+}
 export function clearFeed(container: HTMLElement): void {
   disposeTree(container)
   container.replaceChildren()
@@ -845,6 +872,42 @@ function renderMenu(post: DisplayPost, options: RenderOptions, links: NoteLinks)
     dropdown.appendChild(item)
   }
 
+  // Private feedback first: none of it is published, and each can be undone.
+  const addPrivate = (text: string, run: () => void): HTMLButtonElement => {
+    const item = el('button', 'post-menu-item') as HTMLButtonElement
+    item.type = 'button'
+    item.setAttribute('role', 'menuitem')
+    item.textContent = text
+    item.addEventListener('click', (e) => {
+      e.stopPropagation()
+      close()
+      run()
+    })
+    dropdown.appendChild(item)
+    return item
+  }
+  const undoable = (message: string, undo: (() => void) | null): void => {
+    if (undo) showToast(message, { action: { label: 'Undo', run: undo }, ms: 8000 })
+    else showToast('This note has no text to learn from.', { tone: 'error' })
+  }
+  const heading = el('p', 'post-menu-label')
+  heading.textContent = 'Private, never published'
+  dropdown.appendChild(heading)
+  addPrivate('More like this', () => undoable('Noted privately: more like this. It steers future rankings.', addRule('more', post)))
+  addPrivate('Less like this', () => {
+    const undoRule = addRule('less', post)
+    const undoHide = hideNote(post.id)
+    undoable('Hidden, and noted privately: less like this.', undoRule && (() => { undoHide(); undoRule() }))
+  })
+  addPrivate('Hide this note', () => undoable('Note hidden on this device.', hideNote(post.id)))
+  const who = authorLabel(post.author, options.profiles?.get(post.author))
+  addPrivate(`Hide notes from ${who.isNpub ? 'this person' : who.text}`, () => undoable(`Notes from ${who.isNpub ? 'this person' : who.text} are hidden on this device.`, muteAuthor(post.author)))
+  const saveItem = addPrivate('Save for later', () => {
+    if (isSaved(post.id)) unsaveNote(post.id)
+    else undoable('Saved for later on this device. Find it under Saved in the feed.', saveNote(post))
+  })
+  dropdown.appendChild(el('hr', 'post-menu-sep'))
+
   addCopy('Copy npub', npub)
   addCopy('Copy nprofile', nprofile)
   addLink(`Open profile in ${label}`, profileHref(post.author, options))
@@ -860,6 +923,7 @@ function renderMenu(post: DisplayPost, options: RenderOptions, links: NoteLinks)
     const wasHidden = dropdown.classList.contains('hidden')
     closeAllMenus()
     if (!wasHidden) return
+    saveItem.textContent = isSaved(post.id) ? 'Remove from saved' : 'Save for later'
     dropdown.classList.remove('hidden', 'opens-up')
     // Open upward when there is no room below (above the tab bar).
     if (dropdown.getBoundingClientRect().bottom > window.innerHeight - 88) dropdown.classList.add('opens-up')

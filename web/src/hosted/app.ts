@@ -18,6 +18,9 @@ import { adoptSigner, forgetSigner, setActorProvider } from '../signer.js'
 import { renderFeed, clearFeed, aggregateBoosts, clientRenderOptions, profileLink } from '../render.js'
 import { attachLinkPreviews } from './previews.js'
 import { initPromptStarters } from '../prompt-starters.js'
+import { adoptRules, setFeedbackIdentity, setRulesSync } from '../feedback.js'
+import { initFeedbackSection, refreshFeedbackSection } from '../feedback-ui.js'
+import { showToast } from '../toast.js'
 import { previewsEnabled } from './previews-logic.js'
 import { loadSettings, saveSettings } from '../settings.js'
 import { openHostedLoginDialog } from '../login-ui.js'
@@ -91,6 +94,8 @@ import {
   logout,
   putSchedule,
   putSettings,
+  getLearned,
+  resetLearnedTaste,
   voiceSampleUrl,
   type FeedResponse,
 } from './api.js'
@@ -184,6 +189,19 @@ const DIGEST_FEED_LIMIT = 30
 export function initHosted(): void {
   // Whose key note actions sign for: the hosted session's key.
   setActorProvider(() => (userNpub ? pubkeyToHex(userNpub) : null))
+  // Private feedback belongs to the signed-in account; its more/less rules go to the server, which ranks.
+  setFeedbackIdentity(() => userNpub || null)
+  setRulesSync(syncFeedbackRules)
+  initFeedbackSection({
+    resetLearned: async () => {
+      try {
+        await resetLearnedTaste()
+      } catch (err) {
+        throw new Error(err instanceof ApiError ? describeError(err).message : 'Learned taste could not be reset. Check your connection.')
+      }
+      $<HTMLTextAreaElement>('#hosted-learned').value = ''
+    },
+  })
   // Settings are the Tune tab now, so there is no panel to close.
   const closeSettings = (): void => {}
   openSettingsPanel = () => showTab('tune')
@@ -328,6 +346,8 @@ function showLogin(message = ''): void {
     setDigests([])
   }
   paintedNpub = null
+  $<HTMLTextAreaElement>('#hosted-learned').value = ''
+  refreshFeedbackSection()
   setStatus('')
   setLoginStatus(message, Boolean(message))
 }
@@ -414,6 +434,24 @@ async function signOut(closeSettings: () => void): Promise<void> {
   showLogin()
 }
 
+/** Feedback rules wait a moment, so several taps make one request. A failure offers a retry. */
+let feedbackTimer: number | undefined
+function syncFeedbackRules(rules: Array<{ kind: 'more' | 'less'; excerpt: string }>): void {
+  clearTimeout(feedbackTimer)
+  const owner = userNpub
+  feedbackTimer = window.setTimeout(() => {
+    if (!owner || userNpub !== owner) return
+    putSettings({ feedback: rules }).catch((err) => {
+      if (userNpub !== owner) return
+      if (err instanceof ApiError && err.status === 401) return showLogin(describeError(err).message)
+      showToast('Your feedback is kept here but could not reach the server, so it does not steer rankings yet.', {
+        tone: 'error',
+        action: { label: 'Retry', run: () => syncFeedbackRules(rules) },
+      })
+    })
+  }, 800)
+}
+
 /** Whether link cards are shown; set from the saved settings. */
 let linkPreviewsOn = true
 
@@ -442,6 +480,14 @@ async function onSignedIn(npub: string, ent: Entitlement): Promise<void> {
   $<HTMLInputElement>('#hosted-learn').checked = s.learnFromLikes
   $<HTMLInputElement>('#hosted-previews').checked = linkPreviewsOn = previewsEnabled(s)
   if (s.digestMinutes) $<HTMLSelectElement>('#select-digest-minutes').value = String(s.digestMinutes)
+  adoptRules(s.feedback ?? [])
+  refreshFeedbackSection()
+  void getLearned().then(
+    (l) => {
+      if (userNpub === npub) $<HTMLTextAreaElement>('#hosted-learned').value = l.prompt
+    },
+    () => {}
+  )
   promptSet = Boolean(s.userPrompt)
   loadedPrompt = s.userPrompt
   loadedHours = s.hoursBack

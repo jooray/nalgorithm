@@ -108,6 +108,8 @@ export interface HostedSettings {
   linkPreviews?: boolean
   /** Target spoken digest length in minutes (3, 6 or 10). Absent from older servers, meaning 6. */
   digestMinutes?: number
+  /** Private more/less rules that steer ranking. Absent from older servers. */
+  feedback?: Array<{ kind: 'more' | 'less'; excerpt: string }>
 }
 
 /** The first problem with the settings, or null. Same limits the server enforces. */

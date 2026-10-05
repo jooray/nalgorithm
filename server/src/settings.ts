@@ -1,5 +1,6 @@
 import { upsert } from './database.js'
 import type { Db } from './db.js'
+import { FEEDBACK_EXCERPT_MAX, FEEDBACK_RULES_MAX, type FeedbackRule } from 'nalgorithm'
 
 export interface UserSettings {
   /** What the user wants to see, in their own words. */
@@ -11,6 +12,8 @@ export interface UserSettings {
   linkPreviews: boolean
   /** Target spoken digest length: 3, 6 or 10 minutes; an upper bound, never padded to. */
   digestMinutes: number
+  /** Private "more/less like this" rules, newest first. Never published; they steer future scores. */
+  feedback: FeedbackRule[]
 }
 
 export const DIGEST_MINUTES = [3, 6, 10] as const
@@ -22,6 +25,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   learnFromLikes: true,
   linkPreviews: true,
   digestMinutes: 6,
+  feedback: [],
 }
 
 export const MAX_PROMPT_CHARS = 2000
@@ -33,7 +37,7 @@ export function applySettings(current: UserSettings, patch: unknown): UserSettin
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new SettingsError('settings must be an object')
   const p = patch as Record<string, unknown>
   const next = { ...current }
-  const allowed = new Set(['userPrompt', 'hoursBack', 'topN', 'learnFromLikes', 'linkPreviews', 'digestMinutes'])
+  const allowed = new Set(['userPrompt', 'hoursBack', 'topN', 'learnFromLikes', 'linkPreviews', 'digestMinutes', 'feedback'])
   for (const key of Object.keys(p)) if (!allowed.has(key)) throw new SettingsError(`unknown setting: ${key}`)
 
   if (p.userPrompt !== undefined) {
@@ -58,6 +62,17 @@ export function applySettings(current: UserSettings, patch: unknown): UserSettin
   if (p.linkPreviews !== undefined) {
     if (typeof p.linkPreviews !== 'boolean') throw new SettingsError('linkPreviews must be a boolean')
     next.linkPreviews = p.linkPreviews
+  }
+  if (p.feedback !== undefined) {
+    const list = p.feedback
+    if (!Array.isArray(list) || list.length > FEEDBACK_RULES_MAX) throw new SettingsError(`feedback must be a list of at most ${FEEDBACK_RULES_MAX} rules`)
+    next.feedback = list.map((r: unknown) => {
+      const rule = r as Partial<FeedbackRule> | null
+      if (!rule || (rule.kind !== 'more' && rule.kind !== 'less') || typeof rule.excerpt !== 'string' || !rule.excerpt.trim() || rule.excerpt.length > FEEDBACK_EXCERPT_MAX) {
+        throw new SettingsError(`each feedback rule needs kind more or less and an excerpt of 1 to ${FEEDBACK_EXCERPT_MAX} characters`)
+      }
+      return { kind: rule.kind, excerpt: rule.excerpt.trim() }
+    })
   }
   if (p.digestMinutes !== undefined) {
     if (!(DIGEST_MINUTES as readonly unknown[]).includes(p.digestMinutes)) throw new SettingsError('digestMinutes must be 3, 6 or 10')

@@ -225,6 +225,16 @@ export function putSchedule(
   return request<Schedule>('PUT', 'schedule', patch)
 }
 
+/** The taste learned from the reader's likes ('' when none). */
+export function getLearned(): Promise<{ prompt: string; updatedAt: string | null }> {
+  return request<{ prompt: string; updatedAt: string | null }>('GET', 'learned')
+}
+
+/** Forget the learned taste; only likes from now on shape a new one. */
+export function resetLearnedTaste(): Promise<unknown> {
+  return request('POST', 'learned/reset')
+}
+
 /** Where a voice's short sample plays from (only the shortlisted voices have one). */
 export function voiceSampleUrl(voice: string): string {
   return endpoint(`voices/${encodeURIComponent(voice)}/sample`)

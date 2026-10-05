@@ -218,6 +218,17 @@ export function createApp(deps: AppDeps) {
 
     if (method === 'GET' && path === '/settings') return send(res, 200, await loadSettings(db, npub))
 
+    // Learned taste, to inspect and to start over. A reset keeps which likes were already read,
+    // so only likes from now on shape the new taste.
+    if (method === 'GET' && path === '/learned') {
+      const row = await db.get<{ prompt: string; updated_at: string }>('SELECT prompt, updated_at FROM learned WHERE npub = ?', [npub])
+      return send(res, 200, { prompt: row?.prompt ?? '', updatedAt: row?.updated_at ?? null })
+    }
+    if (method === 'POST' && path === '/learned/reset') {
+      await db.run('UPDATE learned SET prompt = ?, updated_at = ? WHERE npub = ?', ['', new Date(nowSec() * 1000).toISOString(), npub])
+      return send(res, 200, { prompt: '', updatedAt: null })
+    }
+
     if (method === 'PUT' && path === '/settings') {
       const body = await readJson(req)
       try {
