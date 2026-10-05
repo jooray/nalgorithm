@@ -48,7 +48,7 @@ import { relativeTime } from './time.js'
 import { readImeta, type MediaMeta } from 'nalgorithm'
 import { disposeTree } from './lifecycle.js'
 import { addRule, hideNote, isFilteredOut, isSaved, muteAuthor, onFeedbackChange, readFeedback, saveNote, unsaveNote } from './feedback.js'
-import { showToast } from './toast.js'
+import { showToast, showUndoToast } from './toast.js'
 
 export interface RenderOptions {
   feedOrder?: 'new' | 'best'
@@ -920,8 +920,8 @@ function renderMenu(post: DisplayPost, options: RenderOptions, links: NoteLinks)
     return item
   }
   const undoable = (message: string, undo: (() => void) | null): void => {
-    // No timeout: Undo has to be reachable by keyboard and screen reader.
-    if (undo) showToast(message, { action: { label: 'Undo', run: undo } })
+    // No timer, so Undo can be reached by keyboard; the next action elsewhere closes it.
+    if (undo) showUndoToast(message, undo)
     else showToast('This note has no text to learn from.', { tone: 'error' })
   }
   const heading = el('p', 'post-menu-label')

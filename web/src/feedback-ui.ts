@@ -11,7 +11,7 @@ import { onFeedbackChange, readFeedback, removeRule, showHiddenNotes, unmuteAuth
 import { authorLabel } from './identity.js'
 import { knownProfiles } from './profiles.js'
 import { openSheet } from './sheet.js'
-import { showToast } from './toast.js'
+import { showUndoToast } from './toast.js'
 import { relativeTime } from './time.js'
 
 export interface FeedbackSectionOptions {
@@ -50,7 +50,7 @@ function paint(): void {
     ...state.rules.map((r) =>
       listItem(`${r.kind === 'more' ? 'More' : 'Less'} like “${r.excerpt}”`, 'Remove', () => {
         const undo = removeRule(r.noteId)
-        showToast('Feedback removed. It no longer steers rankings.', { action: { label: 'Undo', run: undo } })
+        showUndoToast('Feedback removed. It no longer steers rankings.', undo)
       })
     )
   )
@@ -66,7 +66,7 @@ function paint(): void {
     button.textContent = 'Show them again'
     button.addEventListener('click', () => {
       const undo = showHiddenNotes()
-      showToast('Hidden notes are back in your feed.', { action: { label: 'Undo', run: undo } })
+      showUndoToast('Hidden notes are back in your feed.', undo)
     })
     hidden.appendChild(button)
   } else if (state.rules.length === 0 && state.muted.length === 0) {
