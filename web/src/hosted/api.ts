@@ -225,6 +225,17 @@ export function putSchedule(
   return request<Schedule>('PUT', 'schedule', patch)
 }
 
+/** What the server keeps for this account, as a file. */
+export async function exportAccount(): Promise<Blob> {
+  const data = await request<unknown>('GET', 'account/export')
+  return new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+}
+
+/** Delete what the server keeps for this account; the session ends with it. */
+export async function deleteAccount(): Promise<void> {
+  await request('POST', 'account/delete', { confirm: 'delete' })
+}
+
 /** The taste learned from the reader's likes ('' when none). */
 export function getLearned(): Promise<{ prompt: string; updatedAt: string | null }> {
   return request<{ prompt: string; updatedAt: string | null }>('GET', 'learned')

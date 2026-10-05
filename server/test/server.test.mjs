@@ -744,6 +744,27 @@ test('HTTP: a summary list leaves out notes, and an unchanged list answers 304 w
   })
 })
 
+test('HTTP: an account exports what the server keeps, and deletes it only on explicit confirmation', async () => {
+  await withApp(async ({ json, login, npub, db }) => {
+    const { body } = await login()
+    await setPrompt(json, body.token)
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', [npub, T0, 'mine', null, 'ok'])
+    await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', ['f'.repeat(64), T0, 'someone else', null, 'ok'])
+    const exported = await (await json('/account/export', { token: body.token })).json()
+    assert.equal(exported.npub, npub)
+    assert.deepEqual(exported.digests.map((d) => d.text), ['mine'])
+    assert.ok(exported.settings.userPrompt)
+    assert.equal((await json('/account/delete', { method: 'POST', body: {}, token: body.token })).status, 400, 'nothing goes without confirmation')
+    const done = await json('/account/delete', { method: 'POST', body: { confirm: 'delete' }, token: body.token })
+    assert.equal(done.status, 200)
+    assert.match(done.headers.get('set-cookie'), /Max-Age=0/i)
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM digests WHERE npub = ?', [npub])).n, 0)
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM settings WHERE npub = ?', [npub])).n, 0)
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM digests WHERE npub = ?', ['f'.repeat(64)])).n, 1, 'other accounts are untouched')
+    assert.equal((await json('/me', { token: body.token })).status, 401, 'the session is gone too')
+  })
+})
+
 test('HTTP: learned taste can be read and reset per user, keeping which likes were already read', async () => {
   await withApp(async ({ json, login, npub, db }) => {
     const { body } = await login()

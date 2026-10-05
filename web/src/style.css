@@ -3179,3 +3179,17 @@ body[data-mode='hosted']:has(#hosted-startup:not(.hidden)) #views::before { disp
 .first-note strong {
   color: var(--text);
 }
+
+.btn-danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.danger-zone {
+  margin-top: 12px;
+}
+
+#device-section .btn-row + .btn-row {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}

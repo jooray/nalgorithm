@@ -22,6 +22,7 @@ import { adoptRules, setFeedbackIdentity, setRulesSync } from '../feedback.js'
 import { initFeedbackSection, refreshFeedbackSection } from '../feedback-ui.js'
 import { showToast } from '../toast.js'
 import { maybeShowFirstRankNote } from '../first-note.js'
+import { initDeviceSection } from '../device-data.js'
 import { previewsEnabled } from './previews-logic.js'
 import { loadSettings, saveSettings } from '../settings.js'
 import { openHostedLoginDialog } from '../login-ui.js'
@@ -97,6 +98,8 @@ import {
   putSettings,
   getLearned,
   resetLearnedTaste,
+  exportAccount,
+  deleteAccount,
   voiceSampleUrl,
   type FeedResponse,
 } from './api.js'
@@ -192,6 +195,27 @@ export function initHosted(): void {
   setActorProvider(() => (userNpub ? pubkeyToHex(userNpub) : null))
   // Private feedback belongs to the signed-in account; its more/less rules go to the server, which ranks.
   setFeedbackIdentity(() => userNpub || null)
+  initDeviceSection({
+    mode: 'hosted',
+    signOut: async () => {
+      forgetSigner()
+      await logout()
+    },
+    exportAccount: async () => {
+      try {
+        return await exportAccount()
+      } catch (err) {
+        throw new Error(err instanceof ApiError ? describeError(err).message : 'The download failed. Check your connection.')
+      }
+    },
+    deleteAccount: async () => {
+      try {
+        await deleteAccount()
+      } catch (err) {
+        throw new Error(err instanceof ApiError ? describeError(err).message : 'Your data could not be deleted. Check your connection and try again.')
+      }
+    },
+  })
   setRulesSync(syncFeedbackRules)
   initFeedbackSection({
     resetLearned: async () => {

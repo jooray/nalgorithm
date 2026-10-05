@@ -74,6 +74,7 @@ import { learnIncrementally, activeLearningResult, resetLearned } from './learni
 import { activeRules, setFeedbackIdentity } from './feedback.js'
 import { initFeedbackSection } from './feedback-ui.js'
 import { maybeShowFirstRankNote } from './first-note.js'
+import { initDeviceSection } from './device-data.js'
 
 import { initVersionCheck, setUpdateBlocked } from './version-check.js'
 
@@ -663,6 +664,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Whose feedback is in effect: the identity set up in Tune.
   setFeedbackIdentity(() => loadSettings().npub.trim() || null)
+  initDeviceSection({ mode: 'byok' })
   initFeedbackSection({
     resetLearned: () => {
       resetLearned(loadSettings())

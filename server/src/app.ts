@@ -218,6 +218,37 @@ export function createApp(deps: AppDeps) {
       return send(res, 200, { npub, entitlement: await billing.entitlement(npub) })
     }
 
+    // What this server keeps for the account, as one JSON file. Payment records live with the billing service.
+    if (method === 'GET' && path === '/account/export') {
+      const digests = await db.all<DigestRow>('SELECT id, created_at, body, audio_url, notes, duration_s FROM digests WHERE npub = ? ORDER BY created_at DESC', [npub])
+      const learned = await db.get<{ prompt: string; updated_at: string }>('SELECT prompt, updated_at FROM learned WHERE npub = ?', [npub])
+      const body = {
+        exportedAt: new Date(nowSec() * 1000).toISOString(),
+        npub,
+        settings: await loadSettings(db, npub),
+        schedule: publicSchedule(await loadSchedule(db, npub)),
+        learned: learned ? { prompt: learned.prompt, updatedAt: learned.updated_at } : null,
+        digests: digests.map(publicDigest),
+      }
+      return send(res, 200, body, { 'Content-Disposition': 'attachment; filename="nalgorithm-account.json"' })
+    }
+
+    // Delete everything this server keeps for the account. Uploaded audio on public file hosts
+    // and payment records at the billing service are outside this server and stay.
+    if (method === 'POST' && path === '/account/delete') {
+      const body = await readJson(req)
+      if (body.confirm !== 'delete') throw new HttpError(400, 'confirm with {"confirm":"delete"}')
+      if (running.has(npub) || (await digestJobStatus(db, npub, nowSec())).running) {
+        throw new HttpError(409, 'a ranking or digest is running; try again when it has finished', { code: 'busy' })
+      }
+      for (const table of ['settings', 'learned', 'scores', 'schedules', 'digests', 'deliveries', 'peers', 'digest_jobs', 'feed_snapshots', 'pipeline_jobs', 'dm_outbox', 'sessions', 'accounts']) {
+        await db.run(`DELETE FROM ${table} WHERE npub = ?`, [npub])
+      }
+      billing.forget(npub)
+      log.info(`deleted hosted data for ${npub.slice(0, 8)}`)
+      return send(res, 200, { ok: true }, { 'Set-Cookie': cookie('', 0) })
+    }
+
     if (method === 'GET' && path === '/settings') return send(res, 200, await loadSettings(db, npub))
 
     // Learned taste, to inspect and to start over. A reset keeps which likes were already read,
