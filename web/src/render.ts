@@ -130,7 +130,8 @@ export function renderFeed(
 
   const split = options.feedOrder === 'best' ? { fresh: [], rest: posts } : splitFresh(posts, options.fresh ?? new Set())
   const freshIds = new Set(split.fresh.map((post) => post.id))
-  const freshKey = [...freshIds].sort().join()
+  // From what the caller gave, so hiding a note is not mistaken for a different feed.
+  const freshKey = options.feedOrder === 'best' ? '' : splitFresh(source, options.fresh ?? new Set()).fresh.map((p) => p.id).sort().join()
   let ordered = [...split.fresh, ...split.rest]
   // A reader engaging with progressively arriving scores keeps their reading order.
   // A changed "new" set is a different feed, not a rescore, so it is laid out afresh.
@@ -890,13 +891,19 @@ function renderMenu(post: DisplayPost, options: RenderOptions, links: NoteLinks)
     item.addEventListener('click', (e) => {
       e.stopPropagation()
       close()
+      // A hide removes this card: keep keyboard focus nearby rather than at the top of the page.
+      const card = btn.closest<HTMLElement>('.note')
+      const next = (card?.nextElementSibling ?? card?.previousElementSibling) as HTMLElement | null
       run()
+      if (btn.isConnected) btn.focus()
+      else (next?.isConnected ? next : document.getElementById('status'))?.focus()
     })
     dropdown.appendChild(item)
     return item
   }
   const undoable = (message: string, undo: (() => void) | null): void => {
-    if (undo) showToast(message, { action: { label: 'Undo', run: undo }, ms: 8000 })
+    // No timeout: Undo has to be reachable by keyboard and screen reader.
+    if (undo) showToast(message, { action: { label: 'Undo', run: undo } })
     else showToast('This note has no text to learn from.', { tone: 'error' })
   }
   const heading = el('p', 'post-menu-label')
@@ -906,7 +913,9 @@ function renderMenu(post: DisplayPost, options: RenderOptions, links: NoteLinks)
   addPrivate('Less like this', () => {
     const undoRule = addRule('less', post)
     const undoHide = hideNote(post.id)
-    undoable('Hidden, and noted privately: less like this.', undoRule && (() => { undoHide(); undoRule() }))
+    // A note with no words still hides; there is just nothing for the ranking to learn.
+    if (undoRule) undoable('Hidden, and noted privately: less like this.', () => { undoHide(); undoRule() })
+    else undoable('Hidden. It has no text, so it does not steer rankings.', undoHide)
   })
   addPrivate('Hide this note', () => undoable('Note hidden on this device.', hideNote(post.id)))
   const who = authorLabel(post.author, options.profiles?.get(post.author))

@@ -50,7 +50,7 @@ function paint(): void {
     ...state.rules.map((r) =>
       listItem(`${r.kind === 'more' ? 'More' : 'Less'} like “${r.excerpt}”`, 'Remove', () => {
         const undo = removeRule(r.noteId)
-        showToast('Feedback removed. It no longer steers rankings.', { action: { label: 'Undo', run: undo }, ms: 8000 })
+        showToast('Feedback removed. It no longer steers rankings.', { action: { label: 'Undo', run: undo } })
       })
     )
   )
@@ -66,7 +66,7 @@ function paint(): void {
     button.textContent = 'Show them again'
     button.addEventListener('click', () => {
       const undo = showHiddenNotes()
-      showToast('Hidden notes are back in your feed.', { action: { label: 'Undo', run: undo }, ms: 8000 })
+      showToast('Hidden notes are back in your feed.', { action: { label: 'Undo', run: undo } })
     })
     hidden.appendChild(button)
   } else if (state.rules.length === 0 && state.muted.length === 0) {

@@ -23,4 +23,6 @@ test('exported settings leave out the model key unless asked, and clearing remov
   assert.equal(d.exportableSettings(true).settings.apiKey, 'sk-secret')
   await d.clearDeviceData()
   assert.equal(d.loadSettings().apiKey, '')
+  d.saveSettings({ ...d.loadSettings(), apiKey: 'written-late', rememberKey: true })
+  assert.equal(d.loadSettings().apiKey, '', 'a late write (page-hide save) cannot bring data back')
 })

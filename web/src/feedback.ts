@@ -123,10 +123,19 @@ export function addRule(kind: 'more' | 'less', note: { id: string; content: stri
   return () => update((s) => { s.rules = before }, true)
 }
 
-/** Rules the server already has (a new device): taken in without sending them back. */
+/**
+ * Reconcile with the rules the server ranks with. This device's rules win when it has any
+ * (they are what Tune shows), and are sent if the server's differ; a new device takes the server's.
+ */
 export function adoptRules(rules: readonly FeedbackRule[]): void {
   const k = key()
-  if (!k || rules.length === 0 || readFeedback().rules.length > 0) return
+  if (!k) return
+  const local = activeRules()
+  if (local.length > 0) {
+    if (JSON.stringify(local) !== JSON.stringify(rules.map(({ kind, excerpt }) => ({ kind, excerpt })))) onRulesChanged(local)
+    return
+  }
+  if (rules.length === 0) return
   const s = readFeedback()
   s.rules = rules.map((r, i) => ({ kind: r.kind, excerpt: r.excerpt, noteId: `server-${i}`, at: 0 }))
   write(s, false)

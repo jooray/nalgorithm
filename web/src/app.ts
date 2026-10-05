@@ -156,11 +156,14 @@ async function showStoredFeed(settings: ReturnType<typeof loadSettings>): Promis
 }
 
 /** Another identity in Tune: nothing of the previous one stays on screen. */
-let shownIdentity: string | null = null
+// undefined until the first call, so a first run without any identity still draws the setup steps.
+let shownIdentity: string | null | undefined
+const currentIdentity = (): string | null => identityKey(loadSettings().npub)
 async function followIdentity(settings: ReturnType<typeof loadSettings>): Promise<void> {
   const next = identityKey(settings.npub)
   // A run in flight finishes for its own identity, then calls this again.
   if (next === shownIdentity || isRunning) return
+  const first = shownIdentity === undefined
   shownIdentity = next
   stopPlayback()
   currentPosts = []
@@ -172,11 +175,17 @@ async function followIdentity(settings: ReturnType<typeof loadSettings>): Promis
   hideNewPill()
   clearFeed(getFeedContainer())
   paintAge()
-  setDigests(await loadLocalDigests(settings.npub))
+  const digests = await loadLocalDigests(settings.npub)
+  // Two quick saves: only the newest identity's history may land.
+  if (currentIdentity() !== next) return
+  setDigests(digests)
   const stored = await showStoredFeed(settings)
-  if (stored) return
-  if (validateSettings(settings)) showEmptyState(true, false)
-  else if (!settings.autoRefresh) showEmptyState(true, true)
+  if (!stored) {
+    if (validateSettings(settings)) showEmptyState(true, false)
+    else if (!settings.autoRefresh) showEmptyState(true, true)
+  }
+  // The startup caller runs the first check itself; a later switch ranks the new identity now.
+  if (!first) autoCheck()
 }
 
 /**
@@ -544,6 +553,9 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     const allScored = [...cachedPosts, ...newlyScored].sort((a, b) => b.score - a.score)
     if (!stillMine()) {
       saveByokFeed(allScored, nowSec(), settings, [])
+      fetcher.destroy()
+      setStatus('')
+      setRefreshEnabled(true)
       return
     }
     applyRanking(allScored, settings, !auto)
@@ -634,6 +646,8 @@ async function ensureFeed(): Promise<{ posts: ScoredPost[]; profiles: Map<string
   const settings = loadSettings()
   const problem = validateSettings(settings)
   if (problem) throw new Error(`${problem}. Open Tune to finish setting up.`)
+  // Mid-switch, the notes on screen may still be the previous identity's.
+  if (shownIdentity !== identityKey(settings.npub)) throw new Error('Switching to the identity in Tune. Try again once its feed is on screen.')
   if (currentPosts.length === 0) {
     setMakeStatus('Loading your feed first…')
     await runFeed()

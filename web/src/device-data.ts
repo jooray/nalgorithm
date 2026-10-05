@@ -9,7 +9,7 @@
 
 import { loadSettings } from './settings.js'
 import { forgetSigner } from './signer.js'
-import { deviceStorage } from './storage.js'
+import { deviceStorage, freezeStorage } from './storage.js'
 import { clearRecords } from './records.js'
 import { readFeedback } from './feedback.js'
 
@@ -52,11 +52,15 @@ const today = (): string => new Date().toISOString().slice(0, 10)
 export function exportableSettings(includeKey: boolean): Record<string, unknown> {
   const { apiKey, learnedPrompt: _learned, ...rest } = loadSettings()
   const feedback = readFeedback()
+  const hosted = document.body.dataset.mode === 'hosted'
+  // Hosted settings live on the server (Download my hosted data); here only this device's preferences.
+  const device = { feedOrder: rest.feedOrder, dataSaver: rest.dataSaver, digestMinutes: rest.digestMinutes, cacheAudio: rest.cacheAudio,
+    clientPreset: rest.clientPreset, clientCustomUrl: rest.clientCustomUrl, clientCustomProfileUrl: rest.clientCustomProfileUrl }
   return {
     app: 'nalgorithm',
     exportedAt: new Date().toISOString(),
     mode: document.body.dataset.mode,
-    settings: includeKey ? { ...rest, apiKey } : rest,
+    settings: hosted ? device : includeKey ? { ...rest, apiKey } : rest,
     feedback: { rules: feedback.rules, muted: feedback.muted, saved: feedback.saved },
   }
 }
@@ -64,6 +68,9 @@ export function exportableSettings(includeKey: boolean): Record<string, unknown>
 /** Everything this app keeps in the browser: storage, session storage and IndexedDB records. */
 export async function clearDeviceData(): Promise<void> {
   forgetSigner()
+  // From here on nothing is written back: not the player's resume save on page hide,
+  // not a feed run's last scores.
+  freezeStorage()
   deviceStorage.clear()
   try {
     for (let i = sessionStorage.length - 1; i >= 0; i--) {
@@ -77,9 +84,11 @@ export async function clearDeviceData(): Promise<void> {
 }
 
 let pending: (() => Promise<void>) | null = null
+let opener: HTMLElement | null = null
 
 function confirmStep(text: string, action: string, run: () => Promise<void>): void {
   pending = run
+  opener = document.activeElement as HTMLElement | null
   $('device-confirm-text').textContent = text
   $('btn-device-confirm').textContent = action
   $('device-confirm').classList.remove('hidden')
@@ -89,6 +98,8 @@ function confirmStep(text: string, action: string, run: () => Promise<void>): vo
 function closeConfirm(): void {
   pending = null
   $('device-confirm').classList.add('hidden')
+  opener?.focus()
+  opener = null
 }
 
 export function initDeviceSection(options: DeviceSectionOptions): void {

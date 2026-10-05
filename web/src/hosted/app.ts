@@ -145,6 +145,8 @@ const POLL_MAX_MS = 10 * 60 * 1000
 let entitlement: Entitlement | null = null
 let userNpub = ''
 let running = false
+/** Bumped when the account changes: an answer for an older run belongs to someone else. */
+let runEpoch = 0
 let paying = false
 let stopPaying = false
 
@@ -398,6 +400,13 @@ function resetFeedState(): void {
   jobWasRunning = false
   readyDuringJob = null
   schedule = null
+  // A run for the previous account is abandoned: its answer is dropped, and its busy state goes now.
+  runEpoch++
+  running = false
+  show('#hosted-loading', false)
+  $<HTMLButtonElement>('#btn-hosted-refresh').disabled = false
+  $('#btn-hosted-refresh').classList.remove('is-busy')
+  setUpdateBlocked(false)
   show('#schedule-nudge', false)
   digestsKnown = false
   setDigestJobRunning(false)
@@ -448,6 +457,8 @@ async function signOut(closeSettings: () => void): Promise<void> {
   }
   closeSettings()
   // The next person on this device must not see this account's digests.
+  // After an offline start the remembered account is on screen without a verified session.
+  const shown = userNpub || paintedNpub || lastNpub()
   stopPlayback()
   try {
     safeStorage()?.removeItem(LAST_NPUB_KEY)
@@ -455,7 +466,7 @@ async function signOut(closeSettings: () => void): Promise<void> {
     // nothing cached to clear
   }
   clearLegacyHistory('hosted')
-  if (userNpub) await clearIdentityData('hosted', userNpub)
+  if (shown) await clearIdentityData('hosted', shown)
   setDigests([])
   showLogin()
 }
@@ -620,7 +631,9 @@ async function liveCheck(): Promise<void> {
 /** The stored ranking from the server. It never ranks and never uses the daily cap. */
 async function syncLatest(): Promise<void> {
   try {
+    const owner = userNpub
     const latest = await getLatestFeed(fetchedAt)
+    if (userNpub !== owner) return
     settingsChanged = latest?.settingsChanged === true
     if (!latest || 'unchanged' in latest || (latest.createdAt ?? 0) <= (fetchedAt ?? 0)) return
     setEntitlement(latest.entitlement)
@@ -693,6 +706,7 @@ async function runFeed(opts: { manual?: boolean } = {}): Promise<void> {
   if (running) return
   const manual = opts.manual ?? false
   running = true
+  const epoch = runEpoch
   if (manual) {
     attemptFailed = false
     pausedUntil = 0
@@ -727,6 +741,7 @@ async function runFeed(opts: { manual?: boolean } = {}): Promise<void> {
 
   try {
     const feed = await getFeed(100, manual)
+    if (epoch !== runEpoch) return
     setEntitlement(feed.entitlement)
     paywalled = false
     pausedUntil = 0
@@ -734,9 +749,11 @@ async function runFeed(opts: { manual?: boolean } = {}): Promise<void> {
     applyFeed(feed, { manual })
     void maybeFirstDigest()
   } catch (err) {
-    onRunFailed(err, quiet)
+    if (epoch === runEpoch) onRunFailed(err, quiet)
   } finally {
     if (timer !== undefined) clearInterval(timer)
+    // The account changed meanwhile: resetFeedState already reset the shared state.
+    if (epoch !== runEpoch) return
     show('#hosted-loading', false)
     setBackgroundBusy(null)
     refresh.disabled = false
@@ -1315,8 +1332,11 @@ async function loadFullDigest(d: DigestRecord): Promise<DigestRecord | null> {
   const owner = userNpub
   const full = await getDigest(d.id)
   if (!full || !owner || userNpub !== owner) return full
+  // The page's list is the newest view: writing it back cannot drop a digest a list read just added.
   if (listState.owner === owner && listState.list) {
     listState.list = listState.list.map((x) => (x.id === full.id ? { ...x, notes: full.notes } : x))
+    void saveDigestHistory('hosted', owner, listState.list)
+    return full
   }
   const stored = await loadDigestHistory('hosted', owner, readDigest)
   if (stored.some((x) => x.id === full.id)) {
@@ -1359,7 +1379,10 @@ function paintJob(): void {
 async function refreshDigestStatus(): Promise<void> {
   if (!userNpub) return
   try {
+    const owner = userNpub
     const status = await getDigestStatus()
+    // Signed out or another account meanwhile: this job is not theirs.
+    if (userNpub !== owner) return
     if (status.running && !readyDuringJob) {
       // The list can have the new digest before the job is finished (the DM is sent in between):
       // it can be played now, but delivery is only known once the job ends.

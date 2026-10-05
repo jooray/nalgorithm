@@ -2,11 +2,18 @@ import { deviceStorage } from './storage.js'
 import { beginActivity } from './activity.js'
 
 /** Tune drafts deliberately exclude passwords/keys and are scoped to identity + mode. */
+let previous: AbortController | null = null
+
 export function initTuneDrafts(identity: () => string): void {
+  // Called again for another account: the earlier account's listeners must stop writing.
+  previous?.abort()
+  const lifetime = new AbortController()
+  previous = lifetime
+  const signal = lifetime.signal
   const draftKey = `nalgorithm_tune_draft_${document.body.dataset.mode}_${identity()}`
   const key = () => draftKey
   const fields = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('#view-tune input[id], #view-tune textarea[id], #view-tune select[id]')]
-    .filter((f) => f.type !== 'password' && !f.id.includes('api-key') && (!('readOnly' in f) || !f.readOnly))
+    .filter((f) => f.type !== 'password' && !f.id.includes('api-key') && !f.hasAttribute('data-no-draft') && (!('readOnly' in f) || !f.readOnly))
     .filter((f) => !(f.closest('.byok-only') && document.body.dataset.mode !== 'byok') && !(f.closest('.hosted-only') && document.body.dataset.mode !== 'hosted'))
   const dirty = new Map<string, string | boolean>()
   let finish: (() => void) | undefined
@@ -34,8 +41,8 @@ export function initTuneDrafts(identity: () => string): void {
     save()
     const status = document.getElementById('tune-status')
     if (status) status.textContent = 'Unsaved preferences. Use the Save button for the section you changed.'
-  })
-  window.addEventListener('nalgorithm:checkpoint', save)
+  }, { signal })
+  window.addEventListener('nalgorithm:checkpoint', save, { signal })
   document.addEventListener('nalgorithm:settings-saved', (event) => {
     const schedule = (event as CustomEvent).detail?.section === 'schedule'
     for (const id of dirty.keys()) if (id.startsWith('digest-') === schedule) dirty.delete(id)
@@ -44,5 +51,5 @@ export function initTuneDrafts(identity: () => string): void {
       const status = document.getElementById('tune-status')
       if (status) status.textContent = 'This section is saved; changes in another section are still unsaved.'
     }
-  })
+  }, { signal })
 }

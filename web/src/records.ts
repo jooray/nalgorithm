@@ -1,3 +1,4 @@
+import { storageFrozen } from './storage.js'
 /** Async local records, including binary audio. Small preferences stay separate. */
 export interface LocalRecord<T = unknown> { key: string; value: T; at: number }
 const fallback = new Map<string, LocalRecord>()
@@ -25,6 +26,7 @@ export async function getRecord<T>(key: string): Promise<T | null> {
 }
 export async function isRecordDurable(key: string): Promise<boolean> { return Boolean(await open()) && !fallback.has(key) }
 export async function putRecord<T>(key: string, value: T, at = Date.now()): Promise<boolean> {
+  if (storageFrozen()) return false
   const record = { key, value, at }; const db = await open()
   if (!db) { fallback.set(key, record); return false }
   return new Promise((resolve) => {

@@ -5,7 +5,7 @@
   <!-- Scripts only from this origin: a note or profile can never run code here, which matters because
        a model key may be kept in this browser. Relays, model providers and media are https/wss;
        local models are reached over localhost. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* http://[::1]:* ws://localhost:* ws://127.0.0.1:*; font-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: blob:; connect-src 'self' https: wss: blob: http://localhost:* http://127.0.0.1:* http://[::1]:* ws://localhost:* ws://127.0.0.1:*; font-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>nalgorithm</title>
   <meta name="description" content="A daily voice digest of your Nostr feed, and the feed ranked by what you say you care about.">
@@ -497,7 +497,7 @@
             <h2 id="device-title">Privacy and this device</h2>
             <p class="field-hint byok-only">Your settings, model key (unless it is session-only), rankings, digests, cached audio and private feedback stay in this browser. The text of the notes being ranked goes from this browser to the model provider you chose. Relays you list supply the notes. Images and avatars load from their own hosts unless Tap to load remote media is on. Replies, boosts, likes and zaps are signed by your signer and published to relays.</p>
             <p class="field-hint hosted-only">Our server keeps your settings, words, learned taste, scores, rankings, digests and private more/less feedback to run the service, and sends the notes' text to the model provider it uses to rank them and write digests. Digest audio is uploaded to public file hosts: anyone with the link can play it. Link previews are fetched by the server. Payments are handled by a separate billing service. This browser keeps a copy of your ranking and digests for offline use.</p>
-            <label class="check byok-only"><input type="checkbox" id="export-include-key"><span>Include my model API key in the export<small>Anyone with the file could use the key.</small></span></label>
+            <label class="check byok-only"><input type="checkbox" id="export-include-key" data-no-draft><span>Include my model API key in the export<small>Anyone with the file could use the key.</small></span></label>
             <div class="btn-row">
               <button id="btn-export-settings" class="btn btn-small" type="button">Export settings</button>
               <button id="btn-export-account" class="btn btn-small hosted-only" type="button">Download my hosted data</button>

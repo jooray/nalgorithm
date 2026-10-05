@@ -341,11 +341,11 @@ export function cacheScores(
 ): Promise<boolean> {
   const key = SCORE_RECORD_PREFIX + scoreNamespace(settings) + todayKey()
   const write = (bucketWrites.get(key) ?? Promise.resolve()).then(async () => {
-    let bucket = buckets.get(key)
-    if (!bucket) {
-      bucket = (await getRecord<Record<string, CachedScore>>(key)) ?? {}
-      buckets.set(key, bucket)
-    }
+    // Re-read every time and merge: another tab (the installed app beside a browser tab)
+    // may have written this day's bucket since, and its paid scores must not be lost.
+    const stored = (await getRecord<Record<string, CachedScore>>(key)) ?? {}
+    const bucket = { ...stored, ...(buckets.get(key) ?? {}) }
+    buckets.set(key, bucket)
     for (const e of entries) {
       bucket[e.id] = { score: e.score, justification: e.justification, ...(e.scorer ? { scorer: e.scorer } : {}) }
     }
@@ -397,6 +397,8 @@ async function listScoreKeys(): Promise<string[]> {
  * Clear the entire score cache (all day buckets, every context).
  */
 export async function clearScoreCache(): Promise<void> {
+  // A queued write finishing after the clear would bring its bucket back.
+  await Promise.all(bucketWrites.values())
   for (const key of await listScoreKeys()) {
     if (key.startsWith(SCORE_RECORD_PREFIX)) await deleteRecord(key)
     else localStorage.removeItem(key)

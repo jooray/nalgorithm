@@ -2,6 +2,14 @@
 const memory = new Map<string, string>()
 const volatile = new Set<string>()
 let failed = false
+/** Set while the device is being wiped: late writes (a page-hide save, say) must not bring data back. */
+let frozen = false
+export function freezeStorage(): void {
+  frozen = true
+}
+export function storageFrozen(): boolean {
+  return frozen
+}
 function persistent(): Storage | null {
   try { return globalThis.localStorage } catch { failed = true; return null }
 }
@@ -13,6 +21,7 @@ export const deviceStorage: Storage = {
     try { return persistent()?.getItem(key) ?? memory.get(key) ?? null } catch { failed = true; return memory.get(key) ?? null }
   },
   setItem(key, value) {
+    if (frozen) return
     memory.set(key, String(value))
     try {
       const store = persistent()
