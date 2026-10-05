@@ -58,6 +58,7 @@ import {
 } from './feed-live.js'
 import {
   ageLabel,
+  coverageText,
   decideMerge,
   freshIds,
   shouldAutoRun,
@@ -105,6 +106,17 @@ function paintAge(): void {
   setAgeLabel(ageLabel(shownAt, nowSec()))
 }
 
+/** The status line for a ranking: coverage, window and order (see coverageText). */
+function coverageOf(posts: ScoredPost[], settings: ReturnType<typeof loadSettings>): string {
+  return coverageText({
+    shown: aggregateBoosts(posts).length,
+    ranked: posts.length,
+    hoursBack: settings.hoursBack,
+    order: settings.feedOrder,
+    unranked: posts.filter((p) => p.defaultScore).length,
+  })
+}
+
 /** Keep the newest ranking on this device, under the identity it was ranked for. */
 function saveByokFeed(posts: ScoredPost[], at: number, settings: ReturnType<typeof loadSettings>, fresh: string[]): void {
   const snap: LocalSnapshot = {
@@ -133,7 +145,7 @@ async function showStoredFeed(settings: ReturnType<typeof loadSettings>): Promis
   renderCurrent(settings)
   shownAt = fetchedAt = snap.createdAt
   rankedSig = snap.sig ?? null
-  setStatus(`Showing ${aggregateBoosts(currentPosts).length} posts, ranked by relevance`)
+  setStatus(coverageOf(currentPosts, settings))
   paintAge()
   return true
 }
@@ -191,8 +203,7 @@ function applyRanking(posts: ScoredPost[], settings: ReturnType<typeof loadSetti
   commitShown()
   shownAt = at
   paintAge()
-  const shown = aggregateBoosts(posts).length
-  setStatus(`Showing ${shown} posts, ranked by relevance`)
+  setStatus(coverageOf(posts, settings))
 }
 
 function mergePending(settings: ReturnType<typeof loadSettings>): void {
@@ -204,7 +215,7 @@ function mergePending(settings: ReturnType<typeof loadSettings>): void {
   commitShown()
   shownAt = at
   paintAge()
-  setStatus(`Showing ${aggregateBoosts(posts).length} posts, ranked by relevance`)
+  setStatus(coverageOf(posts, settings))
 }
 
 /** Open, return to the app, every five minutes: rank quietly when the stored feed is stale. */
@@ -530,12 +541,8 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     }
     applyRanking(allScored, settings, !auto)
 
-    const shown = aggregateBoosts(allScored).length
-    const collapsed = allScored.length - shown
-    const cachedLabel = cachedPosts.length > 0 ? ` (${cachedPosts.length} from cache)` : ''
-    const boostLabel = collapsed > 0 ? `, ${collapsed} duplicate boosts merged` : ''
-    const unranked = allScored.filter((p) => p.defaultScore).length
-    if (!quiet) setStatus(`Showing ${shown} posts${cachedLabel}${boostLabel}${unranked ? `. ${unranked} not ranked yet; check the model connection.` : ', ranked successfully'}`)
+    const cachedLabel = cachedPosts.length > 0 ? ` ${cachedPosts.length} scores came from this device's cache.` : ''
+    if (!quiet) setStatus(coverageOf(allScored, settings) + cachedLabel)
     setRefreshEnabled(true)
 
     // ── Phase 2: background likes → re-rate ────────────────────────────

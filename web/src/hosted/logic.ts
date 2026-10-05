@@ -106,6 +106,8 @@ export interface HostedSettings {
   learnFromLikes: boolean
   /** Link cards under posts; the server fetches the pages. Absent from older servers, meaning on. */
   linkPreviews?: boolean
+  /** Target spoken digest length in minutes (3, 6 or 10). Absent from older servers, meaning 6. */
+  digestMinutes?: number
 }
 
 /** The first problem with the settings, or null. Same limits the server enforces. */

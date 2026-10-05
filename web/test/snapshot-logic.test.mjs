@@ -223,3 +223,11 @@ test('a stored snapshot keeps its fresh ids', () => {
   saveLocalSnapshot(store, 'k', { v: 1, createdAt: NOW, fresh: ['x'], posts: [{ id: 'x' }, { id: 'a' }], profiles: {} })
   assert.deepEqual(loadLocalSnapshot(store, 'k').fresh, ['x'])
 })
+
+test('coverageText: says what was ranked, from which window, in which order, and when the window was capped', async () => {
+  const { coverageText } = await import('../src/snapshot-logic.ts')
+  assert.equal(coverageText({ shown: 87, ranked: 240, hoursBack: 24, order: 'new' }), '87 notes from 240 posts ranked in the last 24 h, new arrivals first, then best match.')
+  assert.equal(coverageText({ shown: 1, ranked: 1, hoursBack: 72, order: 'best' }), '1 note from 1 post ranked in the last 3 days, best match first.')
+  assert.match(coverageText({ shown: 100, ranked: 500, hoursBack: 24, order: 'best' }), /only the newest 500 posts were ranked/)
+  assert.match(coverageText({ shown: 10, ranked: 20, hoursBack: 24, order: 'best', unranked: 3 }), /3 not ranked yet/)
+})

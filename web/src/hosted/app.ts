@@ -37,6 +37,7 @@ import {
 } from '../feed-live.js'
 import {
   ageLabel,
+  coverageText,
   decideMerge,
   freshIds,
   quietNotice,
@@ -299,7 +300,7 @@ async function paintRemembered(): Promise<void> {
   if (!snap || snap.posts.length === 0 || shownIds.length > 0) return
   document.body.dataset.signedIn = 'true'
   drawFeed(
-    { posts: snap.posts as unknown as FeedResponse['posts'], profiles: snap.profiles as FeedResponse['profiles'], hoursBack: snap.hoursBack ?? 24 },
+    { posts: snap.posts as unknown as FeedResponse['posts'], profiles: snap.profiles as FeedResponse['profiles'], hoursBack: snap.hoursBack ?? 24, fetched: snap.fetched },
     Array.isArray(snap.fresh) ? snap.fresh : []
   )
   shownAt = fetchedAt = snap.createdAt
@@ -440,6 +441,7 @@ async function onSignedIn(npub: string, ent: Entitlement): Promise<void> {
   $<HTMLInputElement>('#hosted-topn').value = String(s.topN)
   $<HTMLInputElement>('#hosted-learn').checked = s.learnFromLikes
   $<HTMLInputElement>('#hosted-previews').checked = linkPreviewsOn = previewsEnabled(s)
+  if (s.digestMinutes) $<HTMLSelectElement>('#select-digest-minutes').value = String(s.digestMinutes)
   promptSet = Boolean(s.userPrompt)
   loadedPrompt = s.userPrompt
   loadedHours = s.hoursBack
@@ -517,7 +519,7 @@ function setEntitlement(ent: Entitlement): void {
 
 // ─── Feed ────────────────────────────────────────────────────────────────────
 
-type ShownFeed = Pick<FeedResponse, 'posts' | 'profiles' | 'hoursBack'>
+type ShownFeed = Pick<FeedResponse, 'posts' | 'profiles' | 'hoursBack'> & { fetched?: number }
 
 /** Whether the app may start a ranking by itself right now. */
 function autoDue(): boolean {
@@ -717,7 +719,7 @@ function drawFeed(feed: ShownFeed, fresh: string[]): void {
     linkPreviews: linkPreviewsOn ? attachLinkPreviews : undefined,
   })
   shownIds = posts.map((p) => p.id)
-  setStatus(`Showing ${display.length} posts, ranked by relevance`)
+  setStatus(coverageText({ shown: display.length, ranked: Math.max(feed.fetched ?? 0, posts.length), hoursBack: feed.hoursBack, order: settings.feedOrder }))
 }
 
 function showEmpty(text: string): void {
@@ -771,6 +773,8 @@ async function saveSettingsForm(closeSettings: () => void): Promise<void> {
     topN: parseWholeNumber($<HTMLInputElement>('#hosted-topn').value),
     learnFromLikes: $<HTMLInputElement>('#hosted-learn').checked,
     linkPreviews: $<HTMLInputElement>('#hosted-previews').checked,
+    // The server writes the digest, so the length choice goes there as well as to this device.
+    digestMinutes: Number($<HTMLSelectElement>('#select-digest-minutes').value),
   }
   const problem = validateHostedSettings(draft)
   if (problem) return setMsg(problem, true)
@@ -786,8 +790,8 @@ async function saveSettingsForm(closeSettings: () => void): Promise<void> {
     $<HTMLTextAreaElement>('#hosted-prompt').value = saved.userPrompt
     linkPreviewsOn = previewsEnabled(saved)
     updatePromptCount()
-      setMsg('')
-      document.dispatchEvent(new Event('nalgorithm:settings-saved'))
+    setMsg('')
+    document.dispatchEvent(new Event('nalgorithm:settings-saved'))
     setStatus('Settings saved')
     show('#hosted-notice', false)
     closeSettings()

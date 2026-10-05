@@ -59,6 +59,7 @@ test('happy path: speech-tuned digest with humanizer, audio uploaded, DM has the
   assert.equal(w.digest.posts.length, 2, 'top N from the user setting')
   assert.equal(w.digest.userPrompt, 'bitcoin and nostr')
   assert.equal(w.digest.learnedPrompt, 'learned')
+  assert.equal(w.digest.targetMinutes, 6, 'the reader\'s target length reaches the writer')
   assert.equal(w.digest.profiles.get('b'.repeat(64)).name, 'bob')
   assert.equal(calls.synth[0].cfg.voice, 'af_sky'); assert.equal(calls.synth[0].cfg.format, 'mp3')
   const sent = calls.dm[0]

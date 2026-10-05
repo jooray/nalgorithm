@@ -159,6 +159,25 @@ export function splitFresh<T extends { id: string }>(posts: readonly T[], fresh:
   return { fresh: top, rest: posts.filter((p) => !fresh.has(p.id)) }
 }
 
+/** The most recent posts one run ranks (the library's and server's cap). */
+export const RANKED_CAP = 500
+
+/**
+ * What the status line says about a ranking: how many notes it covers, from how many
+ * ranked posts in which window, and in what order. "Ranked" is an estimate of relevance
+ * to the reader's words, not a measured certainty, so nothing here claims more.
+ */
+export function coverageText(i: { shown: number; ranked: number; hoursBack: number; order: 'new' | 'best'; unranked?: number }): string {
+  const notes = i.shown === 1 ? '1 note' : `${i.shown} notes`
+  const window = i.hoursBack % 24 === 0 && i.hoursBack >= 48 ? `${i.hoursBack / 24} days` : `${i.hoursBack} h`
+  const order = i.order === 'best' ? 'best match first' : 'new arrivals first, then best match'
+  const posts = i.ranked === 1 ? '1 post' : `${i.ranked} posts`
+  let text = `${notes} from ${posts} ranked in the last ${window}, ${order}.`
+  if (i.ranked >= RANKED_CAP) text += ` A busy window: only the newest ${RANKED_CAP} posts were ranked.`
+  if (i.unranked) text += ` ${i.unranked} not ranked yet; check the model connection.`
+  return text
+}
+
 export function pillLabel(n: number): string {
   return n === 1 ? '1 new note' : `${n} new notes`
 }

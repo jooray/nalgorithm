@@ -55,8 +55,10 @@ export async function writeDigest(
         posts,
         profiles,
         userPrompt: settings.userPrompt,
-        learnedPrompt: settings.learnedPrompt || undefined,
+        // Learning off means learned taste is ignored, here as in ranking.
+        learnedPrompt: settings.learnFromLikes ? settings.learnedPrompt || undefined : undefined,
         topN: settings.digestTopN,
+        targetMinutes: settings.digestMinutes,
         forSpeech: settings.digestForSpeech,
         onDelta: (piece) => {
           streamed += piece

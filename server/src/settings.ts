@@ -9,7 +9,11 @@ export interface UserSettings {
   learnFromLikes: boolean
   /** Show link cards under posts. The server fetches the pages, so this is the reader's choice. */
   linkPreviews: boolean
+  /** Target spoken digest length: 3, 6 or 10 minutes; an upper bound, never padded to. */
+  digestMinutes: number
 }
+
+export const DIGEST_MINUTES = [3, 6, 10] as const
 
 export const DEFAULT_SETTINGS: UserSettings = {
   userPrompt: '',
@@ -17,6 +21,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   topN: 15,
   learnFromLikes: true,
   linkPreviews: true,
+  digestMinutes: 6,
 }
 
 export const MAX_PROMPT_CHARS = 2000
@@ -28,7 +33,7 @@ export function applySettings(current: UserSettings, patch: unknown): UserSettin
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new SettingsError('settings must be an object')
   const p = patch as Record<string, unknown>
   const next = { ...current }
-  const allowed = new Set(['userPrompt', 'hoursBack', 'topN', 'learnFromLikes', 'linkPreviews'])
+  const allowed = new Set(['userPrompt', 'hoursBack', 'topN', 'learnFromLikes', 'linkPreviews', 'digestMinutes'])
   for (const key of Object.keys(p)) if (!allowed.has(key)) throw new SettingsError(`unknown setting: ${key}`)
 
   if (p.userPrompt !== undefined) {
@@ -53,6 +58,10 @@ export function applySettings(current: UserSettings, patch: unknown): UserSettin
   if (p.linkPreviews !== undefined) {
     if (typeof p.linkPreviews !== 'boolean') throw new SettingsError('linkPreviews must be a boolean')
     next.linkPreviews = p.linkPreviews
+  }
+  if (p.digestMinutes !== undefined) {
+    if (!(DIGEST_MINUTES as readonly unknown[]).includes(p.digestMinutes)) throw new SettingsError('digestMinutes must be 3, 6 or 10')
+    next.digestMinutes = p.digestMinutes as number
   }
   return next
 }

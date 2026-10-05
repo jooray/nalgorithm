@@ -68,8 +68,23 @@ export const SPOKEN_SIGN_OFF = `End with the sentence: That's your digest.`
  * prompt or not — they are corrections to how these models write by default,
  * not a stylistic preference the caller should have to remember to include.
  */
-export function buildDigestSystemPrompt(custom?: string, forSpeech = false): string {
-  return (custom ?? DEFAULT_DIGEST_SYSTEM_PROMPT) + HUMANIZER_APPENDIX + (forSpeech ? SPEECH_APPENDIX : '')
+export function buildDigestSystemPrompt(custom?: string, forSpeech = false, targetMinutes?: number): string {
+  let base = custom ?? DEFAULT_DIGEST_SYSTEM_PROMPT
+  if (targetMinutes !== undefined && custom === undefined) base = base.replace(DEFAULT_LENGTH_SENTENCE, lengthSentence(targetMinutes))
+  return base + HUMANIZER_APPENDIX + (forSpeech ? SPEECH_APPENDIX : '')
+}
+
+const DEFAULT_LENGTH_SENTENCE = 'Aim for about 6 minutes of spoken content (roughly 1100-1500 words): never pad, and keep every item tight.'
+
+/** Spoken English runs at about 160 to 200 words a minute. */
+export function digestWordRange(minutes: number): [number, number] {
+  const m = Math.min(15, Math.max(1, minutes))
+  return [Math.round((m * 160) / 50) * 50, Math.round((m * 200) / 50) * 50]
+}
+
+function lengthSentence(minutes: number): string {
+  const [lo, hi] = digestWordRange(minutes)
+  return `Aim for at most about ${minutes} minutes of spoken content (roughly ${lo}-${hi} words). If there is less worth saying, be shorter: never pad, and keep every item tight.`
 }
 
 function resolveAuthorName(pubkey: string, profiles?: Map<string, ProfileData>): string {
@@ -131,6 +146,11 @@ export interface DigestOptions {
   digestPrompt?: string
   /** How many top posts to include (default: 15). */
   topN?: number
+  /**
+   * Target spoken length in minutes (the reader's 3/6/10-minute choice). Shorter when
+   * there is less worth saying; never padded. Default: the system prompt's 6 minutes.
+   */
+  targetMinutes?: number
   /** Append the text-to-speech instructions (default: false). */
   forSpeech?: boolean
   /** Append the faithfulness rules (default: true). */
@@ -204,7 +224,7 @@ ${options.learnedPrompt ? `\n=== Learned Preferences ===\n${options.learnedPromp
 ${postsBlock}${options.faithfulness === false ? '' : `\n\n${FAITHFULNESS_RULES}${options.forSpeech ? ` ${SPOKEN_SIGN_OFF}` : ''}`}`
 
   return [
-    { role: 'system', content: buildDigestSystemPrompt(options.systemPrompt, options.forSpeech) },
+    { role: 'system', content: buildDigestSystemPrompt(options.systemPrompt, options.forSpeech, options.targetMinutes) },
     { role: 'user', content: userMessage },
   ]
 }

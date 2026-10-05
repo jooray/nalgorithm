@@ -105,9 +105,9 @@ test('store: a large key list is queried in chunks', async () => {
 // ─── settings ────────────────────────────────────────────────────────────────
 
 test('settings: validates every field and rejects unknown ones', async () => {
-  const ok = applySettings(DEFAULT_SETTINGS, { userPrompt: '  bitcoin and nostr  ', hoursBack: 12, topN: 5, learnFromLikes: false, linkPreviews: false })
-  assert.deepEqual(ok, { userPrompt: 'bitcoin and nostr', hoursBack: 12, topN: 5, learnFromLikes: false, linkPreviews: false })
-  for (const bad of [{ hoursBack: 0 }, { hoursBack: 100 }, { topN: 1.5 }, { userPrompt: 5 }, { userPrompt: 'x'.repeat(2001) }, { learnFromLikes: 'yes' }, { linkPreviews: 'no' }, { apiKey: 'x' }, []]) {
+  const ok = applySettings(DEFAULT_SETTINGS, { userPrompt: '  bitcoin and nostr  ', hoursBack: 12, topN: 5, learnFromLikes: false, linkPreviews: false, digestMinutes: 3 })
+  assert.deepEqual(ok, { userPrompt: 'bitcoin and nostr', hoursBack: 12, topN: 5, learnFromLikes: false, linkPreviews: false, digestMinutes: 3 })
+  for (const bad of [{ digestMinutes: 4 }, { digestMinutes: '6' }, { hoursBack: 0 }, { hoursBack: 100 }, { topN: 1.5 }, { userPrompt: 5 }, { userPrompt: 'x'.repeat(2001) }, { learnFromLikes: 'yes' }, { linkPreviews: 'no' }, { apiKey: 'x' }, []]) {
     assert.throws(() => applySettings(DEFAULT_SETTINGS, bad), SettingsError, JSON.stringify(bad))
   }
 })

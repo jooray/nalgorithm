@@ -1546,7 +1546,7 @@ select:focus {
 .score-reason {
   overflow: hidden;
   min-width: 0;
-  color: var(--accent-ink);
+  color: var(--text-2);
   font-size: 0.9375rem;
   font-weight: 500;
   text-overflow: ellipsis;
@@ -3048,4 +3048,29 @@ body[data-mode='hosted']:has(#hosted-startup:not(.hidden)) #views::before { disp
 .inline-field select {
   flex: 1;
   min-width: 0;
+}
+
+/* The accessible path to the full explanation; the reason beside it stays one quiet line. */
+.why-btn {
+  flex: none;
+  min-height: 32px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.why-btn:hover {
+  text-decoration: underline;
+}
+
+.sheet-note {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 0.9375rem;
+  line-height: 1.45;
 }

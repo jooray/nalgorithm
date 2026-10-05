@@ -510,8 +510,15 @@ function renderScore(post: DisplayPost, full = false): HTMLElement {
   pill.setAttribute('aria-label', post.defaultScore ? 'This note has not been ranked' : `Estimated relevance ${post.score.toFixed(1)} out of 10`)
   row.appendChild(pill)
   const reason = el('span', 'score-reason')
-  reason.textContent = post.defaultScore ? 'Model unavailable. Refresh retries only unranked notes.' : post.justification || 'Open Why it ranked for details'
+  reason.textContent = post.defaultScore ? 'Model unavailable. Refresh retries only unranked notes.' : post.justification || 'No reason was given'
   row.appendChild(reason)
+  if (!full && !post.defaultScore) {
+    // The card's own click handler opens the sheet at its explanation.
+    const why = el('button', 'why-btn') as HTMLButtonElement
+    why.type = 'button'
+    why.textContent = 'Why this?'
+    row.appendChild(why)
+  }
   return row
 }
 
@@ -554,6 +561,7 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
     const open = (): void => openNoteSheet(post, options)
     card.addEventListener('click', (e) => {
       const target = e.target as Element | null
+      if (target?.closest('.why-btn')) return openNoteSheet(post, options, { at: 'why' })
       if (target?.closest('a, button, input, textarea, select, video, [role="menu"], .video-placeholder')) return
       if (window.getSelection()?.toString()) return
       open()
@@ -573,7 +581,7 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
  * The full note, its actions, what it replies to and its direct replies (one
  * level each way), why it ranked, and every way to open or copy it.
  */
-export function openNoteSheet(post: DisplayPost, options: RenderOptions): void {
+export function openNoteSheet(post: DisplayPost, options: RenderOptions, opts: { at?: 'why' } = {}): void {
   const links = linksFor(post, options)
   const tab = location.hash.slice(1).split('/')[0] || 'feed'
   const sheet = openSheet({ title: 'Note', route: `#${tab}/note/${post.id}` })
@@ -604,7 +612,19 @@ export function openNoteSheet(post: DisplayPost, options: RenderOptions): void {
     whyTitle.textContent = 'Why it ranked'
     why.appendChild(whyTitle)
     why.appendChild(renderScore(post, true))
-    body.appendChild(why)
+    const about = el('p', 'sheet-note')
+    about.textContent = post.defaultScore
+      ? 'The model could not score this note, so it sits behind the ranked ones.'
+      : 'The score estimates how well this note matches your words in Tune; it is the model\'s judgement, not a measured certainty. The model read the first 500 characters of the note. To change what ranks high, change your words.'
+    why.appendChild(about)
+    body.insertBefore(why, repliesBox)
+    if (opts.at === 'why') {
+      whyTitle.tabIndex = -1
+      queueMicrotask(() => {
+        whyTitle.scrollIntoView({ block: 'start' })
+        whyTitle.focus({ preventScroll: true })
+      })
+    }
   }
 
   const list = el('div', 'sheet-actions')

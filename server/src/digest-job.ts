@@ -182,6 +182,7 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
         userPrompt: settings.userPrompt,
         learnedPrompt: feed.learnedPrompt,
         topN: settings.topN,
+        targetMinutes: settings.digestMinutes,
         // Spoken output: plain text, no markdown, spelled-out abbreviations.
         forSpeech: true,
       },
