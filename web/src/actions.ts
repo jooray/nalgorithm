@@ -12,6 +12,7 @@ import { icon, type IconName } from './icons.js'
 import { boostNote, isMarked, likeNote, replyToNote, type NoteTarget } from './note-ui.js'
 import { onMarkChange } from './note-state.js'
 import { zapNote } from './zap-ui.js'
+import { onDispose } from './lifecycle.js'
 
 /** What an action needs to know about the note it acts on. */
 export interface NoteLinks {
@@ -110,6 +111,7 @@ export function renderActionRow(actions: NoteAction[], trailing?: HTMLElement): 
         paint()
         // Follow the mark while this button is on screen; let go of it once it is not.
         const stop = onMarkChange(() => (b.isConnected ? paint() : stop()))
+        onDispose(row, stop)
       }
       b.addEventListener('click', (e) => {
         e.stopPropagation()

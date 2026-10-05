@@ -15,7 +15,7 @@
 
 import { collectPostPubkeys, pubkeyToHex, type ProfileData, type ScoredPost } from 'nalgorithm'
 import { adoptSigner, forgetSigner, setActorProvider } from '../signer.js'
-import { renderFeed, aggregateBoosts, clientRenderOptions } from '../render.js'
+import { renderFeed, clearFeed, aggregateBoosts, clientRenderOptions } from '../render.js'
 import { attachLinkPreviews } from './previews.js'
 import { previewsEnabled } from './previews-logic.js'
 import { loadSettings, saveSettings } from '../settings.js'
@@ -298,7 +298,7 @@ function showLogin(message = ''): void {
   show('#hosted-paywall', false)
   show('#hosted-loading', false)
   show('#hosted-empty', false)
-  $('#hosted-feed').innerHTML = ''
+  clearFeed($('#hosted-feed'))
   resetFeedState()
   setStatus('')
   setLoginStatus(message, Boolean(message))
@@ -434,7 +434,7 @@ function rememberNpub(npub: string): void {
 }
 
 function resetShown(): void {
-  $('#hosted-feed').innerHTML = ''
+  clearFeed($('#hosted-feed'))
   shownIds = baseKeys = baseFresh = []
   shownAt = fetchedAt = null
   pending = null
@@ -663,7 +663,7 @@ function drawFeed(feed: ShownFeed, fresh: string[]): void {
   const settings = loadSettings()
 
   if (posts.length === 0) {
-    $('#hosted-feed').innerHTML = ''
+    clearFeed($('#hosted-feed'))
     shownIds = baseKeys = baseFresh = []
     showEmpty(`No posts from the people you follow in the last ${feed.hoursBack} hours. Try a longer window in Tune.`)
     setStatus('No posts found')

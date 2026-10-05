@@ -10,6 +10,7 @@
 
 import { getPreview, previewImageSrc } from './api.js'
 import { extractPreviewUrls, readLinkCard, type LinkCard } from './previews-logic.js'
+import { onDispose } from '../lifecycle.js'
 
 const MAX_PARALLEL = 2
 const answers = new Map<string, Promise<LinkCard | null>>()
@@ -29,6 +30,7 @@ async function limited<T>(job: () => Promise<T>): Promise<T> {
 }
 
 function load(url: string): Promise<LinkCard | null> {
+  if (answers.size >= 256) answers.delete(answers.keys().next().value!)
   let p = answers.get(url)
   if (!p) {
     p = limited(() => getPreview(url)).then(readLinkCard)
@@ -88,6 +90,7 @@ function whenNear(el: Element, run: () => void): void {
   )
   pending.set(el, run)
   observer.observe(el)
+  onDispose(el, () => { observer?.unobserve(el); pending.delete(el) })
 }
 
 /** The `linkPreviews` hook for the renderer: adds cards for the URLs in `content` to `post`. */
@@ -102,8 +105,10 @@ export function attachLinkPreviews(content: string, post: HTMLElement): void {
     slot.setAttribute('aria-hidden', 'true')
     list.appendChild(slot)
     whenNear(slot, () => {
+      if (!slot.isConnected) return
       load(url).then(
         (card) => {
+          if (!slot.isConnected) return
           if (card) slot.replaceWith(buildCard(url, card))
           else slot.remove()
         },

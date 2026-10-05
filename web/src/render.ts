@@ -45,8 +45,11 @@ import { postsToRedraw, unresolvedPeople } from './lazy-profiles.js'
 import type { Event as NostrEvent } from 'nostr-tools/pure'
 import { openSheet } from './sheet.js'
 import { relativeTime } from './time.js'
+import { disposeTree } from './lifecycle.js'
 
 export interface RenderOptions {
+  feedOrder?: 'new' | 'best'
+  dataSaver?: boolean
   profiles?: Map<string, ProfileData>
   /** URL template for "open in client" — may contain {e} or be a prefix. */
   eventUrlTemplate?: string
@@ -74,7 +77,7 @@ export interface RenderOptions {
 
 /** Link options derived from the reader's settings; shared by both modes. */
 export function clientRenderOptions(
-  settings: Pick<AppSettings, 'clientPreset' | 'clientCustomUrl' | 'clientCustomProfileUrl'>,
+  settings: Pick<AppSettings, 'clientPreset' | 'clientCustomUrl' | 'clientCustomProfileUrl'> & Partial<Pick<AppSettings, 'feedOrder' | 'dataSaver'>>,
   relayHints: string[] = []
 ): RenderOptions {
   return {
@@ -82,6 +85,8 @@ export function clientRenderOptions(
     profileUrlTemplate: resolveProfileTemplate(settings.clientPreset, settings.clientCustomProfileUrl),
     clientPreset: settings.clientPreset,
     relayHints,
+    feedOrder: settings.feedOrder ?? 'new',
+    dataSaver: settings.dataSaver ?? false,
   }
 }
 
@@ -101,29 +106,102 @@ export function renderFeed(
   container: HTMLElement,
   options: RenderOptions = {}
 ): void {
-  container.textContent = ''
-
+  const previous = feedState.get(container)
   if (posts.length === 0) {
+    disposeTree(container)
+    container.replaceChildren()
+    feedState.delete(container)
     const empty = el('p', 'feed-empty')
     empty.textContent = 'No posts to display.'
     container.appendChild(empty)
     return
   }
 
-  const split = splitFresh(posts, options.fresh ?? new Set())
-  const ordered = [...split.fresh, ...split.rest]
-  const cards: HTMLElement[] = []
-  ordered.forEach((post, i) => {
-    if (split.fresh.length > 0 && (i === 0 || i === split.fresh.length)) {
-      container.appendChild(sectionHeading(i === 0 ? `New since last refresh · ${split.fresh.length}` : 'The rest of your feed'))
-    }
-    // Ranked best first, so the first note is the top-ranked one (of the new ones, when split).
-    const card = renderPostCard(post, options, i === 0)
-    cards.push(card)
-    container.appendChild(card)
-  })
-  feedState.set(container, { posts: ordered, cards, options })
+  const split = options.feedOrder === 'best' ? { fresh: [], rest: posts } : splitFresh(posts, options.fresh ?? new Set())
+  const freshIds = new Set(split.fresh.map((post) => post.id))
+  const freshKey = [...freshIds].sort().join()
+  let ordered = [...split.fresh, ...split.rest]
+  // A reader engaging with progressively arriving scores keeps their reading order.
+  // A changed "new" set is a different feed, not a rescore, so it is laid out afresh.
+  const reading = window.scrollY > 80 && !document.getElementById('view-feed')?.classList.contains('hidden')
+  const anchor = reading ? previous?.cards.find((card) => card.getBoundingClientRect().bottom > 0) : null
+  const anchorTop = anchor?.getBoundingClientRect().top
+  if (previous && reading && previous.freshKey === freshKey && ['feed-list', 'hosted-feed'].includes(container.id)) {
+    const incoming = new Map(ordered.map((post) => [post.id, post]))
+    const kept = previous.allPosts.filter((post) => incoming.has(post.id)).map((post) => incoming.get(post.id)!)
+    const keys = new Set(kept.map((post) => post.id))
+    const added = ordered.filter((post) => !keys.has(post.id))
+    const group = (list: DisplayPost[], isFresh: boolean): DisplayPost[] => list.filter((post) => freshIds.has(post.id) === isFresh)
+    ordered = [...group(kept, true), ...group(added, true), ...group(kept, false), ...group(added, false)]
+  }
   const linkedId = /\/note\/([0-9a-f]{64})$/i.exec(location.hash)?.[1]
+  const count = Math.max(previous?.visibleCount ?? 50, linkedId ? ordered.findIndex((post) => post.id === linkedId) + 1 : 0)
+  const visible = ordered.slice(0, count)
+  const cards: HTMLElement[] = []
+  const items = new Map<string, CardState>()
+  const nodes: HTMLElement[] = []
+  // One lime edge: the first of the highest-scored ranked notes.
+  const topId = posts.reduce<DisplayPost | null>((best, p) => (!p.defaultScore && (!best || p.score > best.score) ? p : best), null)?.id
+  const heading = (kind: string, text: string): HTMLElement => {
+    const old = container.querySelector<HTMLElement>(`.feed-section[data-kind="${kind}"]`)
+    const node = old ?? sectionHeading(text)
+    node.dataset.kind = kind
+    if (node.textContent !== text) node.textContent = text
+    return node
+  }
+  visible.forEach((post, i) => {
+    if (split.fresh.length > 0 && (i === 0 || i === split.fresh.length)) {
+      nodes.push(heading(i === 0 ? 'fresh' : 'rest', i === 0 ? `New since last refresh · ${split.fresh.length}` : 'Earlier notes'))
+    }
+    const signature = JSON.stringify([post.type, post.author, post.content, post.createdAt, post.quotedPost, post.originalPost, post.boostedBy, post.rawEvent?.tags, options.eventUrlTemplate, options.profileUrlTemplate, options.clientPreset, options.dataSaver, Boolean(options.linkPreviews)])
+    const old = previous?.items.get(post.id)
+    let card: HTMLElement
+    if (old && old.signature === signature) {
+      card = old.card
+      Object.assign(old.post, post)
+      Object.assign(old.options, options)
+      const score = card.querySelector('.note-score')
+      const scoreKey = `${post.score}|${post.justification}|${post.defaultScore}`
+      if (card.dataset.scoreKey !== scoreKey) { score?.replaceWith(renderScore(post)); card.dataset.scoreKey = scoreKey }
+      patchPeople(card, old.options)
+      card.setAttribute('aria-label', cardLabel(post, old.options))
+      items.set(post.id, old)
+    } else {
+      if (old) disposeTree(old.card)
+      const postRef = { ...post }, optionRef = { ...options }
+      card = renderPostCard(postRef, optionRef)
+      card.dataset.noteId = post.id
+      card.dataset.scoreKey = `${post.score}|${post.justification}|${post.defaultScore}`
+      items.set(post.id, { card, post: postRef, options: optionRef, signature })
+    }
+    card.classList.toggle('note-top', post.id === topId)
+    cards.push(card)
+    nodes.push(card)
+  })
+  if (ordered.length > visible.length) {
+    const more = el('button', 'btn btn-full feed-more') as HTMLButtonElement
+    more.type = 'button'
+    more.textContent = `Show next ${Math.min(50, ordered.length - visible.length)} notes · ${ordered.length} total`
+    more.addEventListener('click', () => {
+      const state = feedState.get(container)
+      if (!state) return
+      const next = state.visibleCount
+      state.visibleCount += 50
+      renderFeed(state.allPosts, container, state.options)
+      // Keyboard and screen-reader users continue at the first newly shown note.
+      feedState.get(container)?.cards[next]?.focus({ preventScroll: true })
+    })
+    nodes.push(more)
+  }
+  for (const [id, item] of previous?.items ?? []) if (!items.has(id)) disposeTree(item.card)
+  // Reconcile in place, instead of detaching reused cards and losing focus/media.
+  nodes.forEach((node, i) => { if (container.children[i] !== node) container.insertBefore(node, container.children[i] ?? null) })
+  while (container.children.length > nodes.length) { const last = container.lastElementChild!; disposeTree(last); last.remove() }
+  feedState.set(container, { posts: visible, allPosts: ordered, visibleCount: count, freshKey, cards, items, options })
+  if (anchor?.isConnected && anchorTop !== undefined) {
+    const shift = anchor.getBoundingClientRect().top - anchorTop
+    if (Math.abs(shift) > 1) window.scrollBy({ top: shift, behavior: 'auto' })
+  }
   const linked = linkedId ? ordered.find((p) => p.id === linkedId) : null
   if (linked && !document.querySelector('dialog[open]')) queueMicrotask(() => {
     if (!document.querySelector('dialog[open]')) openNoteSheet(linked, options)
@@ -138,13 +216,38 @@ function sectionHeading(text: string): HTMLElement {
 }
 
 interface FeedState {
+  allPosts: DisplayPost[]
+  visibleCount: number
+  freshKey: string
+  items: Map<string, CardState>
   posts: DisplayPost[]
   cards: HTMLElement[]
   options: RenderOptions
 }
+interface CardState { card: HTMLElement; post: DisplayPost; options: RenderOptions; signature: string }
+
+function patchPeople(card: HTMLElement, options: RenderOptions): void {
+  for (const link of card.querySelectorAll<HTMLAnchorElement>('a[data-person]')) {
+    const pubkey = link.dataset.person!
+    const label = authorLabel(pubkey, options.profiles?.get(pubkey)).text
+    const text = (link.dataset.prefix ?? '') + label
+    if (link.textContent !== text) link.replaceChildren(nameNode(pubkey, options, link.dataset.prefix ?? ''))
+    link.href = profileHref(pubkey, options)
+  }
+  for (const avatar of card.querySelectorAll<HTMLElement>('[data-avatar]')) {
+    const pubkey = avatar.dataset.avatar!
+    const signature = JSON.stringify(options.profiles?.get(pubkey) ?? null)
+    if (avatar.dataset.profileKey !== signature) avatar.replaceWith(renderAvatar(pubkey, options, avatar.className.replace(' post-avatar-fallback', '')))
+  }
+}
 
 /** The latest render of each feed container, so a late profile redraws the current cards. */
 const feedState = new WeakMap<HTMLElement, FeedState>()
+export function clearFeed(container: HTMLElement): void {
+  disposeTree(container)
+  container.replaceChildren()
+  feedState.delete(container)
+}
 
 /**
  * One browser lookup for people the feed shows without a profile (the library
@@ -177,9 +280,7 @@ async function lazyResolveProfiles(container: HTMLElement): Promise<void> {
   for (const i of postsToRedraw(state.posts, arrived)) {
     const old = state.cards[i]
     if (!old?.isConnected) continue
-    const fresh = renderPostCard(state.posts[i], state.options, old.classList.contains('note-top'))
-    old.replaceWith(fresh)
-    state.cards[i] = fresh
+    patchPeople(old, state.options)
   }
 }
 
@@ -210,6 +311,8 @@ function nameNode(pubkey: string, options: RenderOptions, prefix = ''): Node {
 function personLink(pubkey: string, options: RenderOptions, className: string, prefix = ''): HTMLAnchorElement {
   const a = document.createElement('a')
   a.className = className
+  a.dataset.person = pubkey
+  a.dataset.prefix = prefix
   a.href = profileHref(pubkey, options)
   a.target = '_blank'
   a.rel = 'noopener'
@@ -221,6 +324,8 @@ function personLink(pubkey: string, options: RenderOptions, className: string, p
 function renderAvatar(pubkey: string, options: RenderOptions, className: string): HTMLElement {
   const profile = options.profiles?.get(pubkey)
   const container = el('div', className)
+  container.dataset.avatar = pubkey
+  container.dataset.profileKey = JSON.stringify(profile ?? null)
   const link = document.createElement('a')
   link.href = profileHref(pubkey, options)
   link.target = '_blank'
@@ -416,11 +521,15 @@ function renderScore(post: DisplayPost, full = false): HTMLElement {
  *
  * Tapping the note (anywhere that is not a link or button) opens the detail sheet.
  */
-function renderPostCard(post: DisplayPost, options: RenderOptions, top = false): HTMLElement {
-  const card = el('article', top ? 'note note-top' : 'note')
-  card.tabIndex = 0
+function cardLabel(post: DisplayPost, options: RenderOptions): string {
   const name = authorLabel(post.author, options.profiles?.get(post.author)).text
-  card.setAttribute('aria-label', `Note by ${name}, ${post.defaultScore ? 'not ranked yet' : `relevance ${post.score.toFixed(1)}`}. Open details`)
+  return `Note by ${name}, ${post.defaultScore ? 'not ranked yet' : `relevance ${post.score.toFixed(1)}`}. Open details`
+}
+
+function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement {
+  const card = el('article', 'note')
+  card.tabIndex = 0
+  card.setAttribute('aria-label', cardLabel(post, options))
 
   card.appendChild(renderAvatar(post.author, options, 'post-avatar'))
 

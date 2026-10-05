@@ -9,6 +9,8 @@
  * the first user; a later stage puts the reply composer in the same sheet.
  */
 
+import { disposeTree } from './lifecycle.js'
+
 export interface SheetHandle {
   el: HTMLDialogElement
   /** Scrolling content area; append to it. */
@@ -74,6 +76,7 @@ export function openSheet(options: SheetOptions): SheetHandle {
   const finish = (): void => {
     if (closed) return
     closed = true
+    disposeTree(dialog)
     dialog.remove()
     document.body.classList.remove('sheet-open')
     if (open === handle) open = null
