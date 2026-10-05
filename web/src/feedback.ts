@@ -32,6 +32,8 @@ export interface FeedbackState {
   hidden: string[]
   muted: string[]
   saved: SavedNote[]
+  /** Rules changed here that the server has not confirmed yet (hosted). Older data: pending if it has rules. */
+  rulesPending?: boolean
 }
 
 const HIDDEN_MAX = 500
@@ -71,12 +73,14 @@ export function readFeedback(): FeedbackState {
   try {
     const parsed = JSON.parse(deviceStorage.getItem(k) ?? 'null') as Partial<FeedbackState> | null
     if (!parsed || parsed.v !== 1) return empty()
+    const rules = Array.isArray(parsed.rules) ? parsed.rules.filter((r) => (r?.kind === 'more' || r?.kind === 'less') && typeof r.excerpt === 'string') : []
     return {
       v: 1,
-      rules: Array.isArray(parsed.rules) ? parsed.rules.filter((r) => (r?.kind === 'more' || r?.kind === 'less') && typeof r.excerpt === 'string') : [],
+      rules,
       hidden: Array.isArray(parsed.hidden) ? parsed.hidden.filter((x) => typeof x === 'string') : [],
       muted: Array.isArray(parsed.muted) ? parsed.muted.filter((x) => typeof x === 'string') : [],
       saved: Array.isArray(parsed.saved) ? parsed.saved.filter((n) => typeof n?.id === 'string') : [],
+      rulesPending: typeof parsed.rulesPending === 'boolean' ? parsed.rulesPending : rules.length > 0,
     }
   } catch {
     return empty()
@@ -89,6 +93,7 @@ function write(next: FeedbackState, rulesChanged: boolean): void {
   next.hidden = next.hidden.slice(-HIDDEN_MAX)
   next.muted = next.muted.slice(-MUTED_MAX)
   next.saved = next.saved.slice(0, SAVED_MAX)
+  if (rulesChanged) next.rulesPending = true
   deviceStorage.setItem(k, JSON.stringify(next))
   if (rulesChanged) onRulesChanged(activeRules(next))
   for (const cb of listeners) cb()
@@ -145,21 +150,35 @@ export function addRule(kind: 'more' | 'less', note: { id: string; content: stri
 }
 
 /**
- * Reconcile with the rules the server ranks with. This device's rules win when it has any
- * (they are what Tune shows), and are sent if the server's differ; a new device takes the server's.
+ * Reconcile with the rules the server ranks with. Rules changed on this device that the server
+ * has not confirmed are sent; otherwise the server's list wins, so a rule removed on another
+ * device is not brought back from here.
  */
 export function adoptRules(rules: readonly FeedbackRule[]): void {
   const k = key()
   if (!k) return
-  const local = activeRules()
-  if (local.length > 0) {
-    if (JSON.stringify(local) !== JSON.stringify(rules.map(({ kind, excerpt }) => ({ kind, excerpt })))) onRulesChanged(local)
+  const s = readFeedback()
+  const server = rules.map(({ kind, excerpt }) => ({ kind, excerpt }))
+  const same = JSON.stringify(activeRules(s)) === JSON.stringify(server)
+  if (s.rulesPending) {
+    if (same) markRulesSynced(server)
+    else onRulesChanged(activeRules(s))
     return
   }
-  if (rules.length === 0) return
-  const s = readFeedback()
+  if (same) return
   s.rules = rules.map((r, i) => ({ kind: r.kind, excerpt: r.excerpt, noteId: `server-${i}`, at: 0 }))
+  s.rulesPending = false
   write(s, false)
+}
+
+/** The server stored these rules; nothing is pending if they are still what this device has. */
+export function markRulesSynced(rules: readonly FeedbackRule[]): void {
+  const k = key()
+  if (!k) return
+  const s = readFeedback()
+  if (!s.rulesPending || JSON.stringify(activeRules(s)) !== JSON.stringify(rules.map(({ kind, excerpt }) => ({ kind, excerpt })))) return
+  s.rulesPending = false
+  deviceStorage.setItem(k, JSON.stringify(s))
 }
 
 export function removeRule(noteId: string): () => void {

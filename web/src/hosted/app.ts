@@ -18,7 +18,7 @@ import { adoptSigner, forgetSigner, setActorProvider } from '../signer.js'
 import { renderFeed, clearFeed, aggregateBoosts, clientRenderOptions, profileLink } from '../render.js'
 import { attachLinkPreviews } from './previews.js'
 import { initPromptStarters } from '../prompt-starters.js'
-import { adoptRules, setFeedbackIdentity, setRulesSync } from '../feedback.js'
+import { adoptRules, markRulesSynced, setFeedbackIdentity, setRulesSync } from '../feedback.js'
 import { initFeedbackSection, refreshFeedbackSection } from '../feedback-ui.js'
 import { showToast } from '../toast.js'
 import { maybeShowFirstRankNote } from '../first-note.js'
@@ -481,7 +481,7 @@ function syncFeedbackRules(rules: Array<{ kind: 'more' | 'less'; excerpt: string
   const owner = userNpub
   feedbackTimer = window.setTimeout(() => {
     if (!owner || userNpub !== owner) return
-    putSettings({ feedback: rules }).catch((err) => {
+    putSettings({ feedback: rules }).then(() => { if (userNpub === owner) markRulesSynced(rules) }, (err) => {
       if (userNpub !== owner) return
       if (err instanceof ApiError && err.status === 401) return showLogin(describeError(err).message)
       showToast('Your feedback is kept here but could not reach the server, so it does not steer rankings yet.', {

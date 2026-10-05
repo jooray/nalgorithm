@@ -69,3 +69,32 @@ test('an undo reverses only its own action, for the identity that made it', asyn
   undoLater()
   assert.deepEqual(plain(m.readFeedback().rules.map((r) => r.noteId)), [post(5).id, post(1).id], 'a later rule survives an earlier undo')
 })
+
+test('rules sync: local changes are sent until confirmed, then the server list wins', async () => {
+  const { exports: m } = await setup()
+  m.setFeedbackIdentity(() => A)
+  const sent = []
+  m.setRulesSync((rules) => sent.push(plain(rules)))
+  m.addRule('more', post(1))
+  const mine = sent.at(-1)
+  m.adoptRules([])
+  assert.deepEqual(sent.at(-1), mine, 'an unconfirmed local rule is sent again, not dropped')
+  m.markRulesSynced(mine)
+  m.adoptRules([])
+  assert.equal(m.readFeedback().rules.length, 0, 'once confirmed, a removal made on another device sticks')
+  m.adoptRules([{ kind: 'less', excerpt: 'price talk' }])
+  assert.deepEqual(plain(m.activeRules()), [{ kind: 'less', excerpt: 'price talk' }], 'a new device takes the server list')
+})
+
+test('removing the last rule here is sent, not replaced by the server list', async () => {
+  const { exports: m } = await setup()
+  m.setFeedbackIdentity(() => A)
+  const sent = []
+  m.setRulesSync((rules) => sent.push(plain(rules)))
+  m.addRule('more', post(1))
+  m.markRulesSynced(sent.at(-1))
+  m.removeRule(post(1).id)
+  m.adoptRules([{ kind: 'more', excerpt: m.excerptOf(post(1).content) }])
+  assert.equal(m.readFeedback().rules.length, 0)
+  assert.deepEqual(sent.at(-1), [])
+})
