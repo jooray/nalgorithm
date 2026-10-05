@@ -2250,13 +2250,62 @@ dialog.sheet::backdrop {
   cursor: pointer;
 }
 
-.toast-dismiss { border: 0; background: none; color: inherit; font: inherit; min-height: 44px; padding: 0 8px; cursor: pointer; }
-.login-dialog { max-height: calc(100dvh - 32px); overflow-y: auto; margin: auto; }
-.post-menu-dropdown { min-width: min(250px, calc(100vw - 32px)); max-width: calc(100vw - 32px); }
-.note-actions { flex-wrap: wrap; }
-.new-pill { min-height: 44px; }
-.pill-anchor:has(.new-pill:not(.hidden)) { top: calc(env(safe-area-inset-top) + 80px); }
-@media (max-width: 360px) { .note-actions { margin-left: -56px; justify-content: space-between; } .sheet-body, .sheet-footer { padding-inline: 12px; } }
+.toast-dismiss {
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* The login dialog scrolls inside itself, so its actions stay reachable with a keyboard open or large text. */
+.login-dialog {
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  overflow-y: auto;
+}
+
+/* Menus never wider than the screen, and never taller: a long one scrolls. */
+.post-menu-dropdown {
+  min-width: min(250px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: min(70dvh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.note-actions {
+  flex-wrap: wrap;
+}
+
+.new-pill {
+  min-height: 44px;
+}
+
+/* One sticky stack: the new-notes pill sits below the mini player when it is showing, at the top otherwise. */
+.view:has(.mini:not(.hidden)) .pill-anchor:has(.new-pill:not(.hidden)) {
+  top: calc(env(safe-area-inset-top) + 80px);
+}
+
+@media (max-width: 360px) {
+  /* Narrow cards: the action row takes the full card width, under the avatar too. */
+  .note-actions {
+    margin-left: -56px;
+    justify-content: space-between;
+  }
+
+  .note-action,
+  .post-menu-btn {
+    width: 40px;
+  }
+
+  .sheet-body,
+  .sheet-footer {
+    padding-inline: 12px;
+  }
+}
 
 @keyframes toast-in {
   from {

@@ -175,7 +175,7 @@ export function renderFeed(
       const scoreKey = `${post.score}|${post.justification}|${post.defaultScore}`
       if (card.dataset.scoreKey !== scoreKey) { score?.replaceWith(renderScore(post)); card.dataset.scoreKey = scoreKey }
       patchPeople(card, old.options)
-      card.setAttribute('aria-label', cardLabel(post, old.options))
+      card.setAttribute('aria-label', cardLabel(post, old.options, post.id === topId))
       items.set(post.id, old)
     } else {
       if (old) disposeTree(old.card)
@@ -185,7 +185,12 @@ export function renderFeed(
       card.dataset.scoreKey = `${post.score}|${post.justification}|${post.defaultScore}`
       items.set(post.id, { card, post: postRef, options: optionRef, signature })
     }
-    card.classList.toggle('note-top', post.id === topId)
+    const top = post.id === topId
+    if (card.classList.contains('note-top') !== top) {
+      card.classList.toggle('note-top', top)
+      // The lime edge is visual only; the label says it too.
+      card.setAttribute('aria-label', cardLabel(post, items.get(post.id)!.options, top))
+    }
     cards.push(card)
     nodes.push(card)
   })
@@ -564,9 +569,9 @@ function renderScore(post: DisplayPost, full = false): HTMLElement {
  *
  * Tapping the note (anywhere that is not a link or button) opens the detail sheet.
  */
-function cardLabel(post: DisplayPost, options: RenderOptions): string {
+function cardLabel(post: DisplayPost, options: RenderOptions, top = false): string {
   const name = authorLabel(post.author, options.profiles?.get(post.author)).text
-  return `Note by ${name}, ${post.defaultScore ? 'not ranked yet' : `relevance ${post.score.toFixed(1)}`}. Open details`
+  return `Note by ${name}, ${post.defaultScore ? 'not ranked yet' : `relevance ${post.score.toFixed(1)}${top ? ', top match' : ''}`}. Open details`
 }
 
 function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement {
