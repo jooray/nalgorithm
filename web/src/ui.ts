@@ -73,7 +73,9 @@ export function initUI(
     const provider = selectProvider.value
     const draft = providerDraft(provider)
     inputApiBase.value = draft.apiBaseUrl
-    $<HTMLInputElement>('#input-api-key').value = ''
+    // Keys are never kept per provider; switching back to the saved provider brings its saved key back.
+    const saved = loadSettings()
+    $<HTMLInputElement>('#input-api-key').value = provider === saved.provider ? saved.apiKey : ''
     $<HTMLInputElement>('#input-model').value = draft.model
     $<HTMLInputElement>('#input-digest-model').value = draft.digestModel
     $<HTMLInputElement>('#input-learner-model').value = draft.learnerModel
@@ -243,6 +245,14 @@ export function initUI(
   // First run: nothing is set up, so start where the setup is.
   if (!settings.npub.trim()) showTab('tune')
   initTuneDrafts(() => loadSettings().npub || 'setup')
+  // Drafts belong to an identity: after a switch, edits go under (and restore from) the new one.
+  let draftIdentity = loadSettings().npub || 'setup'
+  document.addEventListener('nalgorithm:settings-saved', () => {
+    const now = loadSettings().npub || 'setup'
+    if (now === draftIdentity) return
+    draftIdentity = now
+    initTuneDrafts(() => now)
+  })
 
   return settings
 }

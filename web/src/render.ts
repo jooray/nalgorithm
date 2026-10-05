@@ -144,7 +144,20 @@ export function renderFeed(
     const keys = new Set(kept.map((post) => post.id))
     const added = ordered.filter((post) => !keys.has(post.id))
     const group = (list: DisplayPost[], isFresh: boolean): DisplayPost[] => list.filter((post) => freshIds.has(post.id) === isFresh)
-    ordered = [...group(kept, true), ...group(added, true), ...group(kept, false), ...group(added, false)]
+    if (options.feedOrder === 'best') {
+      // Nothing moves above the note being read; newly scored notes take their place by
+      // score below it rather than all going to the end, past the "Show next" cut.
+      const at = anchor ? kept.findIndex((post) => post.id === anchor.dataset.noteId) : -1
+      const tail = kept.slice(at + 1)
+      const merged: DisplayPost[] = []
+      for (let k = 0, a = 0; k < tail.length || a < added.length;) {
+        if (a < added.length && (k >= tail.length || added[a].score > tail[k].score)) merged.push(added[a++])
+        else merged.push(tail[k++])
+      }
+      ordered = [...kept.slice(0, at + 1), ...merged]
+    } else {
+      ordered = [...group(kept, true), ...group(added, true), ...group(kept, false), ...group(added, false)]
+    }
   }
   const linkedId = /\/note\/([0-9a-f]{64})$/i.exec(location.hash)?.[1]
   const count = Math.max(previous?.visibleCount ?? 50, linkedId ? ordered.findIndex((post) => post.id === linkedId) + 1 : 0)
@@ -892,11 +905,16 @@ function renderMenu(post: DisplayPost, options: RenderOptions, links: NoteLinks)
       e.stopPropagation()
       close()
       // A hide removes this card: keep keyboard focus nearby rather than at the top of the page.
+      // The neighbour is looked up afterwards: a mute can remove more cards than this one.
       const card = btn.closest<HTMLElement>('.note')
-      const next = (card?.nextElementSibling ?? card?.previousElementSibling) as HTMLElement | null
+      const list = card?.parentElement
+      const at = list ? [...list.querySelectorAll(':scope > .note')].indexOf(card!) : -1
       run()
-      if (btn.isConnected) btn.focus()
-      else (next?.isConnected ? next : document.getElementById('status'))?.focus()
+      if (btn.isConnected) return btn.focus()
+      const left = list?.isConnected ? [...list.querySelectorAll<HTMLElement>(':scope > .note')] : []
+      const target = left[Math.min(Math.max(at, 0), left.length - 1)] ?? document.querySelector<HTMLElement>('.view:not(.hidden) h1')
+      if (target && target.tabIndex < 0 && !target.hasAttribute('tabindex')) target.tabIndex = -1
+      target?.focus()
     })
     dropdown.appendChild(item)
     return item
@@ -907,6 +925,7 @@ function renderMenu(post: DisplayPost, options: RenderOptions, links: NoteLinks)
     else showToast('This note has no text to learn from.', { tone: 'error' })
   }
   const heading = el('p', 'post-menu-label')
+  heading.setAttribute('role', 'presentation')
   heading.textContent = 'Private, never published'
   dropdown.appendChild(heading)
   addPrivate('More like this', () => undoable('Noted privately: more like this. It steers future rankings.', addRule('more', post)))

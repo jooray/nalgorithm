@@ -28,6 +28,14 @@ function dismiss(): void {
   el.remove()
 }
 
+function show(el: HTMLElement): void {
+  try {
+    if (!el.matches(':popover-open')) el.showPopover()
+  } catch {
+    // no popover support: it still shows, just beneath any open sheet
+  }
+}
+
 export function showToast(text: string, options: ToastOptions = {}): void {
   dismiss()
   const el = document.createElement('div')
@@ -59,12 +67,16 @@ export function showToast(text: string, options: ToastOptions = {}): void {
   el.appendChild(close)
 
   el.setAttribute('popover', 'manual')
-  document.body.appendChild(el)
-  try {
-    el.showPopover()
-  } catch {
-    // no popover support: it still shows, just beneath any open sheet
-  }
+  // Everything outside an open modal sheet is inert, so Undo or Retry would show but not
+  // respond: the toast goes inside the sheet, and back to the page when the sheet closes.
+  const sheet = [...document.querySelectorAll<HTMLDialogElement>('dialog[open]')].filter((d) => d.matches(':modal')).pop()
+  ;(sheet ?? document.body).appendChild(el)
+  show(el)
+  sheet?.addEventListener('close', () => {
+    if (current?.el !== el) return
+    document.body.appendChild(el)
+    show(el)
+  }, { once: true })
   const ms = options.ms ?? (options.action ? 0 : 4500)
   current = { el, timer: ms > 0 ? window.setTimeout(dismiss, ms) : undefined }
 }

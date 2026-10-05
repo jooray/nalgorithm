@@ -14,12 +14,14 @@ export async function saveOfflineAudio(owner: string, id: string, createdAt: num
   if (blob.size > AUDIO_ITEM_MAX_BYTES) throw new Error('Audio is too large for the offline cache. Download the MP3 instead.')
   const persisted = await putRecord(keyOf(owner,id), { blob, createdAt, owner, id })
   const records = (await listRecords<SavedAudio>('audio:')).sort((a,b)=>b.value.createdAt-a.value.createdAt)
-  let count=0,bytes=0
+  // Only the reader in front of the device keeps cached audio (another identity's or mode's goes).
+  let count=0,bytes=0,kept=false
   for (const record of records) {
     if (record.value.owner !== owner || count >= AUDIO_COUNT || bytes + record.value.blob.size > AUDIO_MAX_BYTES) await deleteRecord(record.key)
-    else { count++; bytes += record.value.blob.size }
+    else { count++; bytes += record.value.blob.size; if (record.key === keyOf(owner,id)) kept = true }
   }
-  return persisted
+  // Audio for an older digest than the three cached ones is evicted at once: not saved.
+  return persisted && kept
 }
 export function fetchAudioBlob(owner: string, id: string, url: string, maxBytes = AUDIO_ITEM_MAX_BYTES): Promise<Blob> {
   const key=keyOf(owner,id); const existing=pending.get(key); if(existing)return existing

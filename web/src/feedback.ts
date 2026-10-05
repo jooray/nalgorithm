@@ -112,15 +112,36 @@ export function excerptOf(content: string): string {
 }
 
 // ─── actions; each returns its own undo ──────────────────────────────────────
+//
+// An undo reverses only its own action, for the identity it was made under: an Undo still
+// on screen after a sign-out or an identity change does nothing, and undoing a repeated
+// hide or mute does not lift the earlier, deliberate one.
+
+const noop = (): void => {}
+
+/** Runs `undo` only while the identity that made the change is still the current one. */
+function sameIdentity(undo: () => void): () => void {
+  const made = key()
+  return () => { if (made && key() === made) undo() }
+}
+
+function insertAt<T>(list: T[], index: number, item: T): T[] {
+  return [...list.slice(0, index), item, ...list.slice(index)]
+}
 
 export function addRule(kind: 'more' | 'less', note: { id: string; content: string }): (() => void) | null {
   const excerpt = excerptOf(note.content)
   if (!excerpt) return null
   const before = readFeedback().rules
+  const index = before.findIndex((r) => r.noteId === note.id)
+  const prior = index >= 0 ? before[index] : undefined
   update((s) => {
     s.rules = [{ kind, excerpt, noteId: note.id, at: Date.now() }, ...s.rules.filter((r) => r.noteId !== note.id)]
   }, true)
-  return () => update((s) => { s.rules = before }, true)
+  return sameIdentity(() => update((s) => {
+    s.rules = s.rules.filter((r) => r.noteId !== note.id)
+    if (prior) s.rules = insertAt(s.rules, index, prior)
+  }, true))
 }
 
 /**
@@ -143,24 +164,31 @@ export function adoptRules(rules: readonly FeedbackRule[]): void {
 
 export function removeRule(noteId: string): () => void {
   const before = readFeedback().rules
+  const index = before.findIndex((r) => r.noteId === noteId)
+  if (index < 0) return noop
+  const removed = before[index]
   update((s) => { s.rules = s.rules.filter((r) => r.noteId !== noteId) }, true)
-  return () => update((s) => { s.rules = before }, true)
+  return sameIdentity(() => update((s) => {
+    if (!s.rules.some((r) => r.noteId === noteId)) s.rules = insertAt(s.rules, index, removed)
+  }, true))
 }
 
 export function hideNote(id: string): () => void {
-  update((s) => { if (!s.hidden.includes(id)) s.hidden.push(id) })
-  return () => update((s) => { s.hidden = s.hidden.filter((x) => x !== id) })
+  if (readFeedback().hidden.includes(id)) return noop
+  update((s) => { s.hidden.push(id) })
+  return sameIdentity(() => update((s) => { s.hidden = s.hidden.filter((x) => x !== id) }))
 }
 
 export function showHiddenNotes(): () => void {
   const before = readFeedback().hidden
   update((s) => { s.hidden = [] })
-  return () => update((s) => { s.hidden = before })
+  return sameIdentity(() => update((s) => { s.hidden = [...before, ...s.hidden.filter((x) => !before.includes(x))] }))
 }
 
 export function muteAuthor(pubkey: string): () => void {
-  update((s) => { if (!s.muted.includes(pubkey)) s.muted.push(pubkey) })
-  return () => unmuteAuthor(pubkey)
+  if (readFeedback().muted.includes(pubkey)) return noop
+  update((s) => { s.muted.push(pubkey) })
+  return sameIdentity(() => unmuteAuthor(pubkey))
 }
 
 export function unmuteAuthor(pubkey: string): void {
@@ -172,10 +200,11 @@ export function isSaved(id: string): boolean {
 }
 
 export function saveNote(note: { id: string; author: string; content: string; createdAt: number }): () => void {
+  if (isSaved(note.id)) return noop
   update((s) => {
     s.saved = [{ id: note.id, author: note.author, content: note.content, createdAt: note.createdAt, savedAt: Date.now() }, ...s.saved.filter((n) => n.id !== note.id)]
   })
-  return () => unsaveNote(note.id)
+  return sameIdentity(() => unsaveNote(note.id))
 }
 
 export function unsaveNote(id: string): void {

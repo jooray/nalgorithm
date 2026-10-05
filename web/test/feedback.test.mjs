@@ -43,3 +43,29 @@ test('more/less rules are excerpts, one per note, newest first, and reach the ra
   undo()
   assert.deepEqual(plain(m.activeRules().map((r) => r.kind)), ['less'], 'undo restores the rules as they were before that action')
 })
+
+test('an undo reverses only its own action, for the identity that made it', async () => {
+  const { exports: m } = await setup()
+  let who = A
+  m.setFeedbackIdentity(() => who)
+  const undoRule = m.addRule('more', post(1))
+  who = B
+  m.addRule('less', post(2))
+  undoRule()
+  assert.deepEqual(plain(m.readFeedback().rules.map((r) => r.kind)), ['less'], 'an Undo left on screen cannot rewrite another identity')
+  who = A
+  assert.equal(m.readFeedback().rules.length, 1, 'and it did nothing for the first identity either')
+
+  m.muteAuthor(B)
+  const repeated = m.muteAuthor(B)
+  repeated()
+  assert.deepEqual(plain(m.readFeedback().muted), [B], 'undoing a repeated mute keeps the deliberate one')
+  m.hideNote(post(3).id)
+  m.hideNote(post(3).id)()
+  assert.deepEqual(plain(m.readFeedback().hidden), [post(3).id])
+
+  const undoLater = m.addRule('less', post(4))
+  m.addRule('more', post(5))
+  undoLater()
+  assert.deepEqual(plain(m.readFeedback().rules.map((r) => r.noteId)), [post(5).id, post(1).id], 'a later rule survives an earlier undo')
+})

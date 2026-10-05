@@ -78,11 +78,21 @@ export function initShell(): void {
   const restore = (): void => {
     const hash = location.hash.slice(1).split('/')[0]
     const stored = deviceStorage.getItem('nalgorithm_last_tab')
-    const tab = hash || stored
+    // Only tab names choose a tab; any other fragment keeps the remembered one.
+    const tab = hash === 'feed' || hash === 'tune' || hash === 'digest' ? hash : stored
     showTab(tab === 'tune' || tab === 'digest' ? tab : 'feed', false)
   }
   restore()
   window.addEventListener('popstate', restore)
+
+  // The skip link moves focus into the current view without touching the URL or the tab.
+  document.querySelector('.skip-link')?.addEventListener('click', (e) => {
+    e.preventDefault()
+    const target = document.querySelector<HTMLElement>(`.view[data-view="${active}"] h1`) ?? document.getElementById('views')
+    if (!target) return
+    target.tabIndex = -1
+    target.focus()
+  })
 
   // Offline notice.
   const banner = document.getElementById('offline-banner')!

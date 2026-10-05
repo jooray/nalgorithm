@@ -21,7 +21,7 @@ import {
 import { icon } from './icons.js'
 import { DigestPlayer, safeStorage, type PlayerState } from './player.js'
 import { knownProfiles, loadProfiles, rememberSnapshots } from './profiles.js'
-import { renderFeed, type RenderOptions } from './render.js'
+import { clearFeed, renderFeed, type RenderOptions } from './render.js'
 import { clockLabel, dayLabel } from './time.js'
 import { Waveform } from './waveform.js'
 import { safeAudioUrl } from './hosted/logic.js'
@@ -766,12 +766,15 @@ function renderShowNotes(): void {
   // Notes
   const list = $('shownotes-notes')
   if (d.notes === undefined) {
-    list.replaceChildren(h('p', 'state-note', 'Loading the show notes…'))
+    // The list is rendered as a feed: dispose its cards and state before replacing them.
+    clearFeed(list)
+    list.append(h('p', 'state-note', 'Loading the show notes…'))
     void fetchFull(d)
     return
   }
   if (d.notes.length === 0) {
-    list.replaceChildren(h('p', 'state-note', 'This digest did not record the notes it was written from.'))
+    clearFeed(list)
+    list.append(h('p', 'state-note', 'This digest did not record the notes it was written from.'))
     return
   }
   drawNotes(d)
@@ -885,6 +888,7 @@ async function downloadAudio(): Promise<void> {
     link.href = url; link.download = `nalgorithm-${new Date(d.createdAt * 1000).toISOString().slice(0, 10)}-${d.id}.mp3`; link.click()
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
     $('player-hint').textContent = 'MP3 download started. Keep the file for reliable offline playback.'
+    $('player-hint').classList.remove('is-error')
   } catch (err) { $('player-hint').textContent = `${(err as Error).message} Try online again.`; $('player-hint').classList.add('is-error') }
   finally { finish(); button.disabled = false }
 }

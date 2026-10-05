@@ -71,3 +71,13 @@ test('images keep their proportions and description, and data saver requests not
   placeholder.click()
   assert.equal(container.querySelectorAll('.post-image img').length,1)
 })
+
+test('best order while reading: nothing moves above the read note, new scores are placed below it', async () => {
+  const {exports:r,document,window}=await domModule('src/render.ts');const container=document.getElementById('feed-list')
+  window.HTMLElement.prototype.getBoundingClientRect ??= function () { return { top: 0, bottom: 10 } }
+  r.renderFeed([post(1,{score:9}),post(2,{score:8}),post(3,{score:7})],container,{detail:false,feedOrder:'best'})
+  window.scrollY=200
+  r.renderFeed([post(1,{score:9}),post(4,{score:8.5}),post(3,{score:7}),post(2,{score:6})],container,{detail:false,feedOrder:'best'})
+  const ids=[...container.querySelectorAll('.note')].map((n)=>n.dataset.noteId)
+  assert.deepEqual(ids,[post(1).id,post(4).id,post(2).id,post(3).id])
+})
