@@ -22,6 +22,7 @@ import { toNpub } from './nostr-login.js'
 import { setupProblem } from './settings-validation.js'
 import { chatCompletion } from 'nalgorithm'
 import { initTuneDrafts } from './drafts.js'
+import { initPromptStarters } from './prompt-starters.js'
 import {
   fetchModels,
   loadCachedModels,
@@ -52,8 +53,14 @@ export function initUI(
   populateFields(settings)
 
   $<HTMLButtonElement>('#btn-refresh').innerHTML = refreshButtonHtml()
-  $('#btn-go-tune').addEventListener('click', () => showTab('tune'))
+  $('#btn-go-tune').addEventListener('click', () => {
+    showTab('tune')
+    // Straight to the first missing essential.
+    const next = setupSteps(loadSettings()).find((step) => step.state === 'next')
+    if (next) document.getElementById(next.field)?.focus()
+  })
   initPromptCount('#input-user-prompt', '#input-user-prompt-count')
+  initPromptStarters($<HTMLTextAreaElement>('#input-user-prompt'), $('#input-user-prompt-starters'))
   void populateSpeechVoices()
 
   // Provider change updates API base URL
@@ -292,13 +299,49 @@ export function showEmptyState(show: boolean, configured = false, message?: stri
   empty.style.display = show ? 'block' : 'none'
   list.style.display = show ? 'none' : 'flex'
   if (!show) return
-  $('#feed-empty-title').textContent = configured ? 'Nothing to rank yet' : 'Set up your feed'
-  $('#feed-empty-text').textContent =
-    message ??
-    (configured
-      ? 'Press Refresh to load the people you follow and rank their posts.'
-      : 'Connect your Nostr identity and add a model key in Tune. Everything runs in your browser; your key and settings stay on this device.')
-  $('#btn-go-tune').style.display = configured ? 'none' : ''
+  $('#feed-empty-title').textContent = configured ? 'Nothing to rank yet' : 'Three things before I can rank'
+  const text = $('#feed-empty-text')
+  const steps = $('#feed-empty-steps')
+  steps.replaceChildren()
+  steps.hidden = configured || message !== undefined
+  text.textContent = message ?? (configured ? 'Press Refresh to load the people you follow and rank their posts.' : 'Everything runs in your browser; your key and settings stay on this device.')
+  if (!steps.hidden) {
+    for (const step of setupSteps(loadSettings())) {
+      const li = document.createElement('li')
+      li.className = step.state === 'done' ? 'is-done' : step.state === 'next' ? 'is-next' : ''
+      li.textContent = step.label
+      if (step.state === 'done') li.setAttribute('aria-label', `${step.label}: done`)
+      if (step.state === 'next') li.setAttribute('aria-current', 'step')
+      steps.appendChild(li)
+    }
+  }
+  const go = $<HTMLButtonElement>('#btn-go-tune')
+  go.style.display = configured ? 'none' : ''
+  go.textContent = 'Finish setup'
+}
+
+/** The essentials of a first run, in order, and which one is next. */
+export function setupSteps(s: AppSettings): Array<{ label: string; field: string; state: 'done' | 'next' | 'todo' }> {
+  // Each essential judged on its own: the other two filled with placeholders that pass.
+  const fieldOf = (patch: Partial<AppSettings>): string | null => setupProblem({ ...s, ...patch })?.field ?? null
+  const npubOk = fieldOf({}) !== 'input-npub'
+  const connectionProblem = fieldOf({ npub: '0'.repeat(64), userPrompt: 'x' })
+  const groups = [
+    { label: 'Your public key (npub)', field: 'input-npub', done: npubOk },
+    { label: 'What you care about, in your own words', field: 'input-user-prompt', done: s.userPrompt.trim().length > 0 },
+    {
+      label: 'A model connection',
+      field: connectionProblem && ['input-api-key', 'input-model', 'select-scorer'].includes(connectionProblem) ? connectionProblem : 'input-api-base',
+      done: !connectionProblem || !['input-api-base', 'input-api-key', 'input-model', 'select-scorer'].includes(connectionProblem),
+    },
+  ]
+  let nextGiven = false
+  return groups.map((g) => {
+    if (g.done) return { label: g.label, field: g.field, state: 'done' as const }
+    const state = nextGiven ? ('todo' as const) : ('next' as const)
+    nextGiven = true
+    return { label: g.label, field: g.field, state }
+  })
 }
 
 /**

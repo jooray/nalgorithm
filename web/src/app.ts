@@ -157,7 +157,9 @@ async function followIdentity(settings: ReturnType<typeof loadSettings>): Promis
   paintAge()
   setDigests(await loadLocalDigests(settings.npub))
   const stored = await showStoredFeed(settings)
-  if (!stored && !validateSettings(settings) && !settings.autoRefresh) showEmptyState(true, true)
+  if (stored) return
+  if (validateSettings(settings)) showEmptyState(true, false)
+  else if (!settings.autoRefresh) showEmptyState(true, true)
 }
 
 /**

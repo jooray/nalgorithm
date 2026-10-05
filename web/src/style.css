@@ -1145,6 +1145,55 @@ select:focus {
   color: var(--text-2);
 }
 
+.setup-steps {
+  margin: 12px 0 4px;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.setup-steps li {
+  position: relative;
+  padding: 8px 0 8px 36px;
+  color: var(--text-2);
+  counter-increment: step;
+}
+
+.setup-steps li::before {
+  content: counter(step);
+  position: absolute;
+  top: 7px;
+  left: 0;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1.5px solid var(--line);
+  border-radius: 50%;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.setup-steps li.is-next {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.setup-steps li.is-next::before {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.setup-steps li.is-done {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-3);
+}
+
+.setup-steps li.is-done::before {
+  content: '✓';
+}
+
 .state-card p:last-child {
   margin-bottom: 0;
 }
@@ -2248,6 +2297,12 @@ dialog.sheet::backdrop {
   margin-top: 0;
 }
 
+.choice-note {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  color: var(--text-2);
+}
+
 #hosted-login .btn-full {
   margin-top: 28px;
 }
@@ -2927,4 +2982,28 @@ body[data-mode='hosted']:has(#hosted-startup:not(.hidden)) #views::before { disp
     opacity: 0.55;
     animation: none;
   }
+}
+
+/* Editable starters under the interests field. */
+.starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+
+.starter {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.starter:hover {
+  color: var(--text);
 }

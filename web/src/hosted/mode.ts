@@ -14,7 +14,11 @@ const MODE_KEY = 'nalgorithm_mode'
 
 export function getStoredMode(): string | null {
   const chosen = new URL(location.href).searchParams.get('mode')
-  if (chosen === 'hosted' || chosen === 'byok') return chosen
+  // A mode named in the link (the landing page's "Start the free trial" / "Use my own key") is the choice.
+  if (chosen === 'hosted' || chosen === 'byok') {
+    setStoredMode(chosen)
+    return chosen
+  }
   try {
     return localStorage.getItem(MODE_KEY)
   } catch {

@@ -17,6 +17,7 @@ import { collectPostPubkeys, pubkeyToHex, type ProfileData, type ScoredPost } fr
 import { adoptSigner, forgetSigner, setActorProvider } from '../signer.js'
 import { renderFeed, clearFeed, aggregateBoosts, clientRenderOptions } from '../render.js'
 import { attachLinkPreviews } from './previews.js'
+import { initPromptStarters } from '../prompt-starters.js'
 import { previewsEnabled } from './previews-logic.js'
 import { loadSettings, saveSettings } from '../settings.js'
 import { openHostedLoginDialog } from '../login-ui.js'
@@ -181,6 +182,7 @@ export function initHosted(): void {
   openSettingsPanel = () => showTab('tune')
   $('#btn-hosted-save').addEventListener('click', () => void saveSettingsForm(closeSettings))
   $<HTMLTextAreaElement>('#hosted-prompt').addEventListener('input', updatePromptCount)
+  initPromptStarters($<HTMLTextAreaElement>('#hosted-prompt'), $('#hosted-prompt-starters'))
   initClientPicker()
 
   // Account
