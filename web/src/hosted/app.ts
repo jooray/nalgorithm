@@ -21,6 +21,7 @@ import { initPromptStarters } from '../prompt-starters.js'
 import { adoptRules, setFeedbackIdentity, setRulesSync } from '../feedback.js'
 import { initFeedbackSection, refreshFeedbackSection } from '../feedback-ui.js'
 import { showToast } from '../toast.js'
+import { maybeShowFirstRankNote } from '../first-note.js'
 import { previewsEnabled } from './previews-logic.js'
 import { loadSettings, saveSettings } from '../settings.js'
 import { openHostedLoginDialog } from '../login-ui.js'
@@ -348,6 +349,7 @@ function showLogin(message = ''): void {
   paintedNpub = null
   $<HTMLTextAreaElement>('#hosted-learned').value = ''
   refreshFeedbackSection()
+  show('#first-rank-note', false)
   setStatus('')
   setLoginStatus(message, Boolean(message))
 }
@@ -765,6 +767,7 @@ function drawFeed(feed: ShownFeed, fresh: string[]): void {
     linkPreviews: linkPreviewsOn ? attachLinkPreviews : undefined,
   })
   shownIds = posts.map((p) => p.id)
+  if (userNpub) maybeShowFirstRankNote(userNpub, display.filter((p) => !p.defaultScore).length)
   setStatus(coverageText({ shown: display.length, ranked: Math.max(feed.fetched ?? 0, posts.length), hoursBack: feed.hoursBack, order: settings.feedOrder }))
 }
 

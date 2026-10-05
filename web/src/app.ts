@@ -73,6 +73,7 @@ import { APP_VERSION } from './version-check.js'
 import { learnIncrementally, activeLearningResult, resetLearned } from './learning.js'
 import { activeRules, setFeedbackIdentity } from './feedback.js'
 import { initFeedbackSection } from './feedback-ui.js'
+import { maybeShowFirstRankNote } from './first-note.js'
 
 import { initVersionCheck, setUpdateBlocked } from './version-check.js'
 
@@ -327,6 +328,7 @@ function renderCurrent(settings: ReturnType<typeof loadSettings>): void {
     ...clientRenderOptions(settings, settings.relays),
     lazyProfileRelays: settings.relays,
   })
+  maybeShowFirstRankNote(settings.npub, display.filter((p) => !p.defaultScore).length)
 }
 
 /** What is on screen is now a finished ranking: the next one is compared with it. */

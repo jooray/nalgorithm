@@ -3138,3 +3138,16 @@ body[data-mode='hosted']:has(#hosted-startup:not(.hidden)) #views::before { disp
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.first-note {
+  margin: 4px var(--gutter) 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text-2);
+}
+
+.first-note strong {
+  color: var(--text);
+}
