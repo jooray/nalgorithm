@@ -44,12 +44,19 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
   const run: FeedRunner = async (npub, settings, store, signal) => {
     const fetcher = createFetcher({ relays: config.relays, signal })
     let enrichment: Promise<unknown> = Promise.resolve()
+    // One line per run for the operator: phase times and counts, never content or the full key.
+    const started = Date.now()
+    const phases: string[] = []
+    const lap = (() => { let at = started; return (label: string): void => { const now = Date.now(); phases.push(`${label} ${((now - at) / 1000).toFixed(1)}s`); at = now } })()
+    const report = (detail: string): void => log.info(`feed ${npub.slice(0, 8)}: ${phases.join(', ')}; ${detail}; total ${((Date.now() - started) / 1000).toFixed(1)}s`)
     try {
       const follows = await fetcher.getFollows(npub)
-      if (follows.length === 0) return { posts: [], profiles: {}, fetched: 0 }
+      lap(`${follows.length} follows`)
+      if (follows.length === 0) { report('no follows'); return { posts: [], profiles: {}, fetched: 0 } }
 
       const posts = await fetcher.getPosts(follows, { hoursBack: settings.hoursBack, maxPosts: MAX_POSTS })
-      if (posts.length === 0) return { posts: [], profiles: {}, fetched: 0 }
+      lap(`${posts.length} posts`)
+      if (posts.length === 0) { report('no posts'); return { posts: [], profiles: {}, fetched: 0 } }
 
       const profiles = new Map<string, ProfileData>()
       enrichment = loadFeedProfiles(fetcher, posts, undefined, db).then((found) => {
@@ -83,6 +90,8 @@ export function createFeedRunner(config: ServerConfig, log: PipelineLogger, db?:
         modelLabel: config.venice.scoringModel,
       })
 
+      lap('scoring')
+      report(`${scored.filter((p) => p.defaultScore).length} unranked`)
       return {
         posts: sortByRelevance(scored),
         profiles: Object.fromEntries(profiles),

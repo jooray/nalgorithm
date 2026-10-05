@@ -163,8 +163,16 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
   let notes: DigestSourceNote[] = []
   let audioUrl: string | null = null
   let durationSeconds: number | null = null
+  // Phase times for the operator's log; never content.
+  const marks: string[] = []
+  let at = Date.now()
+  const lap = (label: string): void => {
+    marks.push(`${label} ${((Date.now() - at) / 1000).toFixed(1)}s`)
+    at = Date.now()
+  }
   try {
     const feed = await deps.feed(npub, settings, store, opts.signal)
+    lap('feed')
     if (feed.posts.length === 0) return { status: 'no_posts' }
 
     const top = selectDigestPosts(feed.posts, settings.topN)
@@ -188,6 +196,7 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
       },
       log,
     })
+    lap('writing')
 
     try {
       opts.signal?.throwIfAborted()
@@ -211,6 +220,8 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
     return { status: 'failed', detail: (err as Error).message }
   }
   opts.signal?.throwIfAborted()
+  lap(audioUrl ? 'speech and upload' : 'no audio')
+  log.info(`digest ${npub.slice(0, 8)}: ${marks.join(', ')}; ${notes.length} notes, ${text.split(/\s+/).length} words`)
 
   const digestId = (
     await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status, notes, duration_s) VALUES (?, ?, ?, ?, ?, ?, ?)', [npub, now, text, audioUrl, 'delivery_pending', serializeNotes(notes), durationSeconds])
