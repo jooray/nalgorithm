@@ -115,6 +115,9 @@ h2 { margin: 0 0 .5rem; font-size: clamp(1.8rem, 4.5vw, 3rem); line-height: 1.05
 .big { font-size: clamp(2rem, 6vw, 3.2rem); font-weight: 800; letter-spacing: -.03em; line-height: 1.05; margin: .5rem 0; }
 .price ul { padding-left: 1.1rem; margin: .75rem 0 0; color: var(--muted); }
 .price li { margin: .3rem 0; }
+.bundle { margin-top: 1rem; border-radius: 24px; padding: 1.25rem 1.5rem; border: 1px dashed var(--line); background: var(--surface); }
+.bundle h3 { margin: 0 0 .4rem; font-size: 1.15rem; }
+.bundle p { margin: .3rem 0 0; color: var(--muted); }
 .fine { color: var(--muted); font-size: .92rem; margin-top: 1rem; }
 
 .final { margin-top: clamp(2.5rem, 7vw, 5rem); text-align: center; padding: clamp(2rem, 6vw, 4rem) 1rem; border-radius: 28px; background: var(--violet); color: #fff; }
@@ -199,7 +202,6 @@ footer a { text-decoration-color: var(--line); }
             <li>No API key: the server does the ranking and voices your digest.</li>
             <li>Pay any amount over Lightning, credited pro rata: 5,000 sats is 15 days, minimum 1,000.</li>
             <li>Pay during your trial and the unused days are kept.</li>
-            <li>A bundle covering all of the author's Nostr apps is 25,000 sats.</li>
           </ul>
           <p style="margin-top:1.25rem"><a class="btn btn-accent" href="app/?mode=hosted">Start the free trial</a></p>
         </div>
@@ -215,6 +217,11 @@ footer a { text-decoration-color: var(--line); }
           </ul>
           <p style="margin-top:1.25rem"><a class="btn btn-ghost" href="app/?mode=byok">Use my own key</a></p>
         </div>
+      </div>
+      <div class="bundle">
+        <h3>All-access: 25,000 sats per 30 days</h3>
+        <p>One payment covers hosted nalgorithm, the AI writing in <a href="https://emanator.cypherpunk.today">Emanator</a> (a Nostr post scheduler) and any paid app its author adds later. Days you already paid for on either app are kept.</p>
+        <p>Today the two separately cost 20,000 sats, so the bundle is only worth it if you want what comes next.</p>
       </div>
       <p class="fine">If billing is ever unreachable, the free features keep working.</p>
     </section>
