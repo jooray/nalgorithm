@@ -9,3 +9,7 @@ test('keyless local model is supported, remote models need credentials', () => {
 test('invalid identity, bounds and unsafe endpoints fail before persistence', () => {
   for (const patch of [{ npub: 'nsec1private' }, { batchSize: -1 }, { hoursBack: 99999 }, { concurrency: 999 }, { digestTopN: -5 }, { batchSize: 5.5 }, { apiBaseUrl: 'javascript:bad' }, { apiBaseUrl: 'http://remote.example/v1' }, { relays: ['bad'] }]) assert.notEqual(setupProblem({ ...valid, ...patch }), null)
 })
+test('local endpoints are the ones the CSP allows', () => {
+  assert.equal(setupProblem({ ...valid, apiBaseUrl: 'http://127.0.0.1:11434/v1' }), null)
+  assert.equal(setupProblem({ ...valid, apiBaseUrl: 'http://[::1]:11434/v1' }).field, 'input-api-base')
+})
