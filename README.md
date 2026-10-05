@@ -18,6 +18,8 @@ I write about building things on [my blog](https://juraj.bednar.io/en/blog-en/).
 
 **Live app:** https://nalgorithm.cypherpunk.today/app/ (about it: https://nalgorithm.cypherpunk.today/)
 
+**On Nostr:** [nostr:nprofile1qqsxmw683gykp784cx9gqx6hm9ehzxc4gavgm3rd9tmln8z7f6hn4uqfq4h7z](nostr:nprofile1qqsxmw683gykp784cx9gqx6hm9ehzxc4gavgm3rd9tmln8z7f6hn4uqfq4h7z) ([view on njump.me](https://njump.me/nprofile1qqsxmw683gykp784cx9gqx6hm9ehzxc4gavgm3rd9tmln8z7f6hn4uqfq4h7z))
+
 ## How it works
 
 You write a short profile describing your interests ("I like cypherpunk culture, Bitcoin, cats, thoughtful longform writing. I don't care about price speculation or GM posts"). The app sends batches of posts to your chosen LLM along with this profile, and each post gets a 0-10 relevance score.
