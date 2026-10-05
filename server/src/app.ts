@@ -8,6 +8,7 @@ import { BillingUnavailable } from './billing-client.js'
 import { createStore } from './db.js'
 import type { Db } from './db.js'
 import { DigestRunning, digestJobStatus } from './digest-jobs.js'
+import { deleteUserData } from './commands.js'
 import { parseNotes } from './digest-notes.js'
 import { ShuttingDown } from './drain.js'
 import type { JobTracker } from './drain.js'
@@ -241,9 +242,8 @@ export function createApp(deps: AppDeps) {
       if (running.has(npub) || (await digestJobStatus(db, npub, nowSec())).running) {
         throw new HttpError(409, 'a ranking or digest is running; try again when it has finished', { code: 'busy' })
       }
-      for (const table of ['settings', 'learned', 'scores', 'schedules', 'digests', 'deliveries', 'peers', 'digest_jobs', 'feed_snapshots', 'pipeline_jobs', 'dm_outbox', 'sessions', 'accounts']) {
-        await db.run(`DELETE FROM ${table} WHERE npub = ?`, [npub])
-      }
+      // The same erasure as the bot's "delete my data", in one transaction.
+      await deleteUserData(db, npub)
       billing.forget(npub)
       log.info(`deleted hosted data for ${npub.slice(0, 8)}`)
       return send(res, 200, { ok: true }, { 'Set-Cookie': cookie('', 0) })

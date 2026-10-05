@@ -16,7 +16,7 @@ A Nostr relevance feed. Fetches posts from your follows and ranks them by what y
 I write about building things on [my blog](https://juraj.bednar.io/en/blog-en/). I also wrote a cypherpunk novel, [Tamers of Entropy](https://tamersofentropy.net/), and there is a [trailer](https://tamersofentropy.net/#trailer).
 <!-- jooray-links:end -->
 
-**Live demo:** https://cypherpunk.today/nalgorithm/
+**Live app:** https://nalgorithm.cypherpunk.today/app/ (about it: https://nalgorithm.cypherpunk.today/)
 
 ## How it works
 
@@ -24,7 +24,9 @@ You write a short profile describing your interests ("I like cypherpunk culture,
 
 There's also a "learned prompt" that gets built automatically from your Nostr likes (kind 7 reactions). You keep using your regular Nostr client, like the posts you enjoy, and nalgorithm picks up on those patterns. The learned prompt evolves incrementally -- each run only looks at likes since the last run and refines the existing prompt, rather than regenerating from scratch. It only affects future rankings; already-scored posts keep their scores.
 
-Scores are cached locally (localStorage in the web app, a JSON file for the CLI), so re-running only scores posts the LLM hasn't seen before. No wasted tokens.
+Scores are cached locally (IndexedDB in the web app, a JSON file for the CLI), so re-running only scores posts the LLM hasn't seen before. No wasted tokens.
+
+You can also steer it privately from any note's ••• menu: **More like this**, **Less like this**, **Hide this note**, **Hide notes from this person** and **Save for later**. None of it is published. The more/less rules travel with the learned preferences, so they shape future rankings without throwing away cached scores, and Tune lists everything in effect with a way to undo it. Learned taste can be inspected and reset in both modes.
 
 ## What it handles
 
@@ -37,15 +39,20 @@ Scores are cached locally (localStorage in the web app, a JSON file for the CLI)
 - Profile pictures and display names are fetched and shown
 - `nostr:npub` and `nostr:nprofile` references in post content are resolved to clickable @names
 
-## No server
+## Two ways to run it
 
-Everything runs in the browser (web app) or locally (CLI). Settings, scores, and the learned prompt live in localStorage or local files. The app connects directly to Nostr relays for posts and to your chosen LLM provider for scoring. There's nothing in between.
+**Use my own model (free).** Everything runs in the browser (web app) or locally (CLI). Settings live in local storage; rankings, digests, scores and cached audio in IndexedDB, all scoped to the identity they belong to. The app connects directly to Nostr relays for posts and to your chosen LLM provider for scoring. There's nothing of ours in between. The app costs nothing; your provider may charge for what it ranks and writes. Digests are written in the browser when you ask for one.
+
+**Try it without an API key (hosted).** The optional server in `server/` ranks the feed, writes and voices the digest, and can send it each morning as a Nostr DM once you turn daily delivery on (it is off until you do). It keeps your settings, rankings and digests to do that; Tune explains exactly what goes where, and lets you download or delete what the server keeps. Digest audio is uploaded to public file hosts, so anyone with the link can play it. See [server/README.md](server/README.md).
+
+The landing page's buttons open the app in the chosen mode (`app/?mode=hosted`, `app/?mode=byok`), and switching later keeps both setups.
 
 ## Digest in the browser
 
-The web app can do the same thing the CLI does: click **Digest** and it writes
-a narrative summary of your top-ranked posts. It reuses posts already fetched
-and scored, so it costs exactly one extra LLM call.
+The web app can do the same thing the CLI does: on the **Digests** tab, **Write a
+digest** produces a narrative summary of your top-ranked posts, at most about
+3, 6 or 10 minutes long (Tune). It reuses posts already fetched and scored, so
+it costs exactly one extra LLM call.
 
 **Read aloud** uses the browser's own speech engine (Web Speech API). No TTS
 provider, no API key, nothing leaves the device — the tradeoff is that voice
@@ -97,15 +104,18 @@ per role. The list is cached for a day.
 
 ## Signing in
 
-The web app needs to know your public key and nothing else — it reads your
-follow list, your feed, and your likes. It never publishes, never reacts, never
-signs. Three ways to tell it who you are:
+Reading needs your public key and nothing else — the app reads your follow
+list, your feed, and your likes. Publishing happens only when you choose a note
+action: reply, boost, like or zap. Ways to tell it who you are:
 
 - **Browser extension (NIP-07)** — one click, reads your pubkey from Alby, nos2x, or similar.
-- **Remote signer (NIP-46)** — scan a QR code with Amber or another bunker. The
-  connection requests **no permissions at all**: it calls `get_public_key`, then
-  closes. Your signer is never asked for the ability to sign, so granting this
-  cannot result in anything being posted as you.
+- **Remote signer (NIP-46)** — scan a QR code with Amber or another bunker. For
+  reading, the connection only calls `get_public_key`. Note actions connect your
+  signer when you first choose one. The hosted sign-in signs one login event and,
+  with a remote signer, also asks for the reply, boost, like and zap-request kinds
+  up front so actions work later without another scan; nothing is published until
+  you choose an action. **Disconnect signer** in Tune forgets the connection on
+  this device.
 - **Paste an npub** — no signer involved. Works for reading any public feed,
   including someone else's.
 
@@ -158,15 +168,19 @@ nalgorithm/
 │   ├── public/          # Manifest, icons, service worker
 │   └── src/
 │       ├── app.ts          # Two-phase flow: fetch/score/render, then background learn
-│       ├── settings.ts     # localStorage settings + date-keyed score cache
-│       ├── render.ts       # Post card rendering, content formatting
-│       ├── ui.ts           # DOM bindings, settings panel
-│       ├── nostr-login.ts  # NIP-07 and NIP-46 pubkey retrieval (read-only)
+│       ├── settings.ts     # Settings + per-context score cache (IndexedDB)
+│       ├── local-data.ts   # Feeds and digest histories per identity (IndexedDB)
+│       ├── render.ts       # Keyed post cards, media, note sheet
+│       ├── feedback.ts     # Private more/less, hide, mute and save
+│       ├── ui.ts           # DOM bindings, Tune (own-model mode)
+│       ├── hosted/         # Hosted mode: API client, sign-in, schedule
+│       ├── nostr-login.ts  # NIP-07 and NIP-46 sign-in
 │       ├── login-ui.ts     # Login dialog with QR code
-│       ├── digest-ui.ts    # Digest panel and playback controls
+│       ├── digest-view.ts  # Digests tab, player and show notes
 │       ├── speech.ts       # Browser speech synthesis (Web Speech API)
 │       ├── models.ts       # Provider model catalog and per-role suggestions
 │       └── version-check.ts # Version polling and automatic reload
+├── server/            # Optional hosted service (ranking, digests, DM delivery)
 ├── digest/            # CLI digest tool
 │   └── src/
 │       ├── main.ts      # Fetch, rank, generate spoken-word digest, optional TTS
@@ -186,12 +200,13 @@ npm run build     # builds lib, web, and digest
 npm run dev       # starts vite dev server for the web app
 ```
 
-Open the app, go to Settings, fill in:
+Open the app, choose **Use my own model**, and the Feed lists the three
+essentials; **Finish setup** takes you to the first missing one in Tune:
 - Your npub
-- An API key and endpoint for your LLM provider
-- A user prompt describing what you like to see in your feed
+- What you care about, in your own words
+- A model connection: endpoint, API key (none for a local model) and model
 
-Click Refresh.
+Save, and the first ranking starts.
 
 ## Digest tool
 
@@ -651,7 +666,7 @@ node dist/main.js digest.config.json --tts > "$HOME/digests/$(date +%F).md"
 that serves files. For a subdirectory install, set the base path at build time:
 
 ```bash
-VITE_BASE=/nalgorithm/ npm run build -w web
+VITE_BASE=/app/ npm run build -w web
 ```
 
 It's a PWA: installable, works offline once loaded, and **checks for new
@@ -667,18 +682,24 @@ shell, and the old shell keeps pulling the old content-hashed bundles — the
 update looks deployed but never lands. Under nginx:
 
 ```nginx
-location ^~ /nalgorithm/ {
+location ^~ /app/ {
     try_files $uri $uri/ =404;
 
     # Content-hashed bundles are immutable.
-    location ^~ /nalgorithm/assets/ { expires max; }
+    location ^~ /app/assets/ { expires max; }
 
     # Anything that gates an update must revalidate.
     location ~* \.(html|json|webmanifest)$ { expires -1; }
-    location = /nalgorithm/sw.js          { expires -1; }
-    location = /nalgorithm/               { expires -1; }
+    location = /app/sw.js          { expires -1; }
+    location = /app/               { expires -1; }
 }
 ```
+
+Deploy in two steps so an open page never loses the files it is running:
+first copy the new `assets/` without deleting the old ones, then replace
+`index.html`, `sw.js`, `version.json` and the manifest. Remove old bundles only
+after a few days, when no client can still be on them. Open pages wait to
+reload until the reader is not editing, playing or paying.
 
 Use the `expires` directive rather than `add_header Cache-Control ...`: an
 `add_header` inside a location block discards every `add_header` inherited from

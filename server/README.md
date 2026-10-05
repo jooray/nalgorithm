@@ -6,13 +6,13 @@ Hosted, prepaid nalgorithm: login by npub, ranked feed with the server's own Ven
 npm run build:lib && npm test -w server
 ```
 
-Runs on Node 22.13 or newer; 24 is recommended. Environment (all required unless a default is shown): `PUBLIC_URL` (API base, for example `https://cypherpunk.today/nalgorithm/api`, the login is bound to `<PUBLIC_URL>/auth/login`), `BILLING_API_URL`, `BILLING_API_TOKEN`, `VENICE_API_KEY` (use a dedicated service key), `PORT` (8350), `HOST` (127.0.0.1), `DATABASE_URL`, `RELAYS`, `COOKIE_SECURE`, and model overrides `SCORING_MODEL` (jev-latest), `DIGEST_MODEL` (claude-sonnet-5-5), `HUMANIZER_MODEL` and `LEARNER_MODEL` (deepseek-v4-1-flash), `TTS_MODEL` (tts-kokoro), `TTS_VOICE` (af_bella).
+Runs on Node 22.13 or newer; 24 is recommended. Environment (all required unless a default is shown): `PUBLIC_URL` (API base, for example `https://example.com/app/api`, the login is bound to `<PUBLIC_URL>/auth/login`), `BILLING_API_URL`, `BILLING_API_TOKEN`, `VENICE_API_KEY` (use a dedicated service key), `PORT` (8350), `HOST` (127.0.0.1), `DATABASE_URL`, `RELAYS`, `COOKIE_SECURE`, and model overrides `SCORING_MODEL` (jev-latest), `DIGEST_MODEL` (claude-sonnet-5-5), `HUMANIZER_MODEL` and `LEARNER_MODEL` (deepseek-v4-1-flash), `TTS_MODEL` (tts-kokoro), `TTS_VOICE` (af_bella).
 
 Storage: SQLite (`DATABASE_URL=sqlite:./nalgorithm-server.db`, the default, or a bare path) or MariaDB (`DATABASE_URL=mariadb://user:password@host:3306/database`). The tables are created on first start. `TEST_DATABASE_URL=mariadb://... npm test -w server` runs the suite against a MariaDB test database, which the tests empty first, so never point it at real data.
 
 Optional DM delivery (all off when `BOT_NSEC` is unset): `BOT_NSEC` (the service account's nsec or 64-hex secret key), `DM_RELAYS` (relays the bot listens on and publishes self-copies to; the ones in its DM inbox list; relays that ask for a NIP-42 login are answered as the bot), `DM_FALLBACK_RELAYS` (where to send when a recipient has published no relay list), `BLOSSOM_SERVERS` (comma separated, tried in order; default `https://blossom.primal.net`), `WEB_URL` (public web app URL used in DM replies).
 
-Endpoints: `POST /auth/challenge`, `POST /auth/login` (`{event}`, a signed kind 27235 with tags `u`, `method=POST`, `nonce`), `POST /auth/logout`, `GET /me`, `GET|PUT /settings`, `GET|PUT /schedule` (`enabled`, `time` as `HH:MM`, `tz`, `voice`, `dmFormat`), `GET /digests`, `POST /digest/now`, `GET /feed`, `GET /preview`, `GET /preview/image`, `POST /billing/checkout`. Writes require `Content-Type: application/json`. Sessions are an HttpOnly SameSite=Strict cookie or a Bearer token.
+Endpoints: `POST /auth/challenge`, `POST /auth/login` (`{event}`, a signed kind 27235 with tags `u`, `method=POST`, `nonce`), `POST /auth/logout`, `GET /me`, `GET|PUT /settings` (also `digestMinutes` 3/6/10 and private `feedback` rules), `GET|PUT /schedule` (`enabled`, `time` as `HH:MM`, `tz`, `voice`, `dmFormat`), `GET /digests` (`summary=1` omits show notes; answers 304 to a matching `If-None-Match`), `GET /digests/:id`, `GET /digests/:id/audio`, `GET /digest/status`, `POST /digest/now`, `GET /feed`, `GET /feed/latest` (`since=` answers without posts when unchanged), `GET /learned`, `POST /learned/reset`, `GET /voices/:voice/sample` (shortlisted voices only), `GET /account/export`, `POST /account/delete` (`{"confirm":"delete"}`), `GET /preview`, `GET /preview/image`, `POST /billing/checkout`. Writes require `Content-Type: application/json`. Sessions are an HttpOnly SameSite=Strict cookie or a Bearer token.
 
 Entitlement: a never-seen npub starts its 3-day trial on its first `/feed`, not on login. Expired gets 402, unknown billing state gets 503, the daily cap 429. Free endpoints keep working during a billing outage.
 
@@ -34,7 +34,7 @@ Users control everything by DM to the bot, or with `/schedule` and `/settings` f
 | `legacy` / `nip17` | old-style (kind 4) or modern DMs |
 | `delete my data` (then `... confirm`) | erase everything stored about the user |
 
-Replies use the format the user last wrote in unless they chose one; a message is never sent in both. Inbound sender identity is only the verified seal signature of a NIP-17 message (or the author of a kind 4 event).
+Replies and digests use the format the user chose, else the one they last wrote in, else legacy kind 4, which nearly every client can read; a message is never sent in both. A digest whose DM is not accepted stays readable in the app as `delivery_pending` and is resent for six hours; after that a new day's run writes a new digest instead. Inbound sender identity is only the verified seal signature of a NIP-17 message (or the author of a kind 4 event).
 
 ## Link previews
 
@@ -55,3 +55,9 @@ Fetch rules (`src/preview/ssrf.ts`), applied to the URL and to every redirect:
 The resolver and the transport are parameters, so the tests run without a network. Allowing loopback (and other ports) exists only as an option of the fetcher that tests pass; nothing in the environment or configuration can turn it on.
 
 Images are not loaded from the third-party host by the reader's browser, which would tell that host who reads what. The card's `image` is a path, `preview/image?u=<image url>&s=<signature>`, and `GET /preview/image` fetches it for the reader under the same rules, with a 2 MB cap and only PNG, JPEG, WebP and GIF (never SVG). The type is taken from the file's first bytes, not from the response header. The signature is an HMAC of the image URL under a random secret that lives only in the server process, and only preview parsing produces one, so the endpoint cannot be used as an open proxy: a URL a caller made up has no valid signature and gets 404. After a restart the secret changes, so old paths stop working and the next preview issues new ones. Responses are `private, max-age=604800, immutable`, with `nosniff` and a locked-down CSP.
+
+## Retention
+
+What a reader keeps (settings, words, learned taste, digests, schedule) stays until they delete it: from the web app (Tune, Privacy and this device, Delete my hosted data), with `POST /account/delete`, or by DM (`delete my data`). `GET /account/export` downloads it first. Billing records live in the billing service, and audio already uploaded to Blossom stays reachable by its link.
+
+Operational records are pruned once a day: expired sessions and login nonces, delivery attempts after 180 days, unsent DM outbox entries after 30, cached public profiles after 90, link previews after 7, scores older than the score TTL, and pipeline claims whose owner stopped renewing them an hour ago.
