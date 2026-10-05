@@ -23,6 +23,11 @@ export class FeedBusy extends Error {}
 export const MAX_POSTS = 500
 const learning = new Map<string, Promise<unknown>>()
 
+/** Whether background learning is running for this npub (it writes the learned row when it ends). */
+export function learningInProgress(npub: string): boolean {
+  return learning.has(npub)
+}
+
 /**
  * Profiles for everyone the feed shows: authors, the original authors inside
  * boosts and quotes, and people mentioned in the text. A boost's own author is

@@ -185,6 +185,22 @@ test('an old undelivered digest stays readable but does not replace a new day\'s
   assert.deepEqual(rows.map((r) => r.status), ['undelivered', 'ok'])
 })
 
+test('a resend keeps the first attempt\'s DM format, and a manual request writes a new digest', async () => {
+  const db = await freshDb(); await withPrompt(db)
+  await runDigest(rig(db, { dmThrows: true }).deps, NPUB)
+  await db.run('INSERT INTO peers (npub, dm_kind, last_seen_at) VALUES (?, ?, ?)', [NPUB, 'nip17', T0])
+  const retry = rig(db)
+  assert.equal((await runDigest(retry.deps, NPUB)).status, 'sent')
+  assert.equal(retry.calls.dm[0].opts.format, 'nip04', 'parts already sent are not sent again in another format')
+
+  const db2 = await freshDb(); await withPrompt(db2)
+  await runDigest(rig(db2, { dmThrows: true }).deps, NPUB)
+  const manual = rig(db2)
+  assert.equal((await runDigest(manual.deps, NPUB, { manual: true })).status, 'sent')
+  assert.equal(manual.calls.write.length, 1, 'asking for a digest writes one')
+  assert.deepEqual((await db2.all('SELECT status FROM digests WHERE npub = ? ORDER BY id', [NPUB])).map((r) => r.status), ['undelivered', 'ok'])
+})
+
 test('text-only server does not pay for undeliverable speech', async () => {
   const db = await freshDb(); await withPrompt(db)
   const { deps, calls } = rig(db, { noUpload: true })

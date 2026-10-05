@@ -13,7 +13,7 @@ import { parseNotes } from './digest-notes.js'
 import { ShuttingDown } from './drain.js'
 import type { JobTracker } from './drain.js'
 import type { FeedRunner } from './feed.js'
-import { FeedBusy } from './feed.js'
+import { FeedBusy, learningInProgress } from './feed.js'
 import { PreviewError } from './preview/service.js'
 import { safeFetch } from './preview/ssrf.js'
 import type { PreviewService } from './preview/service.js'
@@ -229,6 +229,7 @@ export function createApp(deps: AppDeps) {
         settings: await loadSettings(db, npub),
         schedule: publicSchedule(await loadSchedule(db, npub)),
         learned: learned ? { prompt: learned.prompt, updatedAt: learned.updated_at } : null,
+        deliveries: await db.all('SELECT digest_id, created_at, protocol, delivered, tier, detail FROM deliveries WHERE npub = ? ORDER BY created_at DESC', [npub]),
         digests: digests.map(publicDigest),
       }
       return send(res, 200, body, { 'Content-Disposition': 'attachment; filename="nalgorithm-account.json"' })
@@ -239,7 +240,7 @@ export function createApp(deps: AppDeps) {
     if (method === 'POST' && path === '/account/delete') {
       const body = await readJson(req)
       if (body.confirm !== 'delete') throw new HttpError(400, 'confirm with {"confirm":"delete"}')
-      if (running.has(npub) || (await digestJobStatus(db, npub, nowSec())).running) {
+      if (running.has(npub) || learningInProgress(npub) || (await digestJobStatus(db, npub, nowSec())).running) {
         throw new HttpError(409, 'a ranking or digest is running; try again when it has finished', { code: 'busy' })
       }
       // The same erasure as the bot's "delete my data", in one transaction.
@@ -258,8 +259,11 @@ export function createApp(deps: AppDeps) {
       return send(res, 200, { prompt: row?.prompt ?? '', updatedAt: row?.updated_at ?? null })
     }
     if (method === 'POST' && path === '/learned/reset') {
-      await db.run('UPDATE learned SET prompt = ?, updated_at = ? WHERE npub = ?', ['', new Date(nowSec() * 1000).toISOString(), npub])
-      return send(res, 200, { prompt: '', updatedAt: null })
+      // A learner still running would write the old taste back when it finishes.
+      if (learningInProgress(npub)) throw new HttpError(409, 'your taste is being updated right now; try again in a minute', { code: 'busy' })
+      const updatedAt = new Date(nowSec() * 1000).toISOString()
+      await db.run('UPDATE learned SET prompt = ?, updated_at = ? WHERE npub = ?', ['', updatedAt, npub])
+      return send(res, 200, { prompt: '', updatedAt })
     }
 
     if (method === 'PUT' && path === '/settings') {
@@ -328,7 +332,9 @@ export function createApp(deps: AppDeps) {
       const body = { digests: rows.map((r) => (summary ? { ...publicDigest(r), notes: undefined } : publicDigest(r))) }
       // An unchanged list answers 304 with no body, so status polls move almost nothing.
       const etag = `"${createHash('sha256').update(JSON.stringify(body)).digest('base64url').slice(0, 27)}"`
-      if (req.headers['if-none-match'] === etag) {
+      // Proxies may weaken the tag (W/"…") or send a list; any match counts.
+      const asked = String(req.headers['if-none-match'] ?? '').split(',').map((t) => t.trim().replace(/^W\//, ''))
+      if (asked.includes(etag) || asked.includes('*')) {
         res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-store' })
         return void res.end()
       }

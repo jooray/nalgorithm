@@ -357,7 +357,7 @@ export const DM_FORMATS: ReadonlyArray<{ value: DmFormat | ''; label: string }> 
 ]
 
 export const DM_FORMAT_HINT =
-  'Automatic uses the format of your last message to the digest account, otherwise the older format that almost every app can read. Private DMs (NIP-17) also hide who is talking to whom, but some apps cannot show them.'
+  'Automatic uses the format of your last message to the digest account, otherwise the older format that almost every app can read. Both are encrypted, but the older format shows relays that the digest account writes to you; private DMs (NIP-17) hide that, and some apps cannot show them.'
 
 /** One line for the Digests tab: is daily delivery on, and when is the next one. */
 export function scheduleLine(s: Pick<Schedule, 'enabled' | 'nextRunAt' | 'tz'> | null): string {

@@ -146,7 +146,9 @@ export async function runDigest(deps: DigestDeps, npub: string, opts: { manual?:
 
   // A recent digest whose DM did not go through is delivered again rather than paid for twice.
   // An older one stays readable in the app; today's run writes a new digest instead of resending it.
-  await db.run("UPDATE digests SET status = 'undelivered' WHERE npub = ? AND status = 'delivery_pending' AND created_at < ?", [npub, now - PENDING_RETRY_SECONDS])
+  // A manual request asks for a new digest, so it never resends an old one.
+  const stale = opts.manual ? now + 1 : now - PENDING_RETRY_SECONDS
+  await db.run("UPDATE digests SET status = 'undelivered' WHERE npub = ? AND status = 'delivery_pending' AND created_at < ?", [npub, stale])
   const pending = await db.get<{ id: number; created_at: number; body: string; audio_url: string | null; notes: string | null }>(
     "SELECT id, created_at, body, audio_url, notes FROM digests WHERE npub = ? AND status = 'delivery_pending' ORDER BY created_at DESC LIMIT 1", [npub])
   if (pending) return deliverDigest(deps, npub, pending.id, pending.created_at, pending.body, pending.audio_url, parseNotes(pending.notes))
@@ -235,7 +237,10 @@ async function deliverDigest(deps: DigestDeps, npub: string, digestId: number, c
   const now = deps.now ? deps.now() : Math.floor(Date.now() / 1000)
   const schedule = await loadSchedule(db, npub)
 
-  const format = await effectiveFormat(db, npub, schedule)
+  // A resend keeps the format of the first attempt: the DM outbox keys its signed events by
+  // format, so switching would send the parts that already arrived a second time.
+  const first = await db.get<{ protocol: string }>('SELECT protocol FROM deliveries WHERE npub = ? AND digest_id = ? ORDER BY created_at, id LIMIT 1', [npub, digestId])
+  const format: DmFormat = first?.protocol === 'nip04' || first?.protocol === 'nip17' ? first.protocol : await effectiveFormat(db, npub, schedule)
   let delivered = false
   let tier: string | null = null
   let detail: string | null = null

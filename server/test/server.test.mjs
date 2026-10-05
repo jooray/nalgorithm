@@ -736,6 +736,7 @@ test('HTTP: a summary list leaves out notes, and an unchanged list answers 304 w
     assert.equal('notes' in (await first.json()).digests[0], false)
     const again = await fetch(base + '/digests?summary=1', { headers: { ...auth, 'If-None-Match': etag } })
     assert.equal(again.status, 304)
+    assert.equal((await fetch(base + '/digests?summary=1', { headers: { ...auth, 'If-None-Match': `W/${etag}` } })).status, 304, 'a proxy-weakened tag still matches')
     assert.equal(await again.text(), '')
     await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', [npub, T0, 'two', null, 'ok'])
     const changed = await fetch(base + '/digests?summary=1', { headers: { ...auth, 'If-None-Match': etag } })
