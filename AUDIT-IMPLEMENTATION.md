@@ -26,7 +26,7 @@ Source audit: `AUDIT-GPT61.md`. Started 2026-10-05. No intermediate deployments.
 | Activation, schedule, ordering and private feedback | F25, F27, F28, F29 | Implemented; logic, DOM and server regressions pass |
 | Media, responsive design, device privacy and visual refinement | F30, F31, F34, F40 | Implemented; DOM/server regressions pass, live layout pending |
 | Documentation, fixtures, tests and observability | F36, F38 | Implemented; retention and diagnostics added |
-| Final release and coordinated deployment | All | Pending |
+| Final release and coordinated deployment | All | Released as 0.17.0 and deployed 2026-10-05 |
 
 Each group will record changes, tests, limitations and commit references. A finding is not marked complete merely because a recommendation was documented. Real-device/provider/payment checks that cannot be performed safely will remain explicit limitations.
 
@@ -134,3 +134,10 @@ Each group will record changes, tests, limitations and commit references. A find
 ### Still not verified
 
 No live browser session was available (BrowserOS neo had no window/profile earlier in the work). Layout at real widths, 200% text, virtual keyboards, screen readers, offline/airplane playback, update activation during blocked work and the CSP in a real browser remain unverified beyond DOM fixtures. No real provider, payment, relay or DM delivery was exercised.
+
+### Review and release (82f698e, b604ebc/re-made, 8518be8)
+
+- Three independent reviews of this session's changes (server, web storage and transitions, renderer/feedback/privacy). Fixed: resends keep their first DM format; manual requests write new digests; account delete and learned reset wait for background learning; weakened ETags match; hosted answers for a signed-out account are dropped; offline sign-out wipes the remembered account; BYOK identity-switch gaps; cross-tab score merges; Clear this device can no longer be undone by a page-hide save; CSP allows the BYOK audio blob; the export-key checkbox is never a draft; private actions keep focus and have persistent Undo.
+- Not changed: audio cached offline before this release under a raw-npub owner key is not migrated (no release had shipped that cache).
+- Release 0.17.0: fresh build; 41 library, 181 web and 233 server tests pass (disposable SQLite, mock relays); `npm audit` clean. Deployed in order: hosted server (API answers, new routes present), web app (two-phase: assets kept, then shell; version.json and assets verified, shell no-cache), landing (mode links present).
+- Live browser acceptance was not possible: BrowserOS neo still reports no window/profile. Real-browser checks of the CSP, layout, offline playback and update activation remain open.
