@@ -120,7 +120,8 @@ export class DigestPlayer {
     })
     this.audio.addEventListener('playing', () => this.set({ playing: true, loading: false, error: '' }))
     this.audio.addEventListener('pause', () => {
-      if (!this.audio.ended) this.set({ playing: false })
+      // A pause while buffering is no longer waiting to play, so it must not keep holding updates.
+      if (!this.audio.ended) this.set({ playing: false, loading: false })
       this.persist()
     })
     this.audio.addEventListener('waiting', () => this.set({ loading: true }))

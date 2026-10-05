@@ -81,6 +81,27 @@ export async function clearDeviceData(): Promise<void> {
     // session storage blocked: nothing kept there
   }
   await clearRecords('')
+  // Another open tab (the installed app and a browser tab) would otherwise write its state back.
+  try {
+    const channel = new BroadcastChannel(CLEAR_CHANNEL)
+    channel.postMessage('cleared')
+    channel.close()
+  } catch {
+    // no BroadcastChannel: other tabs keep running until they reload
+  }
+}
+
+const CLEAR_CHANNEL = 'nalgorithm-device'
+
+function followClearsFromOtherTabs(): void {
+  try {
+    new BroadcastChannel(CLEAR_CHANNEL).onmessage = () => {
+      freezeStorage()
+      location.replace(location.pathname)
+    }
+  } catch {
+    // no BroadcastChannel
+  }
 }
 
 let pending: (() => Promise<void>) | null = null
@@ -103,6 +124,7 @@ function closeConfirm(): void {
 }
 
 export function initDeviceSection(options: DeviceSectionOptions): void {
+  followClearsFromOtherTabs()
   $('btn-export-settings').addEventListener('click', () => {
     const includeKey = options.mode === 'byok' && $<HTMLInputElement>('export-include-key').checked
     download(new Blob([JSON.stringify(exportableSettings(includeKey), null, 2)], { type: 'application/json' }), `nalgorithm-settings-${today()}.json`)

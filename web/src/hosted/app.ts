@@ -27,7 +27,6 @@ import { previewsEnabled } from './previews-logic.js'
 import { loadSettings, saveSettings } from '../settings.js'
 import { openHostedLoginDialog } from '../login-ui.js'
 import { refreshButtonHtml, setStatus, setStatusLoading } from '../ui.js'
-import { setUpdateBlocked } from '../version-check.js'
 import { currentTab, onTabShown, showTab, toast } from '../shell.js'
 import {
   atTop,
@@ -147,6 +146,8 @@ let userNpub = ''
 let running = false
 /** Bumped when the account changes: an answer for an older run belongs to someone else. */
 let runEpoch = 0
+/** Releases the update hold of the feed run in flight; a sign-out releases it early. */
+let releaseRanking: (() => void) | undefined
 let paying = false
 let stopPaying = false
 
@@ -406,7 +407,8 @@ function resetFeedState(): void {
   show('#hosted-loading', false)
   $<HTMLButtonElement>('#btn-hosted-refresh').disabled = false
   $('#btn-hosted-refresh').classList.remove('is-busy')
-  setUpdateBlocked(false)
+  releaseRanking?.()
+  releaseRanking = undefined
   show('#schedule-nudge', false)
   digestsKnown = false
   setDigestJobRunning(false)
@@ -466,7 +468,8 @@ async function signOut(closeSettings: () => void): Promise<void> {
     // nothing cached to clear
   }
   clearLegacyHistory('hosted')
-  if (shown) await clearIdentityData('hosted', shown)
+  // Signing out must reach the login screen even if local data could not be removed.
+  if (shown) await clearIdentityData('hosted', shown).catch((err) => console.error('Clearing local data failed:', err))
   setDigests([])
   showLogin()
 }
@@ -721,7 +724,8 @@ async function runFeed(opts: { manual?: boolean } = {}): Promise<void> {
   show('#hosted-empty', false)
   setQuietNotice(null)
   // A reload mid-run would throw away a run that is already paid for.
-  setUpdateBlocked(true)
+  const finishRanking = beginActivity('ranking')
+  releaseRanking = finishRanking
 
   let timer: ReturnType<typeof setInterval> | undefined
   if (quiet) {
@@ -752,6 +756,7 @@ async function runFeed(opts: { manual?: boolean } = {}): Promise<void> {
     if (epoch === runEpoch) onRunFailed(err, quiet)
   } finally {
     if (timer !== undefined) clearInterval(timer)
+    finishRanking()
     // The account changed meanwhile: resetFeedState already reset the shared state.
     if (epoch !== runEpoch) return
     show('#hosted-loading', false)
@@ -759,7 +764,6 @@ async function runFeed(opts: { manual?: boolean } = {}): Promise<void> {
     refresh.disabled = false
     refresh.classList.remove('is-busy')
     running = false
-    setUpdateBlocked(false)
   }
 }
 
@@ -969,7 +973,7 @@ async function startPayment(): Promise<void> {
   stopPaying = false
   const button = $<HTMLButtonElement>('#btn-pay')
   button.disabled = true
-  setUpdateBlocked(true)
+  const finishPayment = beginActivity('payment')
   // Opened now, inside the click, so a popup blocker allows it; pointed at the
   // payment page once the invoice exists.
   const tab = window.open('', '_blank')
@@ -1019,7 +1023,7 @@ async function startPayment(): Promise<void> {
     button.disabled = false
     show('#btn-pay-cancel', false)
     $('#pay-link').classList.add('hidden')
-    setUpdateBlocked(false)
+    finishPayment()
   }
 }
 

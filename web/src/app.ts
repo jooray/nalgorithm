@@ -76,7 +76,8 @@ import { initFeedbackSection } from './feedback-ui.js'
 import { maybeShowFirstRankNote } from './first-note.js'
 import { initDeviceSection } from './device-data.js'
 
-import { initVersionCheck, setUpdateBlocked } from './version-check.js'
+import { initVersionCheck } from './version-check.js'
+import { beginActivity } from './activity.js'
 
 import { resolveMode, switchMode } from './hosted/mode.js'
 import { initHosted } from './hosted/app.js'
@@ -399,7 +400,7 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
   }
   // Hold off any pending auto-update until this run finishes — reloading
   // mid-scoring would discard work already paid for.
-  setUpdateBlocked(true)
+  const finishRanking = beginActivity('ranking')
 
   // Compute the "since" timestamp so both phases use the same window
   const since = Math.floor(Date.now() / 1000) - settings.hoursBack * 3600
@@ -410,7 +411,7 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
   } catch {
     setStatus('Invalid npub or pubkey')
     isRunning = false
-    setUpdateBlocked(false)
+    finishRanking()
     setBackgroundBusy(null)
     setRefreshEnabled(true)
     return
@@ -576,7 +577,7 @@ async function runFeed(opts: { auto?: boolean } = {}): Promise<void> {
     setRefreshEnabled(true)
   } finally {
     isRunning = false
-    setUpdateBlocked(false)
+    finishRanking()
     setBackgroundBusy(null)
     if (!stillMine()) void followIdentity(loadSettings())
   }
@@ -708,8 +709,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // The feed from last time is on screen as soon as it is read; a background run follows when
   // it is stale and the reader allows it (Tune: "Update my feed automatically when I open the app").
-  void followIdentity(settings).then(() => {
+  // Live checks and identity switching must be installed even if reading local data failed.
+  const follow = (s: ReturnType<typeof loadSettings>): Promise<void> => followIdentity(s).catch((err) => console.error('Loading local data failed:', err))
+  void follow(settings).then(() => {
     startLiveChecks({ check: autoCheck, tick: paintAge })
-    document.addEventListener('nalgorithm:settings-saved', () => void followIdentity(loadSettings()).then(autoCheck))
+    document.addEventListener('nalgorithm:settings-saved', () => void follow(loadSettings()).then(autoCheck))
   })
 })

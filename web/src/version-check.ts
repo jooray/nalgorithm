@@ -11,27 +11,23 @@
  */
 
 declare const __APP_VERSION__: string
-import { activities, beginActivity } from './activity.js'
+import { activities } from './activity.js'
 
 /** How often to re-check while the tab is visible. */
 const POLL_INTERVAL_MS = 5 * 60_000
 /** Grace period before the automatic reload, so a banner is actually readable. */
 const RELOAD_DELAY_MS = 8_000
+/**
+ * Work in progress defers an update, but not forever: after this long the page
+ * reloads the next time it is hidden (drafts are saved at the checkpoint).
+ */
+const MAX_DEFER_MS = 60 * 60_000
+/** How long to wait for a fresh worker to install before reloading anyway. */
+const WORKER_WAIT_MS = 5_000
 
 let reloadScheduled = false
-/** Set while a feed refresh is running, so we never reload mid-scoring. */
-const legacyBlocks: Array<() => void> = []
 
 export const APP_VERSION = __APP_VERSION__
-
-/**
- * Mark the app busy. A pending auto-reload waits until this clears, so an
- * update never throws away scoring the user has already paid for.
- */
-export function setUpdateBlocked(value: boolean): void {
-  if (value) legacyBlocks.push(beginActivity('ranking or payment'))
-  else legacyBlocks.pop()?.()
-}
 
 /** Register the service worker and start polling for new versions. */
 export function initVersionCheck(): void {
@@ -72,7 +68,8 @@ function scheduleReload(newVersion: string): void {
   reloadScheduled = true
 
   const banner = showBanner(newVersion)
-  const deadline = Date.now() + RELOAD_DELAY_MS
+  const detected = Date.now()
+  const deadline = detected + RELOAD_DELAY_MS
 
   const tick = (): void => {
     const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
@@ -80,8 +77,9 @@ function scheduleReload(newVersion: string): void {
     if (counter) {
       counter.textContent = activities.blocked ? `updating after ${activities.reasons.join(', ')}` : `reloading in ${remaining}s`
     }
-    if (!activities.blocked && remaining <= 0) {
-      doReload()
+    const overdue = Date.now() - detected > MAX_DEFER_MS && document.visibilityState === 'hidden'
+    if ((!activities.blocked && remaining <= 0) || overdue) {
+      void doReload()
       return
     }
     setTimeout(tick, 500)
@@ -89,18 +87,48 @@ function scheduleReload(newVersion: string): void {
   tick()
 }
 
+let reloading = false
+
+/** Reload onto the new build. Callers decide whether waiting work allows it. */
 async function doReload(): Promise<void> {
-  if (activities.blocked) return
+  if (reloading) return
+  reloading = true
   window.dispatchEvent(new Event('nalgorithm:checkpoint'))
-  // Ask a waiting worker to take over first, so the reload lands on the new
-  // build rather than triggering a second update cycle.
+  // Fetch the new worker and let it take over first, so the reload lands on
+  // the new build and the worker itself is never left waiting for every tab
+  // to close.
   try {
     const reg = await navigator.serviceWorker?.getRegistration()
-    reg?.waiting?.postMessage('skip-waiting')
+    if (reg) {
+      await withTimeout(reg.update().then(() => installed(reg)), WORKER_WAIT_MS)
+      if (reg.waiting) {
+        const taken = new Promise<void>((resolve) => navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true }))
+        reg.waiting.postMessage('skip-waiting')
+        await withTimeout(taken, WORKER_WAIT_MS)
+      }
+    }
   } catch {
-    // No worker — a plain reload is enough.
+    // No worker, or the update check failed: a plain reload is enough.
   }
   location.reload()
+}
+
+/** Resolves once a worker found by update() has finished installing (or there is none). */
+function installed(reg: ServiceWorkerRegistration): Promise<void> {
+  const worker = reg.installing
+  if (!worker) return Promise.resolve()
+  return new Promise((resolve) => {
+    worker.addEventListener('statechange', () => {
+      if (worker.state !== 'installing') resolve()
+    })
+  })
+}
+
+function withTimeout(promise: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    promise.then(() => { clearTimeout(timer); resolve() }, () => { clearTimeout(timer); resolve() })
+  })
 }
 
 function showBanner(newVersion: string): HTMLElement {
@@ -114,6 +142,7 @@ function showBanner(newVersion: string): HTMLElement {
     <span>Version ${escapeHtml(newVersion.split('+')[0])} ready — <span class="update-count"></span></span>
     <button class="btn btn-small update-now">Reload now</button>
   `
+  // An explicit request: it does not wait for playback or other deferrable work.
   el.querySelector<HTMLButtonElement>('.update-now')!.addEventListener('click', () => {
     void doReload()
   })
@@ -126,7 +155,12 @@ function registerServiceWorker(): void {
   // Only over HTTPS or localhost; browsers reject it elsewhere anyway.
   window.addEventListener('load', () => {
     const swUrl = new URL('sw.js', document.baseURI).toString()
-    navigator.serviceWorker.register(swUrl).catch(() => {
+    navigator.serviceWorker.register(swUrl).then((reg) => {
+      // A worker left waiting by an earlier visit (this page already runs the
+      // new build, so versions match and no update cycle would ever start)
+      // takes over now. Its shell is network-first, so nothing here changes.
+      if (reg.waiting && navigator.serviceWorker.controller) reg.waiting.postMessage('skip-waiting')
+    }).catch(() => {
       // Registration failure is not fatal — the app works without it.
     })
   })
