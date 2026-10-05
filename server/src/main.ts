@@ -5,7 +5,7 @@ import { createBillingClient } from './billing-client.js'
 import { createBot, createDbSeenStore } from './bot.js'
 import { uploadAudio } from './blossom.js'
 import { loadConfig } from './config.js'
-import { openDb, pruneScores } from './db.js'
+import { openDb, pruneOperational, pruneScores } from './db.js'
 import { explain, createScheduler } from './scheduler.js'
 import { createDigestNow, interruptRunningJobs, runInSlot } from './digest-jobs.js'
 import { createJobTracker } from './drain.js'
@@ -165,9 +165,7 @@ setInterval(() => {
   log.info(`model budget: ${JSON.stringify(providerBudgetStats())}`)
   pruneScores(db).then((n) => log.info(`pruned ${n} old scores`), (e) => log.warn(`prune failed: ${(e as Error).message}`))
   previews.prune().then((n) => log.info(`pruned ${n} old link previews`), (e) => log.warn(`prune failed: ${(e as Error).message}`))
-  void db.run('DELETE FROM sessions WHERE expires_at < ?', [nowSec()]).catch(() => {})
-  void db.run('DELETE FROM profiles WHERE fetched_at < ?', [nowSec() - 90 * 86400]).catch(() => {})
-  void db.run('DELETE FROM dm_outbox WHERE created_at < ?', [nowSec() - 30 * 86400]).catch(() => {})
+  pruneOperational(db).then((n) => log.info(`retention: ${JSON.stringify(n)}`), (e) => log.warn(`retention failed: ${(e as Error).message}`))
 }, 86_400_000).unref()
 
 const server = createServer(app)

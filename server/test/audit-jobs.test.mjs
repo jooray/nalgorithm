@@ -37,3 +37,20 @@ test('fresh heartbeat protects a long job and a different owner cannot finish it
     assert.equal((await digestJobStatus(db,npub,1703)).running,true)
   } finally {await db.close()}
 })
+
+test('retention prunes operational records only, never what a reader keeps', async () => {
+  const { openDb, pruneOperational, RETENTION } = await import('../dist/db.js')
+  const db = await openDb(':memory:')
+  const now = 2_000_000_000, day = 86_400
+  await db.run('INSERT INTO deliveries (npub, digest_id, created_at, protocol, delivered) VALUES (?, ?, ?, ?, ?)', ['a', 1, now - (RETENTION.deliveriesDays + 1) * day, 'nip04', 1])
+  await db.run('INSERT INTO deliveries (npub, digest_id, created_at, protocol, delivered) VALUES (?, ?, ?, ?, ?)', ['a', 2, now - day, 'nip04', 1])
+  await db.run('INSERT INTO digests (npub, created_at, body, audio_url, status) VALUES (?, ?, ?, ?, ?)', ['a', now - 1000 * day, 'old but kept', null, 'ok'])
+  await db.run('INSERT INTO pipeline_jobs (npub, owner, lease_until) VALUES (?, ?, ?)', ['dead', 'x', now - 7200])
+  await db.run('INSERT INTO pipeline_jobs (npub, owner, lease_until) VALUES (?, ?, ?)', ['live', 'y', now + 600])
+  const removed = await pruneOperational(db, now)
+  assert.equal(removed.deliveries, 1)
+  assert.equal(removed.pipelineClaims, 1)
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM digests')).n, 1, 'digests stay until the reader deletes them')
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM pipeline_jobs')).n, 1)
+  await db.close()
+})

@@ -34,11 +34,20 @@ export function defaultRelays(): string[] {
 
 // ─── Relay lists ─────────────────────────────────────────────────────────────
 
-const lists = new Map<string, Promise<RelayList | null>>()
+const lists = new Map<string, { at: number; list: Promise<RelayList | null> }>()
+const LISTS_MAX = 1000
+/** A miss is asked again after this long; a relay may have been down. */
+const MISS_TTL_MS = 10 * 60_000
 
-/** A person's relay list, or null when none was found. Cached for the session, including misses. */
+/** A person's relay list, or null when none was found. Cached for the session; misses for ten minutes. */
 export function getRelayList(pubkey: string): Promise<RelayList | null> {
-  let hit = lists.get(pubkey)
+  const cached = lists.get(pubkey)
+  if (cached && Date.now() - cached.at > MISS_TTL_MS) {
+    void cached.list.then((list) => {
+      if (!list && lists.get(pubkey) === cached) lists.delete(pubkey)
+    })
+  }
+  let hit = cached?.list
   if (!hit) {
     hit = (async () => {
       try {
@@ -55,7 +64,8 @@ export function getRelayList(pubkey: string): Promise<RelayList | null> {
         return null
       }
     })()
-    lists.set(pubkey, hit)
+    lists.set(pubkey, { at: Date.now(), list: hit })
+    if (lists.size > LISTS_MAX) lists.delete(lists.keys().next().value!)
   }
   return hit
 }

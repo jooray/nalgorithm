@@ -14,16 +14,24 @@ import type { ProfileSnapshot } from './digest-model.js'
 const cache = new Map<string, ProfileData>()
 const tried = new Set<string>()
 
+/** A long session meets many people; the oldest entries go first past this many. */
+const PROFILE_CACHE_MAX = 5000
+function remember(pubkey: string, profile: ProfileData): void {
+  cache.delete(pubkey)
+  cache.set(pubkey, profile)
+  if (cache.size > PROFILE_CACHE_MAX) cache.delete(cache.keys().next().value!)
+}
+
 /** Remember profiles the Feed already has, so show notes do not look them up again. */
 export function rememberProfiles(profiles: Map<string, ProfileData>): void {
-  for (const [pk, p] of profiles) cache.set(pk, p)
+  for (const [pk, p] of profiles) remember(pk, p)
 }
 
 /** Remember a stored snapshot without overriding a fresher profile. */
 export function rememberSnapshots(snapshots: Record<string, ProfileSnapshot> | undefined): void {
   if (!snapshots) return
   for (const [pubkey, s] of Object.entries(snapshots)) {
-    if (!cache.has(pubkey)) cache.set(pubkey, { pubkey, ...s })
+    if (!cache.has(pubkey)) remember(pubkey, { pubkey, ...s })
   }
 }
 
@@ -45,6 +53,8 @@ export async function loadProfiles(pubkeys: string[], relays: string[]): Promise
   const missing = pubkeys.filter((pk) => !cache.has(pk) && !tried.has(pk))
   if (missing.length > 0 && relays.length > 0) {
     for (const pk of missing) tried.add(pk)
+    // Past the cap the oldest misses may be tried again; that is cheaper than an unbounded set.
+    while (tried.size > PROFILE_CACHE_MAX) tried.delete(tried.values().next().value!)
     const fetcher = createFetcher({ relays })
     try {
       rememberProfiles(await fetcher.getProfiles(missing))

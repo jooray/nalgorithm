@@ -239,6 +239,33 @@ export function createStore(db: Db, npub: string, now: () => number = () => Math
 }
 
 /** Delete scores older than the TTL for everyone. Returns rows removed. */
+/**
+ * Retention for operational records, run once a day. What a reader keeps (settings, digests,
+ * learned taste) is not here: it stays until they delete their hosted data.
+ */
+export const RETENTION = {
+  /** Delivery attempts: enough to explain a missed DM, then gone. */
+  deliveriesDays: 180,
+  /** Signed DMs waiting for a relay; resending after a month is pointless. */
+  outboxDays: 30,
+  /** Public profile metadata, refetched when needed. */
+  profilesDays: 90,
+} as const
+
+export async function pruneOperational(db: Db, now = Math.floor(Date.now() / 1000)): Promise<Record<string, number>> {
+  const day = 86_400
+  const run = async (sql: string, params: number[]): Promise<number> => (await db.run(sql, params)).changes
+  return {
+    sessions: await run('DELETE FROM sessions WHERE expires_at < ?', [now]),
+    nonces: await run('DELETE FROM nonces WHERE expires_at < ?', [now]),
+    deliveries: await run('DELETE FROM deliveries WHERE created_at < ?', [now - RETENTION.deliveriesDays * day]),
+    outbox: await run('DELETE FROM dm_outbox WHERE created_at < ?', [now - RETENTION.outboxDays * day]),
+    profiles: await run('DELETE FROM profiles WHERE fetched_at < ?', [now - RETENTION.profilesDays * day]),
+    // A claim whose owner died long ago; live owners renew theirs every 30 seconds.
+    pipelineClaims: await run('DELETE FROM pipeline_jobs WHERE lease_until < ?', [now - 3600]),
+  }
+}
+
 export async function pruneScores(db: Db, nowSec = Math.floor(Date.now() / 1000)): Promise<number> {
   return (await db.run('DELETE FROM scores WHERE post_created_at < ?', [nowSec - SCORE_TTL_SECONDS])).changes
 }
