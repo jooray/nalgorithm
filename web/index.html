@@ -256,6 +256,7 @@
             <p id="input-user-prompt-count" class="field-hint count" aria-live="polite"></p>
             <p class="field-hint">Use your own words; you can change this later. Starters:</p>
             <div id="input-user-prompt-starters" class="starters" role="group" aria-label="Starters for your words"></div>
+            <div class="setup-extra">
             <label class="check"><input type="checkbox" id="input-learn" checked><span>Learn from my likes<small>Off uses only your written interests. Previously learned taste is kept for re-enabling.</small></span></label>
             <label for="input-learned-prompt">Learned from your likes</label>
             <textarea id="input-learned-prompt" rows="4" readonly class="readonly-field" placeholder="Will be generated after the first run..."></textarea>
@@ -263,9 +264,10 @@
               <button id="btn-regenerate-learned" class="btn btn-small" type="button">Update learned taste</button>
               <button class="btn btn-small btn-ghost" type="button" data-reset-learned>Reset learned taste</button>
             </div>
+            </div>
           </section>
 
-          <section class="tune-section">
+          <section class="tune-section setup-extra">
             <h2>Feed</h2>
             <div class="field-row">
               <div>
@@ -314,7 +316,7 @@
             <p class="field-hint">Does the bulk of the work. Keep it cheap and fast.</p>
           </section>
 
-          <details class="tune-section tune-more">
+          <details class="tune-section tune-more setup-extra">
             <summary>More model options</summary>
             <label for="select-scorer">Scoring method</label>
             <select id="select-scorer">
@@ -345,7 +347,7 @@
             <p class="field-hint">How many scoring calls run at once. 1 is sequential; 5 is roughly five times faster on a cold cache. Keep it within what your provider's rate limits allow.</p>
           </details>
 
-          <section class="tune-section">
+          <section class="tune-section setup-extra">
             <h2>Digest audio</h2>
             <label for="select-speech-voice">Reading voice (your browser's speech)</label>
             <select id="select-speech-voice"><option value="">Browser default</option></select>
@@ -356,7 +358,7 @@
             <p class="field-hint">Reading aloud in the browser is free and needs nothing here. Browsers give no access to that audio, so an MP3 has to be made by your provider: set a TTS model, then press Make audio on a digest.</p>
           </section>
 
-          <details class="tune-section tune-more">
+          <details class="tune-section tune-more setup-extra">
             <summary>Relays and signer</summary>
             <label for="input-relays">Relays (one wss:// address per line)</label>
             <textarea id="input-relays" rows="4" spellcheck="false" placeholder="wss://relay.damus.io&#10;wss://relay.primal.net&#10;wss://nos.lol"></textarea>
@@ -457,7 +459,7 @@
         </div>
 
         <!-- Both modes -->
-        <div class="tune">
+        <div class="tune setup-extra">
           <section class="tune-section">
             <h2>Reading and listening</h2>
             <label for="select-feed-order">Feed order</label>
@@ -492,7 +494,7 @@
           </section>
         </div>
 
-        <div class="tune">
+        <div class="tune setup-extra">
           <section class="tune-section" id="device-section" aria-labelledby="device-title">
             <h2 id="device-title">Privacy and this device</h2>
             <p class="field-hint byok-only">Your settings, model key (unless it is session-only), rankings, digests, cached audio and private feedback stay in this browser. The text of the notes being ranked goes from this browser to the model provider you chose. Relays you list supply the notes. Images and avatars load from their own hosts unless Tap to load remote media is on. Replies, boosts, likes and zaps are signed by your signer and published to relays.</p>
@@ -518,6 +520,11 @@
           </section>
         </div>
 
+        <div class="setup-only">
+          <p class="field-hint">Only what the first ranking needs is shown. Feed window, digest voice, relays, privacy and reading options have working defaults.</p>
+          <button id="btn-show-all-settings" class="btn btn-small btn-ghost" type="button" aria-expanded="false">Show all settings</button>
+        </div>
+
         <div class="tune-actions">
           <p id="tune-status" class="form-status" role="status"></p>
           <button id="btn-save-settings" class="btn btn-primary byok-only" type="button">Save</button>
@@ -529,7 +536,7 @@
             <h2>This device</h2>
             <p id="mode-line" class="field-hint"></p>
             <button id="btn-switch-hosted" class="btn btn-small btn-full byok-only" type="button">Switch to hosted mode (no key needed)</button>
-            <button id="btn-clear-scores" class="btn btn-small btn-full byok-only" type="button">Clear cached scores</button>
+            <button id="btn-clear-scores" class="btn btn-small btn-full byok-only setup-extra" type="button">Clear cached scores</button>
             <button id="btn-hosted-switch-byok" class="btn btn-small btn-full hosted-only" type="button">Use my own API key instead</button>
             <button id="btn-hosted-logout" class="btn btn-small btn-full hosted-only" type="button">Log out</button>
             <p class="about">

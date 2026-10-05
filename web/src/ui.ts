@@ -95,6 +95,21 @@ export function initUI(
   const btnSave = $<HTMLButtonElement>('#btn-save-settings')
   let firstSetup = Boolean(validateSettings(settings))
   if (firstSetup) btnSave.textContent = 'Save and rank my feed'
+  // Until the first save, Tune shows only the three essentials; the rest has working defaults.
+  const showAll = $<HTMLButtonElement>('#btn-show-all-settings')
+  const revealAll = (): void => {
+    document.body.classList.add('show-all-settings')
+    showAll.setAttribute('aria-expanded', 'true')
+    showAll.textContent = 'All settings are shown'
+    showAll.disabled = true
+  }
+  const paintSetup = (): void => {
+    if (document.body.dataset.mode === 'byok' && validateSettings(loadSettings())) document.body.dataset.setup = 'incomplete'
+    else delete document.body.dataset.setup
+  }
+  showAll.addEventListener('click', revealAll)
+  paintSetup()
+  document.addEventListener('nalgorithm:settings-saved', paintSetup)
   btnSave.addEventListener('click', () => {
     const updated = readFieldsToSettings()
     const problem = setupProblem(updated)
@@ -103,6 +118,8 @@ export function initUI(
       setTuneStatus(error, true)
       if (problem) {
         const field = document.getElementById(problem.field)
+        if (field?.closest('.setup-extra')) revealAll()
+        field?.closest('details')?.setAttribute('open', '')
         field?.setAttribute('aria-invalid', 'true')
         field?.setAttribute('aria-describedby', 'tune-status')
         field?.focus()

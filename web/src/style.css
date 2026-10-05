@@ -3244,3 +3244,10 @@ body[data-mode='hosted']:has(#hosted-startup:not(.hidden)) #views::before { disp
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
+
+/* First BYOK setup: only the three essentials until the first save (or "Show all settings"). */
+.setup-only { display: none; }
+body[data-setup="incomplete"]:not(.show-all-settings) .setup-extra { display: none; }
+body[data-setup="incomplete"] .setup-only { display: block; padding: 20px var(--gutter) 24px; border-top: 1px solid var(--line); }
+.setup-only .btn { margin-top: 10px; }
+body[data-setup="incomplete"].show-all-settings .setup-only .field-hint { display: none; }
