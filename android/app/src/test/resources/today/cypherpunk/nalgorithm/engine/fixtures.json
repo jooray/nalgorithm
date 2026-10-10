@@ -1,0 +1,50 @@
+{
+ "ctx1": "79d5cdaa2c967cb005cc33749491b91ffc07844cb161db5cb23c5aa902897ff3",
+ "ctx2": "dfb72b35ad4d875b921c7a8b5cbd57191ac1ab6833b1cfc15090522d50ee64f0",
+ "key1": "559c256a16cdde42e76e52acdc3916a1988d6e193eb2e2c9424917d8ed63ba49",
+ "fp": "ffedf322036b2e3078842c61c3ad17880f8a0b0c633b3b20a4f9c0abca7a5e26",
+ "digest": [
+  {
+   "role": "system",
+   "content": "You are a witty, knowledgeable radio host delivering a spoken-word digest of what happened on Nostr in the last 24 hours. Always open with \"Good morning, nostrich!\" Your style is conversational, warm, and engaging — like a smart friend catching you up over coffee. You weave posts together into a narrative rather than reading them one by one. Add context, make connections between topics, and keep the energy up. Aim for at most about 3 minutes of spoken content (roughly 500-600 words). If there is less worth saying, be shorter: never pad, and keep every item tight.\nWRITING STYLE (mandatory — apply before finalizing):\n- No significance inflation: avoid \"pivotal\", \"testament\", \"evolving landscape\", \"underscores\", \"enduring\"\n- No promotional language: avoid \"groundbreaking\", \"vibrant\", \"stunning\", \"nestled\", \"breathtaking\"\n- No vague attributions: avoid \"experts believe\", \"observers note\", \"industry reports suggest\"\n- No superficial -ing phrases tacked on for fake depth: avoid \"highlighting...\", \"showcasing...\", \"reflecting...\", \"contributing to...\"\n- No em dash overuse — prefer commas or short sentences\n- No staccato \"Not X. Not Y.\" contrast pattern\n- No copula avoidance: use \"is\"/\"are\" instead of \"serves as\", \"stands as\", \"functions as\"\n- No filler: cut \"In order to\", \"At this point in time\", \"It is important to note that\"\n- No generic upbeat conclusions: avoid \"the future looks bright\", \"exciting times ahead\", \"continuing this journey\"\n- No rule of three where it feels forced\n- Vary sentence length. Short punchy ones. Then longer ones that take their time. Mix them.\n- Have opinions. React to things. Be specific rather than vague.\n\nSPOKEN OUTPUT (this will be read aloud by a text-to-speech engine):\n- Output ONLY plain text. No markdown, no headers, no bullet points, no asterisks.\n- Spell out version numbers: \"one dot five dot three\" not \"1.5.3\"\n- Spell out abbreviations on first use: \"N I P nineteen\" not \"NIP-19\"\n- Write URLs as spoken descriptions: \"on their GitHub\" not \"github.com/foo/bar\"\n- No hashtags, no emoji, no special unicode characters.\n- Use short paragraphs separated by blank lines as natural pause points."
+  },
+  {
+   "role": "user",
+   "content": "Create a spoken-word radio digest from these top Nostr posts. Group related topics together, add transitions, and make it flow naturally as if someone is listening to it being read aloud. Don't just list posts — tell the story of what happened today. Include attribution (mention who said what) but keep it natural. Skip any posts that are too short or low-quality to be worth mentioning.\n\n=== User's Interests ===\nBitcoin\n\n=== Learned Preferences ===\nlikes relays\n\n=== Top 3 Posts (ranked by relevance) ===\n\n1. [Score: 9/10, 12:13 AM] Alice quoted someone you follow: \"my take\" — Original: \"quoted\"\n\n2. [Score: 8/10, 10:13 PM] Alice: Hello world\n   Relevance: about bitcoin\n\n3. [Score: 6.67/10, 11:13 PM] [Boosted by someone you follow] Originally by someone you follow: Boosted text\n\nAdditional rules: give every post in the list at least one sentence, most important first, and group related ones. Report what people said and attribute it to them; do not add opinions of your own on contested political or legal matters, and do not state anything the posts do not say. End with the sentence: That's your digest."
+  }
+ ],
+ "decision": {
+  "state": "Relevance scoring of Nostr posts for one user. Everything needed is in each question.",
+  "questions": {
+   "p1": {
+    "type": "score",
+    "instructions": "How relevant is the Nostr post below to this user's interests and preferences?\n\n=== User Profile ===\nBitcoin\n\n=== Learned Preferences (from posts the user liked) ===\nlearned\n\nScore a boosted post by the original content being boosted. Score a quote post by the quote and the quoted post together. Short low-effort posts (greetings, a single emoji, a bare link or image) score low unless the user's profile explicitly values them. A post matching several of the user's interests scores higher than one matching a single interest. Anything the user says they do not care about or want filtered out scores at the bottom, however well made it is.\n\n=== Post ===\n[Quote by Alice] \"my take\" — Quoted post: \"quoted\"",
+    "criteria": [
+     "Spam, completely irrelevant, or content the user explicitly wants filtered out.",
+     "Off-topic, low-effort, or noise (greetings, bare images, memes). No meaningful connection to the user's interests.",
+     "Mostly irrelevant but not objectionable. Weak or indirect connection at best.",
+     "Tangentially related to the user's interests, or generic content that is not off-topic.",
+     "Clearly relevant to one of the user's interests, with reasonable depth or insight.",
+     "Directly about a core interest of the user, substantive, high signal. The user would actively seek this out."
+    ]
+   }
+  }
+ },
+ "splitInput": "Sentence number 0 is here. Sentence number 1 is here. Sentence number 2 is here. Sentence number 3 is here. Sentence number 4 is here. Sentence number 5 is here. Sentence number 6 is here. \n\nSentence number 7 is here. Sentence number 8 is here. Sentence number 9 is here. Sentence number 10 is here. Sentence number 11 is here. Sentence number 12 is here. Sentence number 13 is here. \n\nSentence number 14 is here. Sentence number 15 is here. Sentence number 16 is here. Sentence number 17 is here. Sentence number 18 is here. Sentence number 19 is here. Sentence number 20 is here. \n\nSentence number 21 is here. Sentence number 22 is here. Sentence number 23 is here. Sentence number 24 is here. Sentence number 25 is here. Sentence number 26 is here. Sentence number 27 is here. \n\nSentence number 28 is here. Sentence number 29 is here. Sentence number 30 is here. Sentence number 31 is here. Sentence number 32 is here. Sentence number 33 is here. Sentence number 34 is here. \n\nSentence number 35 is here. Sentence number 36 is here. Sentence number 37 is here. Sentence number 38 is here. Sentence number 39 is here. xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+ "split": [
+  "Sentence number 0 is here. Sentence number 1 is here. Sentence number 2 is here. Sentence number 3 is here.",
+  "Sentence number 4 is here. Sentence number 5 is here. Sentence number 6 is here.",
+  "Sentence number 7 is here. Sentence number 8 is here. Sentence number 9 is here. Sentence number 10 is here.",
+  "Sentence number 11 is here. Sentence number 12 is here. Sentence number 13 is here.",
+  "Sentence number 14 is here. Sentence number 15 is here. Sentence number 16 is here. Sentence number 17 is here.",
+  "Sentence number 18 is here. Sentence number 19 is here. Sentence number 20 is here.",
+  "Sentence number 21 is here. Sentence number 22 is here. Sentence number 23 is here. Sentence number 24 is here.",
+  "Sentence number 25 is here. Sentence number 26 is here. Sentence number 27 is here.",
+  "Sentence number 28 is here. Sentence number 29 is here. Sentence number 30 is here. Sentence number 31 is here.",
+  "Sentence number 32 is here. Sentence number 33 is here. Sentence number 34 is here.",
+  "Sentence number 35 is here. Sentence number 36 is here. Sentence number 37 is here. Sentence number 38 is here.",
+  "Sentence number 39 is here.",
+  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "xxxxxxxxxx"
+ ]
+}

@@ -1,0 +1,20 @@
+# Zapstore listing for the Android app. Releases come from GitHub: each one
+# carries the signed nalgorithm-<version>.apk (see AGENTS.md, "Releasing the Android app").
+name: nalgorithm
+summary: Your Nostr feed ranked by what you care about, plus a daily voice digest
+description: |
+  nalgorithm ranks the posts of the people you follow on Nostr by what you say you care about, in your own words. Every score comes with a one-line reason. Each morning it can write a short digest of what mattered and read it to you.
+
+  Start with the hosted service: no API key, a three-day free trial, then Lightning. Or bring your own model key, and the app does all the work on your phone for free.
+
+  When you open the app, it fetches your latest digest audio right away, and a background check downloads new ones, so the morning digest plays even offline. It keeps playing with the screen off, with lock-screen and headphone controls.
+
+  You sign in with Amber on the same phone, or with any NIP-46 remote signer. Feedback like "more like this" or "hide this person" stays private and is never published.
+
+  Open source under the MIT licence.
+website: https://nalgorithm.cypherpunk.today
+repository: https://github.com/jooray/nalgorithm
+icon: ./icon-512.png
+tags: [nostr, feed, ai, podcast, digest, amber]
+license: MIT
+pubkey: npub1m2mvvpjugwdehtaskrcl7ksvdqnnhnjur9v6g9v266nss504q7mqvlr8p9

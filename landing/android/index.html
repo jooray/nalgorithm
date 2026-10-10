@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nalgorithm for Android</title>
+<meta name="description" content="The nalgorithm Android app: your Nostr feed ranked by what you care about, and a daily voice digest that plays in the background.">
+<meta name="theme-color" content="#6B3DF5">
+<link rel="icon" href="../assets/icon-192.png">
+<style>
+:root { --ground: #0B0B10; --surface: #16161F; --line: #2A2A38; --text: #F5F5F8; --muted: #A4A4B5; --violet: #6B3DF5; --accent: #C6F135; --on-accent: #10130A; --accent-text: #C6F135; }
+@media (prefers-color-scheme: light) { :root { --ground: #FAF7F2; --surface: #FFFFFF; --line: #E4DED3; --text: #14120F; --muted: #5E5A52; --accent-text: #3F6B00; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--text); font: 400 1.0625rem/1.55 "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: inherit; }
+.wrap { max-width: 40rem; margin: 0 auto; padding: 1rem; }
+.brand { display: flex; align-items: center; gap: .6rem; font-weight: 800; text-decoration: none; padding: .5rem 0 1.5rem; }
+.brand img { width: 32px; height: 32px; border-radius: 8px; }
+.hero { background: var(--violet); color: #fff; border-radius: 28px; padding: clamp(1.5rem, 5vw, 2.5rem); }
+.hero h1 { margin: 0 0 .5rem; font-weight: 800; letter-spacing: -.03em; line-height: 1.05; font-size: clamp(2rem, 7vw, 3rem); }
+.hero p { margin: 0 0 1.25rem; color: rgba(255,255,255,.88); }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 1.4rem; border-radius: 999px; font-weight: 700; text-decoration: none; margin: .25rem .5rem .25rem 0; }
+.btn-accent { background: var(--accent); color: var(--on-accent); }
+.btn-ghost { color: #fff; border: 2px solid rgba(255,255,255,.5); }
+section { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 1.25rem 1.5rem; margin-top: 1rem; }
+h2 { font-size: 1.15rem; margin: 0 0 .5rem; }
+.muted { color: var(--muted); font-size: .95rem; }
+code { font-size: .8rem; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="brand" href="../"><img src="../assets/icon-192.png" alt="">nalgorithm</a>
+  <div class="hero">
+    <h1>nalgorithm for Android</h1>
+    <p><strong>Version <span id="version">1.0.0</span></strong></p>
+    <a class="btn btn-accent" href="https://zapstore.dev/apps/today.cypherpunk.nalgorithm">Get it on Zapstore</a>
+    <a class="btn btn-ghost" href="nalgorithm-1.0.0.apk">Download APK</a>
+  </div>
+  <section>
+    <h2>What the app adds</h2>
+    <p>It does everything the web app does, in both modes: the hosted service with no API key, or your own model. On a phone it also does three things a web page can't:</p>
+    <p>When you open it, it fetches your latest digest and its audio right away, so play works at once and keeps working offline. Before you open it, a background check downloads new digests.</p>
+    <p>The digest keeps playing with the screen off. You control it from the lock screen and your headphones.</p>
+    <p>You sign in with Amber on the same phone. There's no QR code to scan, and nalgorithm never sees your key.</p>
+  </section>
+  <section>
+    <h2>Updates</h2>
+    <p>Zapstore keeps the app up to date. With Obtainium, <a href="obtainium://add/https://nalgorithm.cypherpunk.today/android/">add this page as a source</a>.</p>
+    <p class="muted">Signing certificate SHA-256:<br><code>79:75:0f:b4:93:49:ec:37:29:be:5a:3e:82:55:07:a1:5e:47:c6:d9:87:e8:54:ae:91:d5:d5:0a:20:b3:a2:4d</code></p>
+  </section>
+</div>
+</body>
+</html>
