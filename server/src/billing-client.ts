@@ -132,11 +132,18 @@ export function createBillingClient(opts: BillingClientOptions) {
       }
     },
 
-    async createCharge(npub: string, plan: string, sats?: number): Promise<{ invoice_id: string; checkout_url?: string }> {
-      const { status, body } = await call('/v1/charges', {
+    /**
+     * `redirectUrl` is where BTCPay sends the payer once paid. Billing only accepts
+     * origins it was configured with; if it refuses this one, charge without it,
+     * because a payment that lands on the default page beats no payment.
+     */
+    async createCharge(npub: string, plan: string, sats?: number, redirectUrl?: string): Promise<{ invoice_id: string; checkout_url?: string }> {
+      const charge = (redirect?: string) => call('/v1/charges', {
         method: 'POST',
-        body: JSON.stringify({ npub, plan, ...(sats ? { sats } : {}) }),
+        body: JSON.stringify({ npub, plan, ...(sats ? { sats } : {}), ...(redirect ? { redirect_url: redirect } : {}) }),
       })
+      let { status, body } = await charge(redirectUrl)
+      if (status === 400 && redirectUrl) ({ status, body } = await charge())
       if (status !== 200) throw new Error(`billing answered ${status} to charge`)
       return body
     },

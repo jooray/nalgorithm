@@ -179,6 +179,19 @@ test('billing client: trial start treats 409 as success and re-reads the state',
   assert.equal((await c.startTrial('n')).state, 'trial')
 })
 
+test('billing client: a charge whose redirect billing refuses is made again without it', async () => {
+  const bodies = []
+  const fn = async (url, init) => {
+    const body = JSON.parse(init.body)
+    bodies.push(body)
+    if (body.redirect_url) return new Response(JSON.stringify({ error: 'redirect_url is not an allowed origin' }), { status: 400 })
+    return new Response(JSON.stringify({ invoice_id: 'i1', checkout_url: 'https://pay/i/i1' }), { status: 200 })
+  }
+  const c = createBillingClient({ url: 'http://b', token: 't', product: 'nalgorithm', fetch: fn, now: () => T0 })
+  assert.equal((await c.createCharge('n', 'nalgorithm', undefined, 'https://x/billing/app-return')).invoice_id, 'i1')
+  assert.deepEqual(bodies, [{ npub: 'n', plan: 'nalgorithm', redirect_url: 'https://x/billing/app-return' }, { npub: 'n', plan: 'nalgorithm' }])
+})
+
 test('billing client: consume on outage allows a known-active user and denies anyone else', async () => {
   const state = { product: { state: 'active', until: T0 + 1000 } }
   const { fn } = fakeBillingFetch(state)
@@ -206,7 +219,7 @@ function fakeBilling(initial = { state: 'active', until: T0 + 86400 }) {
     async entitlement() { if (b.current === 'throw') throw new BillingUnavailable('down'); return b.current },
     async startTrial(npub) { b.trials.push(npub); b.current = { state: 'trial', until: T0 + 3 * 86400 }; return b.current },
     async consume(npub, kind, units, key) { b.consumed.push({ npub, kind, units, key }); return b.consumeResult },
-    async createCharge(npub, plan, sats) { b.charge = { npub, plan, sats }; return { invoice_id: 'inv1', checkout_url: 'https://pay/i/inv1' } },
+    async createCharge(npub, plan, sats, redirectUrl) { b.charge = { npub, plan, sats, ...(redirectUrl ? { redirectUrl } : {}) }; return { invoice_id: 'inv1', checkout_url: 'https://pay/i/inv1' } },
     forget() {},
   }
   return b
@@ -708,6 +721,23 @@ test('HTTP: checkout uses the session npub, allowlists plans, and never takes an
     assert.deepEqual(billing.charge, { npub, plan: 'nalgorithm', sats: undefined })
     assert.equal((await json('/billing/checkout', { method: 'POST', body: { plan: 'lievik' }, token: body.token })).status, 400)
     assert.equal((await json('/billing/checkout', { method: 'POST', body: { plan: 'nalgorithm', sats: 1.5 }, token: body.token })).status, 400)
+  })
+})
+
+test('HTTP: an app checkout returns the payer to the app page, which opens nalgorithm://billing', async () => {
+  await withApp(async ({ json, login, npub, billing, base }) => {
+    const { body } = await login()
+    assert.equal((await json('/billing/checkout', { method: 'POST', body: { plan: 'nalgorithm', return: 'app' }, token: body.token })).status, 200)
+    assert.match(billing.charge.redirectUrl, /\/billing\/app-return$/)
+    assert.equal(billing.charge.npub, npub)
+    const page = await fetch(base + '/billing/app-return')
+    assert.equal(page.status, 200, 'no session needed: the browser tab has none')
+    assert.match(page.headers.get('content-type'), /text\/html/)
+    const html = await page.text()
+    assert.match(html, /window\.location\.replace\("nalgorithm:\/\/billing"\)/)
+    assert.match(html, /href="nalgorithm:\/\/billing"/)
+    const nonce = /script-src 'nonce-([^']+)'/.exec(page.headers.get('content-security-policy'))[1]
+    assert.ok(html.includes(`<script nonce="${nonce}">`))
   })
 })
 

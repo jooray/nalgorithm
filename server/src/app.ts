@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { ProviderBusy, collectPostPubkeys, readImeta } from 'nalgorithm'
 import type { PipelineLogger, ScoredPost } from 'nalgorithm'
@@ -54,6 +54,59 @@ export const SAMPLE_VOICES = ['af_bella', 'af_heart', 'af_sky', 'bf_emma', 'am_m
 const COOKIE = 'nalgorithm_session'
 const MAX_BODY = 64 * 1024
 const CHECKOUT_PLANS = new Set(['nalgorithm', 'all-access'])
+
+/**
+ * Where BTCPay sends someone who paid from the Android app. The checkout runs in a
+ * Custom Tab, which has no session here, so the web app would only ask them to sign
+ * in. This page hands them back through nalgorithm://billing instead: the app's
+ * activity is singleTask, so returning to it closes the tab, and the app confirms
+ * the payment itself. BTCPay redirects without a tap and Chrome may refuse to open
+ * an app from a navigation nobody tapped, so the page also shows a button.
+ */
+const APP_RETURN_PATH = '/billing/app-return'
+const APP_RETURN_URL = 'nalgorithm://billing'
+
+function sendAppReturn(res: ServerResponse): void {
+  const nonce = randomBytes(16).toString('base64')
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Payment received</title>
+<style nonce="${nonce}">
+  :root { color-scheme: dark light; --bg: #0b0b10; --text: #fff; --text2: #b4b4c6; --accent: #c6f135; --on-accent: #0b0b10; }
+  @media (prefers-color-scheme: light) { :root { --bg: #faf7f2; --text: #17151f; --text2: #4f4c63; --accent: #3f6b00; --on-accent: #fff; } }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 28rem; margin: 0 auto; padding: 4rem 1rem; text-align: center; }
+  h1 { font-size: 1.75rem; line-height: 1.2; margin: 0 0 .75rem; }
+  p { color: var(--text2); margin: 0 0 1.5rem; }
+  a { display: inline-block; padding: .8rem 1.4rem; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 700; text-decoration: none; }
+  small { display: block; margin-top: 1.5rem; color: var(--text2); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Payment received</h1>
+  <p>Thank you. Head back to the app; your access updates there as soon as I see the payment.</p>
+  <a href="${APP_RETURN_URL}">Back to the app</a>
+  <small>If the app doesn't open, close this tab.</small>
+</main>
+<script nonce="${nonce}">window.location.replace(${JSON.stringify(APP_RETURN_URL)})</script>
+</body>
+</html>
+`
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Length': Buffer.byteLength(html),
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+  })
+  res.end(html)
+}
 
 class HttpError extends Error {
   constructor(
@@ -214,6 +267,8 @@ export function createApp(deps: AppDeps) {
       if (token) await revokeSession(db, token)
       return send(res, 200, { ok: true }, { 'Set-Cookie': cookie('', 0) })
     }
+
+    if (method === 'GET' && path === APP_RETURN_PATH) return sendAppReturn(res)
 
     // Everything below needs a session.
     const { npub } = await requireSession(req)
@@ -410,9 +465,11 @@ export function createApp(deps: AppDeps) {
       if (!CHECKOUT_PLANS.has(plan)) throw new HttpError(400, 'unknown plan')
       const sats = body.sats === undefined ? undefined : body.sats
       if (sats !== undefined && (typeof sats !== 'number' || !Number.isInteger(sats))) throw new HttpError(400, 'sats must be an integer')
+      // The Android app pays in a browser tab on top of itself; send the payer back to it.
+      const redirectUrl = body.return === 'app' ? `${deps.publicUrl}${APP_RETURN_PATH}` : undefined
       try {
         // The npub always comes from the session, never from the request.
-        const charge = await billing.createCharge(npub, plan, sats as number | undefined)
+        const charge = await billing.createCharge(npub, plan, sats as number | undefined, redirectUrl)
         return send(res, 200, charge)
       } catch (err) {
         log.warn(`checkout failed: ${(err as Error).message}`)
