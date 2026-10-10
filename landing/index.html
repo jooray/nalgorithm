@@ -125,6 +125,8 @@ h2 { margin: 0 0 .5rem; font-size: clamp(1.8rem, 4.5vw, 3rem); line-height: 1.05
 .native h3 { margin: 0 0 .4rem; font-size: 1.15rem; }
 .native p { margin: .3rem 0 0; color: var(--muted); }
 .native .links { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
+.native.first { margin: 0 0 1.75rem; border: 2px solid var(--accent-text); }
+.sub.also { margin-bottom: 1rem; }
 
 .final { margin-top: clamp(2.5rem, 7vw, 5rem); text-align: center; padding: clamp(2rem, 6vw, 4rem) 1rem; border-radius: 28px; background: var(--violet); color: #fff; }
 .final h2 { margin-bottom: 1rem; }
@@ -199,17 +201,17 @@ footer a { text-decoration-color: var(--line); }
 
     <section id="install" aria-labelledby="install-h">
       <h2 id="install-h">Install it from your browser.</h2>
-      <p class="sub">The web app is the full app. Add it to your home screen and it opens in its own window, like any other app. It works the same on iPhone, iPad, Android and desktop. It keeps your latest digests for offline listening, and you can control playback from the lock screen.</p>
-      <div class="cols">
+      <p class="sub" id="install-sub">The web app is the full app. Add it to your home screen and it opens in its own window, like any other app. It works the same on iPhone, iPad, Android and desktop. It keeps your latest digests for offline listening, and you can control playback from the lock screen.</p>
+      <div class="cols" id="install-cards">
         <div class="card"><h3>iPhone and iPad</h3><p>Open the app in Safari, tap Share, then Add to Home Screen.</p></div>
         <div class="card"><h3>Android</h3><p>Open the app in Chrome, open the menu and tap Install app or Add to Home screen.</p></div>
         <div class="card"><h3>Desktop</h3><p>In Chrome, Edge or Brave, click the install icon in the address bar. In Safari on a Mac, choose File, then Add to Dock.</p></div>
       </div>
-      <div class="native">
+      <div class="native" id="native">
         <h3>Prefer a native Android app?</h3>
-        <p>It's optional. It does everything the web app does. It also downloads new digests in the background before you open it, and it keeps playing reliably with the screen off. A home-screen web app only fetches while it is open, and iOS can pause its audio when the screen locks.</p>
+        <p id="native-text">It's optional. It does everything the web app does. It also downloads new digests in the background before you open it, and it keeps playing reliably with the screen off. A home-screen web app only fetches while it is open, and iOS can pause its audio when the screen locks.</p>
         <div class="links">
-          <a class="btn btn-ghost" href="https://zapstore.dev/apps/today.cypherpunk.nalgorithm">Zapstore</a>
+          <a class="btn btn-ghost" id="zapstore-link" href="https://zapstore.dev/apps/today.cypherpunk.nalgorithm">Zapstore</a>
           <a class="btn btn-ghost" href="obtainium://add/https://github.com/jooray/nalgorithm">Obtainium</a>
           <a class="btn btn-ghost" href="https://github.com/jooray/nalgorithm/releases/latest">Download on GitHub</a>
         </div>
@@ -267,6 +269,23 @@ footer a { text-decoration-color: var(--line); }
 
 <script>
 (function () {
+  // ---- install section: on Android the native app comes first; elsewhere the web app is the answer ----
+  if (/Android/i.test(navigator.userAgent)) {
+    var install = document.getElementById('install'), native = document.getElementById('native')
+    var cards = document.getElementById('install-cards')
+    document.getElementById('install-h').textContent = 'Get the Android app.'
+    document.getElementById('install-sub').textContent = 'On Android, the native app is the best way to listen. It downloads new digests in the background before you open it, keeps playing reliably with the screen off, and signs you in with Amber on the same phone.'
+    native.querySelector('h3').textContent = 'nalgorithm for Android'
+    document.getElementById('native-text').textContent = 'Get it from Zapstore. Obtainium and GitHub have the same signed release.'
+    native.classList.add('first')
+    var zap = document.getElementById('zapstore-link')
+    zap.className = 'btn btn-accent'; zap.textContent = 'Get it on Zapstore'
+    var also = document.createElement('p'); also.className = 'sub also'
+    also.textContent = 'The web app works too. It is the full app, with every feature. To install it, open it in Chrome, open the menu and tap Install app.'
+    install.insertBefore(native, cards)
+    install.insertBefore(also, cards)
+  }
+
   // ---- sample player: no sound until the visitor presses play ----
   var audio = new Audio(); audio.preload = 'none'; audio.src = 'assets/sample-digest.mp3'
   var play = document.getElementById('play'), icon = document.getElementById('play-icon')
