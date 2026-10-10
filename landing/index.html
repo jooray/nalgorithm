@@ -120,6 +120,12 @@ h2 { margin: 0 0 .5rem; font-size: clamp(1.8rem, 4.5vw, 3rem); line-height: 1.05
 .bundle p { margin: .3rem 0 0; color: var(--muted); }
 .fine { color: var(--muted); font-size: .92rem; margin-top: 1rem; }
 
+/* Install */
+.native { margin-top: 1rem; border-radius: 24px; padding: 1.25rem 1.5rem; border: 1px dashed var(--line); background: var(--surface); }
+.native h3 { margin: 0 0 .4rem; font-size: 1.15rem; }
+.native p { margin: .3rem 0 0; color: var(--muted); }
+.native .links { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
+
 .final { margin-top: clamp(2.5rem, 7vw, 5rem); text-align: center; padding: clamp(2rem, 6vw, 4rem) 1rem; border-radius: 28px; background: var(--violet); color: #fff; }
 .final h2 { margin-bottom: 1rem; }
 .final .btn-accent { min-height: 56px; font-size: 1.1rem; }
@@ -134,6 +140,7 @@ footer a { text-decoration-color: var(--line); }
     <a class="brand" href="./"><img src="assets/icon-192.png" alt="" width="32" height="32"> nalgorithm</a>
     <nav aria-label="Main">
       <a href="#how">How it ranks</a>
+      <a href="#install">Install</a>
       <a href="#price">Pricing</a>
       <a class="btn btn-accent" href="app/">Open the app</a>
     </nav>
@@ -187,6 +194,25 @@ footer a { text-decoration-color: var(--line); }
         <div class="card"><h3>A digest you can read back</h3><p>Hosted: turn on daily delivery and a short spoken summary arrives each morning as a Nostr direct message, with the audio link and the text. With your own key, you write a digest in the browser whenever you want one. Either way, the app shows each note it was built from.</p></div>
         <div class="card"><h3>Reasons, not vibes</h3><p>Each post gets a score and a sentence saying why. If a score feels wrong, fix your prompt and the feed changes.</p></div>
         <div class="card"><h3>Yours to run</h3><p>Open source under the MIT licence. Bring your own model key and everything runs in your browser, free. The hosted service never replaces that.</p></div>
+      </div>
+    </section>
+
+    <section id="install" aria-labelledby="install-h">
+      <h2 id="install-h">Install it from your browser.</h2>
+      <p class="sub">The web app is the full app. Add it to your home screen and it opens in its own window, like any other app. It works the same on iPhone, iPad, Android and desktop. It keeps your latest digests for offline listening, and you can control playback from the lock screen.</p>
+      <div class="cols">
+        <div class="card"><h3>iPhone and iPad</h3><p>Open the app in Safari, tap Share, then Add to Home Screen.</p></div>
+        <div class="card"><h3>Android</h3><p>Open the app in Chrome, open the menu and tap Install app or Add to Home screen.</p></div>
+        <div class="card"><h3>Desktop</h3><p>In Chrome, Edge or Brave, click the install icon in the address bar. In Safari on a Mac, choose File, then Add to Dock.</p></div>
+      </div>
+      <div class="native">
+        <h3>Prefer a native Android app?</h3>
+        <p>It's optional. It does everything the web app does. It also downloads new digests in the background before you open it, and it keeps playing reliably with the screen off. A home-screen web app only fetches while it is open, and iOS can pause its audio when the screen locks.</p>
+        <div class="links">
+          <a class="btn btn-ghost" href="https://zapstore.dev/apps/today.cypherpunk.nalgorithm">Zapstore</a>
+          <a class="btn btn-ghost" href="obtainium://add/https://github.com/jooray/nalgorithm">Obtainium</a>
+          <a class="btn btn-ghost" href="https://github.com/jooray/nalgorithm/releases/latest">Download on GitHub</a>
+        </div>
       </div>
     </section>
 
