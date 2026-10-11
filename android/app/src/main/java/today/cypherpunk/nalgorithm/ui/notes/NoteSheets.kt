@@ -99,9 +99,9 @@ private fun DetailBody(graph: AppGraph, display: DisplayPost, profiles: Map<Stri
     val whyRequester = remember { BringIntoViewRequester() }
     val ranked = !post.score.isNaN()
 
-    if (thread.parent != null) {
+    thread.parent?.let { parent ->
         SheetSectionTitle("In reply to")
-        CompactNote(graph, thread.parent!!, people, options) { openEvent(thread.parent!!) }
+        CompactNote(graph, parent, people, options) { openEvent(parent) }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
         Avatar(post.author, people[post.author], options, size = 44, open = rememberLinkOpener(graph))

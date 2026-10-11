@@ -174,14 +174,15 @@ fun FeedScreen(
                         onRefresh = { controller.feed.refresh() },
                     )
                 }
-                if (state.notice != null) item("notice") { StatusLine(state.notice!!) }
+                state.notice?.let { notice -> item("notice") { StatusLine(notice) } }
                 if (age.isNotEmpty() || (state.busyText != null && state.posts.isNotEmpty())) {
                     item("meta") { MetaLine(age, if (state.posts.isNotEmpty()) state.busyText else null) }
                 }
-                if (state.progress != null) {
+                // Captured: `state` is read again when the item draws, and progress may be gone by then.
+                state.progress?.let { progress ->
                     item("progress") {
                         LinearProgressIndicator(
-                            progress = { state.progress!!.coerceIn(0f, 1f) },
+                            progress = { progress.coerceIn(0f, 1f) },
                             modifier = Modifier.fillMaxWidth().padding(horizontal = Nal.gutter).padding(bottom = 10.dp),
                             color = c.accentInk,
                             trackColor = c.surface3,
@@ -189,10 +190,10 @@ fun FeedScreen(
                         )
                     }
                 }
-                if (state.error != null) {
+                state.error?.let { error ->
                     item("error") {
                         StateCard(Modifier.padding(horizontal = Nal.gutter, vertical = 8.dp), error = true) {
-                            Text(state.error!!, color = c.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
+                            Text(error, color = c.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
                             NalButton("Try again", { controller.feed.refresh() }, Modifier.padding(top = 14.dp), small = true)
                         }
                     }

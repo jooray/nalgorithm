@@ -202,6 +202,36 @@ class FetcherTest {
     }
 
     @Test
+    fun `follows missing from the main relays come from the indexers`() = runBlocking {
+        val pool = FakePool { relay, f ->
+            if (relay == index[0] && f.kinds == listOf(3)) listOf(NostrEvent("k3", pk(1), 2, 3, listOf(listOf("p", pk(7))))) else emptyList()
+        }
+        assertEquals(listOf(pk(7)), make(pool).getFollows(pk(1)))
+    }
+
+    @Test
+    fun `follows found only on the user's own write relays`() = runBlocking {
+        val outbox = "wss://outbox.example"
+        val pool = FakePool { relay, f ->
+            when {
+                relay == index[0] && f.kinds == listOf(10002) ->
+                    listOf(list(pk(1), listOf(listOf("r", "$outbox/"), listOf("r", "wss://read.example", "read"))))
+                relay == outbox && f.kinds == listOf(3) -> listOf(NostrEvent("k3", pk(1), 2, 3, listOf(listOf("p", pk(6)))))
+                // Someone else's kind 3 on the read relay must never be taken.
+                relay == "wss://read.example" -> listOf(NostrEvent("other", pk(2), 3, 3, listOf(listOf("p", pk(5)))))
+                else -> emptyList()
+            }
+        }
+        assertEquals(listOf(pk(6)), make(pool).getFollows(pk(1)))
+        assertTrue(pool.calls.none { "wss://read.example" in it.relays })
+    }
+
+    @Test
+    fun `no follows anywhere is an empty list`() = runBlocking {
+        assertEquals(emptyList<String>(), make(FakePool { _, _ -> emptyList() }).getFollows(pk(1)))
+    }
+
+    @Test
     fun `profiles keep the newest event, prefer display_name, skip bad JSON`() {
         val a = pk(1); val b = pk(2); val c = pk(3)
         val out = Fetcher.parseProfileEvents(

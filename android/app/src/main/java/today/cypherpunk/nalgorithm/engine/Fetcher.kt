@@ -116,11 +116,44 @@ class Fetcher(
         return withTimeoutOrNull(timeout) { pool.query(urls, listOf(filter), timeout) } ?: emptyList()
     }
 
-    /** The pubkeys a user follows, from their newest kind 3. */
+    /**
+     * The pubkeys a user follows, from their newest kind 3. When the configured relays have
+     * none, the indexers are asked, then the user's own write relays from their kind 10002.
+     */
     suspend fun getFollows(pubkey: String): List<String> {
         val hex = pubkeyToHex(pubkey)
-        val event = query(relays, Filter(kinds = listOf(3), authors = listOf(hex), limit = 1)).maxByOrNull { it.createdAt } ?: return emptyList()
+        val filter = Filter(kinds = listOf(3), authors = listOf(hex), limit = 1)
+        fun newest(events: List<NostrEvent>) = events.filter { it.kind == 3 && it.pubkey == hex }.maxByOrNull { it.createdAt }
+        val event = newest(query(relays, filter))
+            ?: followsFallback(hex, filter, ::newest)
+            ?: return emptyList()
         return event.tags.filter { it.size > 1 && it[0] == "p" && it[1].isNotEmpty() }.map { it[1] }
+    }
+
+    private suspend fun followsFallback(hex: String, filter: Filter, newest: (List<NostrEvent>) -> NostrEvent?): NostrEvent? {
+        val asked = relays.toMutableSet()
+        val indexers = profileFallbackRelays.filter { it !in asked }
+        try {
+            if (indexers.isNotEmpty()) {
+                asked += indexers
+                newest(query(indexers, filter))?.let { return it }
+            }
+            // Outbox: the write relays named in the user's newest kind 10002.
+            val listFilter = Filter(kinds = listOf(10002), authors = listOf(hex), limit = 1)
+            val list = query(relays + indexers, listFilter, OUTBOX_QUERY_TIMEOUT)
+                .filter { it.kind == 10002 && it.pubkey == hex }.maxByOrNull { it.createdAt } ?: return null
+            val outbox = list.tags
+                .filter { it.firstOrNull() == "r" && (it.size <= 2 || it[2] == "write") }
+                .mapNotNull { RelayUrl.sanitize(it.getOrNull(1)) }
+                .distinct().filter { it !in asked }.take(OUTBOX_MAX_RELAYS_PER_AUTHOR + 1)
+            if (outbox.isEmpty()) return null
+            return newest(query(outbox, filter, OUTBOX_QUERY_TIMEOUT))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Best effort: the caller reports "no follows" as before.
+            return null
+        }
     }
 
     suspend fun getPosts(follows: List<String>, hoursBack: Int = DEFAULT_HOURS_BACK, maxPosts: Int = DEFAULT_MAX_POSTS): List<FetchedPost> {

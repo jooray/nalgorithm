@@ -213,8 +213,8 @@ Scoring scale:
         return emptyList()
     }
 
-    private val TUPLE = Regex("\\[\\s*(\\d+)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)\\s*(?:,\\s*(\"(?:[^\"\\\\]|\\\\.)*\"))?\\s*]")
-    private val OBJECT = Regex("\\{[^{}]*}")
+    private val TUPLE = Regex("\\[\\s*(\\d+)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)\\s*(?:,\\s*(\"(?:[^\"\\\\]|\\\\.)*\"))?\\s*\\]")
+    private val OBJECT = Regex("\\{[^\\{\\}]*\\}")
 
     /** Whole entries out of text that does not parse (usually a truncated response). */
     internal fun salvageEntries(text: String): List<Candidate> {
@@ -247,8 +247,8 @@ Scoring scale:
         val candidates = mutableListOf<String>()
         Regex("```(?:json)?\\s*([\\s\\S]*?)```").find(cleaned)?.let { candidates.add(it.groupValues[1].trim()) }
         candidates.add(cleaned)
-        Regex("(\\[[\\s\\S]*])").find(cleaned)?.let { candidates.add(it.groupValues[1]) }
-        Regex("(\\{[\\s\\S]*})").find(cleaned)?.let { candidates.add(it.groupValues[1]) }
+        Regex("(\\[[\\s\\S]*\\])").find(cleaned)?.let { candidates.add(it.groupValues[1]) }
+        Regex("(\\{[\\s\\S]*\\})").find(cleaned)?.let { candidates.add(it.groupValues[1]) }
 
         var entries: List<Candidate> = emptyList()
         var parseFailed = true
