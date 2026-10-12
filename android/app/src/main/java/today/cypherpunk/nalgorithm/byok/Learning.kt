@@ -52,6 +52,7 @@ class Learning(private val records: RecordStore, private val http: OkHttpClient)
                     llm = LlmConfig(s.apiBaseUrl, s.apiKey, s.learnerModel.ifEmpty { s.model }, http = http),
                     pubkeyHex = hex,
                     pauseMs = 0,
+                    throwOnFailure = force,
                 )
             } finally {
                 synchronized(running) { running.remove(k) }

@@ -13,6 +13,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -137,6 +140,7 @@ class ByokController(private val graph: AppGraph) : ModeController {
     private var started = false
     private var runJob: Job? = null
     private var ticker: Job? = null
+    private var orderWatch: Job? = null
     private val foreground = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) = autoCheck()
     }
@@ -717,12 +721,22 @@ class ByokController(private val graph: AppGraph) : ModeController {
                 autoCheck()
             }
         }
+        // The list reorders as it draws; the status line names the order, so it follows too.
+        orderWatch = graph.scope.launch {
+            graph.deviceSettings.settings.map { it.feedOrder }.distinctUntilChanged().drop(1).collect {
+                if (currentPosts.isNotEmpty() && pending == null) {
+                    coverage = coverageOf(currentPosts, settings.value)
+                    paintFeed()
+                }
+            }
+        }
     }
 
     override fun stop() {
         if (!started) return
         started = false
         ticker?.cancel()
+        orderWatch?.cancel()
         runJob?.cancel()
         graph.scope.launch { ProcessLifecycleOwner.get().lifecycle.removeObserver(foreground) }
     }

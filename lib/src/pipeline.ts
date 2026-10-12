@@ -178,13 +178,18 @@ export interface RefreshLearnedOptions {
   now?: () => number
   /** Pause between batches in ms (default: 1000). */
   pauseMs?: number
+  /**
+   * Throw when the model fails on new likes instead of keeping the stored
+   * prompt, so a button the reader pressed can say what went wrong.
+   */
+  throwOnFailure?: boolean
 }
 
 /**
  * Fetch likes newer than the stored high-water mark and fold them into the
  * stored learned prompt. Returns the prompt to use, or undefined if there is
  * none. A failure keeps whatever was stored, so this never throws for LLM
- * trouble.
+ * trouble unless [RefreshLearnedOptions.throwOnFailure] asks it to.
  */
 export async function refreshLearnedPrompt(opts: RefreshLearnedOptions): Promise<string | undefined> {
   const { fetcher, store, llm, pubkeyHex, log = silentLogger, batchSize = 50 } = opts
@@ -254,8 +259,10 @@ export async function refreshLearnedPrompt(opts: RefreshLearnedOptions): Promise
       })
     } else {
       log.warn('LLM returned empty learned prompt, skipping save')
+      if (opts.throwOnFailure) throw new Error('The model returned no learned taste. Try again.')
     }
   } catch (err) {
+    if (opts.throwOnFailure) throw err
     log.warn(`failed to evolve learned prompt: ${(err as Error).message}`)
   }
   return learnedPrompt

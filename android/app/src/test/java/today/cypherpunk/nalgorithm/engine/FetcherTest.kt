@@ -227,6 +227,25 @@ class FetcherTest {
     }
 
     @Test
+    fun `a dead relay costs time, not what the live relays sent`() = kotlinx.coroutines.test.runTest {
+        val like = NostrEvent("r1", pk(1), 100, 7, listOf(listOf("e", pk(4))), "+")
+        val liked = NostrEvent(pk(4), pk(2), 90, 1, emptyList(), "a liked note")
+        // A pool that waits out its full deadline (one relay never sends EOSE), then answers with what it has.
+        val slow = object : RelayPoolApi {
+            override suspend fun query(relays: List<String>, filters: List<Filter>, timeoutMs: Long): List<NostrEvent> {
+                kotlinx.coroutines.delay(timeoutMs)
+                return if (filters.single().kinds == listOf(7)) listOf(like) else listOf(liked)
+            }
+            override suspend fun get(relays: List<String>, filter: Filter, timeoutMs: Long): NostrEvent? = null
+            override suspend fun publish(relays: List<String>, event: NostrEvent, timeoutMs: Long): Map<String, Boolean> = emptyMap()
+            override fun subscribe(relays: List<String>, filters: List<Filter>): Flow<NostrEvent> = emptyFlow()
+        }
+        val page = Fetcher(slow, main).getLikes(pk(1), 200, null, null)
+        assertEquals(1, page.reactionCount)
+        assertEquals(listOf(pk(4)), page.likes.map { it.id })
+    }
+
+    @Test
     fun `no follows anywhere is an empty list`() = runBlocking {
         assertEquals(emptyList<String>(), make(FakePool { _, _ -> emptyList() }).getFollows(pk(1)))
     }

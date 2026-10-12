@@ -822,8 +822,12 @@ function retryWhenFree(seconds = 30): void {
   }, 1000)
 }
 
+/** The ranking on screen and the order it was drawn in, so a changed order can draw it again. */
+let drawn: { feed: ShownFeed; fresh: string[]; order: string } | null = null
+
 /** Draw a ranking, `fresh` notes first. Also the only place that knows which posts are on screen. */
 function drawFeed(feed: ShownFeed, fresh: string[]): void {
+  drawn = { feed, fresh, order: loadSettings().feedOrder }
   const profiles = new Map<string, ProfileData>()
   for (const [pubkey, p] of Object.entries(feed.profiles)) {
     profiles.set(pubkey, { ...p, pubkey })
@@ -972,6 +976,7 @@ function afterSettingsSaved(prompt: string, hoursBack: number): void {
   }
   if (changed) void liveCheck()
   else if (shownIds.length === 0) showEmpty('Press Refresh to rank your feed.')
+  else if (drawn && !pending && drawn.order !== loadSettings().feedOrder) drawFeed(drawn.feed, drawn.fresh)
 }
 
 // ─── Payment ─────────────────────────────────────────────────────────────────

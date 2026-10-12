@@ -22,7 +22,7 @@ export function learnIncrementally(fetcher: Fetcher, settings: AppSettings, forc
       async getScores() { return {} }, async putScores() {},
     }
     return refreshLearnedPrompt({ fetcher, store, pubkeyHex: pubkeyToHex(settings.npub),
-      llm: { apiBaseUrl: settings.apiBaseUrl, apiKey: settings.apiKey, model: settings.learnerModel || settings.model }, pauseMs: 0 })
+      llm: { apiBaseUrl: settings.apiBaseUrl, apiKey: settings.apiKey, model: settings.learnerModel || settings.model }, pauseMs: 0, throwOnFailure: force })
   })().finally(() => { finishActivity(); fetcher.destroy(); running.delete(key) })
   running.set(key, work)
   return work

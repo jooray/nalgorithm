@@ -45,7 +45,9 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
@@ -102,9 +104,29 @@ internal fun Avatar(pubkey: String, profile: ProfileData?, options: NoteOptions,
 
 /** Body, link cards, media and the quoted note: the part a card and its detail sheet share. */
 @Composable
-internal fun NoteBody(graph: AppGraph, post: ScoredPost, people: Map<String, ProfileData>, options: NoteOptions, maxLines: Int = Int.MAX_VALUE) {
+internal fun NoteBody(graph: AppGraph, post: ScoredPost, people: Map<String, ProfileData>, options: NoteOptions, collapsible: Boolean = false) {
     val open = rememberLinkOpener(graph)
-    ContentText(post.content, people, options, open, Modifier.padding(top = 6.dp), maxLines = maxLines)
+    // A long note in a card shows its first lines and Read more; the detail sheet shows all of it.
+    var expanded by rememberSaveable(post.id) { mutableStateOf(false) }
+    var clipped by remember(post.id) { mutableStateOf(false) }
+    val clamp = collapsible && !expanded && NoteMarkdown.isLong(post.content)
+    ContentText(
+        post.content, people, options, open, Modifier.padding(top = 6.dp),
+        maxLines = if (clamp) COLLAPSED_LINES else Int.MAX_VALUE,
+        onOverflow = { clipped = it },
+    )
+    if (clamp && clipped) {
+        Text(
+            "Read more",
+            color = Nal.colors.accentInk,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .clickable(role = Role.Button) { expanded = true }
+                .padding(vertical = 8.dp),
+        )
+    }
     LinkPreviewCards(graph, post.content)
     // Hosted posts carry `media` (the server's imeta summary); BYOK reads the raw tags.
     val media = remember(post.content, post.media, post.rawEvent) {
@@ -130,40 +152,52 @@ internal fun buildContent(
     link: SpanStyle,
     muted: SpanStyle,
     mono: SpanStyle,
+    code: SpanStyle,
     open: (String) -> Unit,
 ): AnnotatedString = buildAnnotatedString {
-    val tokens = tokenizeContent(content)
-    tokens.forEachIndexed { i, token ->
-        when (token) {
-            is ContentToken.Text -> {
-                var t = token.text.replace(Regex("\n{3,}"), "\n\n")
-                if (i == 0) t = t.trimStart()
-                if (i == tokens.lastIndex) t = t.trimEnd()
-                append(t)
+    NoteMarkdown.format(content, NoteMedia::isMediaUrl).forEachIndexed { i, piece ->
+        val start = length
+        when (piece) {
+            is NoteMarkdown.Piece.Text -> append(piece.text)
+            is NoteMarkdown.Piece.Link -> {
+                val safe = ClientUrl.safeLink(piece.url)
+                if (safe != null) withLink(LinkAnnotation.Clickable("l:$i", TextLinkStyles(link)) { open(safe) }) { append(piece.label) }
+                else append(piece.label)
             }
-            is ContentToken.Profile -> {
-                val pk = token.pubkey
-                if (pk == null) append("@unknown")
-                else {
-                    val l = authorLabel(pk, people[pk])
-                    withLink(LinkAnnotation.Clickable("p:$pk:$i", TextLinkStyles(if (l.isNpub) mono else link.copy(fontWeight = FontWeight.SemiBold))) { open(options.profileHref(pk)) }) {
-                        append("@" + if (l.isNpub) l.text.take(16) + "…" else l.text)
+            is NoteMarkdown.Piece.Token -> when (val token = piece.token) {
+                is ContentToken.Profile -> {
+                    val pk = token.pubkey
+                    if (pk == null) append("@unknown")
+                    else {
+                        val l = authorLabel(pk, people[pk])
+                        withLink(LinkAnnotation.Clickable("p:$pk:$i", TextLinkStyles(if (l.isNpub) mono else link.copy(fontWeight = FontWeight.SemiBold))) { open(options.profileHref(pk)) }) {
+                            append("@" + if (l.isNpub) l.text.take(16) + "…" else l.text)
+                        }
                     }
                 }
-            }
-            is ContentToken.Ref -> {
-                val href = ClientUrl.safeLink(ClientUrl.buildEventUrl(options.eventTemplate, token.bech32))
-                if (href == null) append("[referenced post]")
-                else withLink(LinkAnnotation.Clickable("e:$i", TextLinkStyles(muted)) { open(href) }) { append("[referenced post]") }
-            }
-            is ContentToken.Url -> {
-                if (!NoteMedia.isMediaUrl(token.url)) {
-                    val safe = ClientUrl.safeLink(token.url)
-                    if (safe != null) withLink(LinkAnnotation.Clickable("u:$i", TextLinkStyles(link)) { open(safe) }) { append(token.url) }
-                    else append(token.url)
-                    append(token.trailing)
+                is ContentToken.Ref -> {
+                    val href = ClientUrl.safeLink(ClientUrl.buildEventUrl(options.eventTemplate, token.bech32))
+                    if (href == null) append("[referenced post]")
+                    else withLink(LinkAnnotation.Clickable("e:$i", TextLinkStyles(muted)) { open(href) }) { append("[referenced post]") }
                 }
+                is ContentToken.Url -> {
+                    if (!NoteMedia.isMediaUrl(token.url)) {
+                        val safe = ClientUrl.safeLink(token.url)
+                        if (safe != null) withLink(LinkAnnotation.Clickable("u:$i", TextLinkStyles(link)) { open(safe) }) { append(token.url) }
+                        else append(token.url)
+                        append(token.trailing)
+                    }
+                }
+                is ContentToken.Text -> append(token.text)
             }
+        }
+        val st = piece.style
+        if (length > start && (st.bold || st.italic || st.code || st.strike)) {
+            var span = if (st.code) code else SpanStyle()
+            if (st.bold) span = span.merge(SpanStyle(fontWeight = FontWeight.Bold))
+            if (st.italic) span = span.merge(SpanStyle(fontStyle = FontStyle.Italic))
+            if (st.strike) span = span.merge(SpanStyle(textDecoration = TextDecoration.LineThrough))
+            addStyle(span, start, length)
         }
     }
 }
@@ -178,14 +212,16 @@ internal fun ContentText(
     color: androidx.compose.ui.graphics.Color = Nal.colors.text,
     fontSize: Int = 16,
     maxLines: Int = Int.MAX_VALUE,
+    onOverflow: ((Boolean) -> Unit)? = null,
 ) {
     val c = Nal.colors
-    val text = remember(content, people, options, c) {
+    val text = remember(content, people, options, c, fontSize) {
         buildContent(
             content, people, options,
             link = SpanStyle(color = c.accentInk),
             muted = SpanStyle(color = c.text2, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline),
             mono = SpanStyle(color = c.text2, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+            code = SpanStyle(fontFamily = FontFamily.Monospace, fontSize = (fontSize - 1).sp, background = c.surface2),
             open = open,
         )
     }
@@ -198,8 +234,12 @@ internal fun ContentText(
         lineHeight = (fontSize * 1.5).sp,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
+        onTextLayout = { r -> onOverflow?.invoke(r.hasVisualOverflow) },
     )
 }
+
+/** Lines a long note shows in a card before Read more. */
+private const val COLLAPSED_LINES = 12
 
 @Composable
 private fun MediaList(items: List<MediaItem>, options: NoteOptions, open: (String) -> Unit) {

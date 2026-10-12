@@ -7,7 +7,7 @@
  * thing that silently drifts apart when copied.
  */
 
-import { chatCompletionWithRetry, chatCompletionStream } from './llm.js'
+import { chatCompletionWithRetry, chatCompletionStreamWithRetry } from './llm.js'
 import { sortByRelevance, scoreCacheKey } from './ranker.js'
 import type { ChatMessage, DigestSourceNote, LLMConfig, ProfileData, ScoredPost } from './types.js'
 
@@ -161,9 +161,9 @@ export interface DigestOptions {
    * Receives each fragment of the digest as it is generated.
    *
    * Supplying this switches the call to streaming, which is what makes a long
-   * generation visibly alive rather than indistinguishable from a hang. Note
-   * that streaming bypasses the retry wrapper — a stream that fails part-way
-   * has already emitted text, so silently restarting it would duplicate output.
+   * generation visibly alive rather than indistinguishable from a hang. A
+   * stream is retried only until its first text arrives: one that fails
+   * part-way has already emitted text, so restarting it would duplicate output.
    */
   onDelta?: (text: string) => void
 }
@@ -244,7 +244,7 @@ export async function generateDigest(config: LLMConfig, options: DigestOptions):
   const temperature = options.temperature ?? 0.5
 
   if (options.onDelta) {
-    return chatCompletionStream(config, messages, options.onDelta, temperature)
+    return chatCompletionStreamWithRetry(config, messages, options.onDelta, temperature)
   }
   return chatCompletionWithRetry(config, messages, false, 3, 2000, temperature)
 }

@@ -33,6 +33,8 @@ class Fetcher(
         /** Max pubkeys per relay filter, to avoid relay rejections. */
         private const val FILTER_AUTHOR_CHUNK = 200
         private const val QUERY_TIMEOUT = 8_000L
+        /** How much longer than the pool's own deadline a query may take before it is abandoned. */
+        private const val QUERY_GRACE = 2_000L
         /** Public relays that index kind 0 widely; asked only for pubkeys nobody else knew. */
         val DEFAULT_PROFILE_RELAYS = listOf("wss://purplepag.es", "wss://relay.damus.io")
         /** Indexers are flaky with big author filters; small batches answer reliably. */
@@ -109,11 +111,15 @@ class Fetcher(
         }
     }
 
-    /** EOSE-or-timeout across [urls]; a timeout yields nothing rather than an error. */
+    /**
+     * EOSE-or-timeout across [urls]. The pool answers at [timeout] with what the live relays sent,
+     * so a dead relay costs time, not results; the outer bound only guards a pool that hangs, and
+     * must outlast the pool's own deadline or it would throw those results away.
+     */
     private suspend fun query(urls: List<String>, filter: Filter, timeout: Long = QUERY_TIMEOUT): List<NostrEvent> {
         currentCoroutineContext().ensureActive()
         if (timeout <= 0) return emptyList()
-        return withTimeoutOrNull(timeout) { pool.query(urls, listOf(filter), timeout) } ?: emptyList()
+        return withTimeoutOrNull(timeout + QUERY_GRACE) { pool.query(urls, listOf(filter), timeout) } ?: emptyList()
     }
 
     /**

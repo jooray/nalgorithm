@@ -160,6 +160,8 @@ Summary:""",
         now: () -> Long = { System.currentTimeMillis() },
         pauseMs: Long = 1000,
         retryBaseDelayMs: Long = 2000,
+        /** Throw when the model fails on new likes, so a button the reader pressed can say why. */
+        throwOnFailure: Boolean = false,
     ): String? {
         val cached = store.getLearned()
         var learnedPrompt: String? = null
@@ -212,10 +214,12 @@ Summary:""",
                 )
             } else {
                 log.warn("LLM returned empty learned prompt, skipping save")
+                if (throwOnFailure) throw Exception("The model returned no learned taste. Try again.")
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            if (throwOnFailure) throw e
             log.warn("failed to evolve learned prompt: ${e.message}")
         }
         return learnedPrompt

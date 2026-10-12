@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.19.0 — 2026-10-12
+
+Notes read better, and a slow or dead relay no longer hides what the others
+sent. The hosted server gets the relay and digest fixes through the shared
+library; no API changes, so the web app and the server can be deployed in
+either order.
+
+### Feed
+- Light markdown in notes: **bold**, *italic*, `code`, ~~strike~~, # headings, bullets and [label](url) links. snake_case and lone asterisks stay as written.
+- A long note shows its first twelve lines in the feed with Read more; the note sheet always shows all of it.
+- Changing the feed order redraws the ranking on screen, status line included.
+
+### Relays and models
+- One relay that answered slowly made a query return nothing, even when the others had answered; that hid likes from learning. The live relays' answers are kept now.
+- A digest whose model sends nothing before the first word is retried, up to three times.
+- Update learned taste says when the model failed, instead of "No likes to learn from yet".
+
 ## 0.18.0 — 2026-10-05
 
 Fixes from a second review of 0.17.0, a visible line for hosted rankings, and a

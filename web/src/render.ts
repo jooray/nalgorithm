@@ -29,9 +29,9 @@ import {
   npubOf,
   nprofileOf,
   summarizeBoosters,
-  tokenizeContent,
   type Folded,
 } from './identity.js'
+import { formatContent, isLongNote, type TextStyle } from './markdown.js'
 import type { AppSettings } from './settings.js'
 import { copyText } from './clipboard.js'
 import { noteActions, renderActionRow, type NoteLinks } from './actions.js'
@@ -601,6 +601,7 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
     main.appendChild(renderBoostedBy(post.boostedBy, options))
   }
   renderNoteContent(post, options, main)
+  if (isLongNote(post.content)) clampLongNote(main)
   main.appendChild(renderScore(post))
 
   const links = linksFor(post, options)
@@ -623,6 +624,29 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
     })
   }
   return card
+}
+
+/** Show a long note's first lines with Read more; the detail sheet always shows all of it. */
+function clampLongNote(main: HTMLElement): void {
+  const content = main.querySelector<HTMLElement>('.post-content')
+  if (!content) return
+  content.classList.add('post-content-clamped')
+  const more = el('button', 'read-more') as HTMLButtonElement
+  more.type = 'button'
+  more.textContent = 'Read more'
+  const expand = (): void => {
+    content.classList.remove('post-content-clamped')
+    more.remove()
+  }
+  more.addEventListener('click', (e) => {
+    e.stopPropagation()
+    expand()
+  })
+  content.after(more)
+  // A note that fits after all (wide screen, short lines) needs no button.
+  globalThis.requestAnimationFrame?.(() => {
+    if (content.isConnected && content.scrollHeight <= content.clientHeight + 2) expand()
+  })
 }
 
 // ─── Detail sheet ────────────────────────────────────────────────────────────
@@ -1031,64 +1055,68 @@ interface MediaItem {
  * Build post text as DOM nodes.
  *
  * Plain text goes in as text nodes (so nothing in a post can inject markup),
- * `nostr:npub/nprofile` mentions become "@name" links or a truncated-npub
- * element, and media URLs are dropped here because they render as media.
+ * light markdown becomes strong/em/code/s elements, `nostr:npub/nprofile`
+ * mentions become "@name" links or a truncated-npub element, and media URLs
+ * are dropped here because they render as media.
  */
 function renderContent(content: string, options: RenderOptions): DocumentFragment {
   const frag = document.createDocumentFragment()
-  const tokens = tokenizeContent(content)
-  const text = (t: string): void => {
-    if (t) frag.appendChild(document.createTextNode(t))
+  const external = (href: string, label: string): HTMLAnchorElement => {
+    const a = document.createElement('a')
+    a.href = href
+    a.target = '_blank'
+    a.rel = 'noopener'
+    a.textContent = label
+    return a
   }
 
-  tokens.forEach((token, i) => {
-    switch (token.kind) {
-      case 'text': {
-        let t = token.text.replace(/\n{3,}/g, '\n\n')
-        if (i === 0) t = t.replace(/^\s+/, '')
-        if (i === tokens.length - 1) t = t.replace(/\s+$/, '')
-        text(t)
+  for (const piece of formatContent(content, isMediaUrl)) {
+    let node: Node | null = null
+    switch (piece.kind) {
+      case 'text':
+        node = document.createTextNode(piece.text)
+        break
+      case 'link': {
+        const safe = safeLink(piece.url)
+        node = safe ? external(safe, piece.label) : document.createTextNode(piece.label)
         break
       }
-      case 'profile': {
-        if (!token.pubkey) {
-          text('@unknown')
-          break
+      case 'token': {
+        const token = piece.token
+        if (token.kind === 'profile') {
+          node = token.pubkey ? personLink(token.pubkey, options, 'nostr-profile-link', '@') : document.createTextNode('@unknown')
+        } else if (token.kind === 'ref') {
+          const a = external(safeLink(buildEventUrl(options.eventUrlTemplate ?? '', token.bech32)) ?? '#', '[referenced post]')
+          a.className = 'nostr-ref-link'
+          node = a
+        } else if (!isMediaUrl(token.url)) {
+          const safe = safeLink(token.url)
+          const wrap = document.createDocumentFragment()
+          wrap.appendChild(safe ? external(safe, token.url) : document.createTextNode(token.url))
+          if (token.trailing) wrap.appendChild(document.createTextNode(token.trailing))
+          node = wrap
         }
-        const a = personLink(token.pubkey, options, 'nostr-profile-link', '@')
-        frag.appendChild(a)
-        break
-      }
-      case 'ref': {
-        const a = document.createElement('a')
-        a.className = 'nostr-ref-link'
-        a.href = safeLink(buildEventUrl(options.eventUrlTemplate ?? '', token.bech32)) ?? '#'
-        a.target = '_blank'
-        a.rel = 'noopener'
-        a.textContent = '[referenced post]'
-        frag.appendChild(a)
-        break
-      }
-      case 'url': {
-        if (isMediaUrl(token.url)) break
-        const safe = safeLink(token.url)
-        if (safe) {
-          const a = document.createElement('a')
-          a.href = safe
-          a.target = '_blank'
-          a.rel = 'noopener'
-          a.textContent = token.url
-          frag.appendChild(a)
-        } else {
-          text(token.url)
-        }
-        text(token.trailing)
         break
       }
     }
-  })
-
+    if (node) frag.appendChild(styled(node, piece.style))
+  }
   return frag
+}
+
+/** Wrap a piece in the elements its markdown asked for. */
+function styled(node: Node, style: TextStyle): Node {
+  let out = node
+  const wrap = (tag: string): void => {
+    const e = document.createElement(tag)
+    e.appendChild(out)
+    out = e
+  }
+  if (style.code) wrap('code')
+  if (style.strike) wrap('s')
+  if (style.italic) wrap('em')
+  if (style.bold) wrap('strong')
+  return out
 }
 
 /**

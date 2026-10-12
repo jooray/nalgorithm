@@ -328,7 +328,19 @@ async function scorePosts(
  * Called repeatedly while scoring runs, so the user sees ranked posts building
  * up instead of staring at a spinner until the last batch lands.
  */
+/** The order the shown ranking was drawn in. */
+let drawnOrder: string | null = null
+
+/** A saved change of feed order draws the shown ranking again, status line included. */
+function repaintShown(): void {
+  const settings = loadSettings()
+  if (isRunning || pending || currentPosts.length === 0 || drawnOrder === settings.feedOrder) return
+  renderCurrent(settings)
+  setStatus(coverageOf(currentPosts, settings))
+}
+
 function renderCurrent(settings: ReturnType<typeof loadSettings>): void {
+  drawnOrder = settings.feedOrder
   shownIds = currentPosts.map((p) => p.id)
   const display = aggregateBoosts(currentPosts)
   shownFresh = freshIds(baseKeys, display.map((p) => p.id), baseFresh)
@@ -713,6 +725,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const follow = (s: ReturnType<typeof loadSettings>): Promise<void> => followIdentity(s).catch((err) => console.error('Loading local data failed:', err))
   void follow(settings).then(() => {
     startLiveChecks({ check: autoCheck, tick: paintAge })
-    document.addEventListener('nalgorithm:settings-saved', () => void follow(loadSettings()).then(autoCheck))
+    document.addEventListener('nalgorithm:settings-saved', () => void follow(loadSettings()).then(() => {
+      repaintShown()
+      return autoCheck()
+    }))
   })
 })

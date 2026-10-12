@@ -24,7 +24,7 @@ export type { DecisionRequest, DecisionResponse, DecisionScoreAnswer, DecisionSc
 export { createLearner } from './learner.js'
 export { readImeta, type MediaMeta } from './media.js'
 export { feedbackPrompt, withFeedback, FEEDBACK_RULES_MAX, FEEDBACK_EXCERPT_MAX, type FeedbackRule } from './feedback.js'
-export { chatCompletion, chatCompletionWithRetry, chatCompletionStream, ProviderError, providerHeaders } from './llm.js'
+export { chatCompletion, chatCompletionWithRetry, chatCompletionStream, chatCompletionStreamWithRetry, ProviderError, providerHeaders } from './llm.js'
 export { synthesizeSpeech, splitTextForTTS, DEFAULT_TTS_MAX_CHARS } from './tts.js'
 export {
   humanizeText,

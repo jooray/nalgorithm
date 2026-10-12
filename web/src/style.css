@@ -1415,6 +1415,40 @@ select:focus {
   line-height: 1.5;
 }
 
+/* A long note in the feed: twelve lines, fading out, then Read more. */
+.post-content-clamped {
+  max-height: calc(1.5em * 12);
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 75%, transparent);
+}
+
+.read-more {
+  display: inline-block;
+  min-height: 32px;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.read-more:hover {
+  text-decoration: underline;
+}
+
+.post-content code,
+.embedded-content code {
+  padding: 0.05em 0.3em;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
 .post-content a,
 .embedded-content a {
   color: var(--accent-ink);

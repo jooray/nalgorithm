@@ -120,7 +120,7 @@ fun NoteCard(
         Column(Modifier.weight(1f)) {
             NoteHead(graph, post, people, options)
             if (boostedBy.isNotEmpty()) BoostedByLine(graph, boostedBy, people, options)
-            NoteBody(graph, post, people, options)
+            NoteBody(graph, post, people, options, collapsible = true)
             if (showScore) ScoreRow(post, full = false, onWhy = if (detail) ({ sheet = NoteSheet.Detail(true) }) else null)
             if (showActions) ActionRow(graph, display, people, options, onSheet = { sheet = it }, menu = true)
         }

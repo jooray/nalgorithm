@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -49,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -174,6 +176,15 @@ fun DigestScreenImpl(graph: AppGraph, modifier: Modifier = Modifier) {
             })
         }
         }
+        // The list runs under the status bar so the hero can fill it; whatever scrolls up there
+        // goes behind a scrim in the hero's colour (unseen at rest), then in the page's.
+        val heroOnTop by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .windowInsetsTopHeight(WindowInsets.statusBars)
+                .background(if (heroOnTop && !wide) Nal.colors.hero else Nal.colors.bg),
+        )
     }
 }
 

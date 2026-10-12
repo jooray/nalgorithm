@@ -197,6 +197,17 @@ class PipelineTest {
     }
 
     @Test
+    fun `a learning run the reader asked for reports the LLM failure`() = runBlocking {
+        chat { null }
+        val store = MemoryStore(learned = LearnedState("old", "t", lastLikeTimestamp = 100))
+        val err = runCatching {
+            Pipeline.refreshLearnedPrompt(FakeLikes(LikesPage(listOf(LikedPostContent("x", "liked", "a")))), store, llm(), "p", pauseMs = 0, retryBaseDelayMs = 1, throwOnFailure = true)
+        }.exceptionOrNull()
+        assertTrue(err != null)
+        assertEquals(100L, store.learned!!.lastLikeTimestamp)
+    }
+
+    @Test
     fun `learning deduplicates reaction ids and advances to reaction time`() = runBlocking {
         chat { "new taste" }
         val store = MemoryStore(learned = LearnedState("old", "t", lastLikeTimestamp = 100, processedReactionIds = listOf("old")))

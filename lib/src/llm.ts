@@ -264,6 +264,42 @@ export function chatCompletionStream(config: LLMConfig, messages: ChatMessage[],
 }
 
 /**
+ * [chatCompletionStream] that tries again, like [chatCompletionWithRetry], but
+ * only while nothing has reached [onDelta]: once text has been shown, a restart
+ * would repeat it, so a later failure is final.
+ */
+export async function chatCompletionStreamWithRetry(
+  config: LLMConfig,
+  messages: ChatMessage[],
+  onDelta: (text: string) => void,
+  temperature = 0.5,
+  maxAttempts = 3,
+  baseDelayMs = 2000
+): Promise<string> {
+  let started = false
+  const forward = (text: string): void => {
+    started = true
+    onDelta(text)
+  }
+  let lastErr: Error | undefined
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    config.signal?.throwIfAborted()
+    try {
+      return await chatCompletionStream(config, messages, forward, temperature)
+    } catch (err) {
+      lastErr = err as Error
+      if (started || (err instanceof ProviderError && !err.retryable) || err instanceof ProviderBusy) break
+      if (attempt < maxAttempts) {
+        const delay = err instanceof ProviderError && err.retryAfterMs ? err.retryAfterMs : baseDelayMs * Math.pow(2, attempt - 1)
+        console.warn(`LLM stream failed before any text (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms:`, lastErr.message)
+        await sleep(delay)
+      }
+    }
+  }
+  throw lastErr
+}
+
+/**
  * Sleep for a given number of milliseconds.
  */
 function sleep(ms: number): Promise<void> {

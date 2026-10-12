@@ -168,7 +168,11 @@ function parseRepostContent(event: NostrEvent): EmbeddedPost | null {
 }
 
 /**
- * Query relays with a timeout. Returns events or empty array on timeout.
+ * Query relays with a timeout. querySync answers with whatever the live relays
+ * sent once each relay has sent EOSE, failed or waited [timeout] after it
+ * connected; connecting may itself take most of [timeout]. The outer timer only
+ * guards a pool that hangs, so it must outlast both, or a single slow relay
+ * would throw away what every other relay already returned.
  */
 async function queryWithTimeout(
   pool: SimplePool,
@@ -185,7 +189,7 @@ async function queryWithTimeout(
     return await Promise.race([
       pool.querySync(relays, filter as Parameters<SimplePool['querySync']>[1], { maxWait: timeout }),
       new Promise<NostrEvent[]>((resolve) => {
-        timer = setTimeout(() => resolve([]), timeout)
+        timer = setTimeout(() => resolve([]), timeout * 2)
       }),
     ])
   } finally {

@@ -141,7 +141,7 @@ SPOKEN OUTPUT (this will be read aloud by a text-to-speech engine):
         val forSpeech: Boolean = false,
         val faithfulness: Boolean = true,
         val temperature: Double = 0.5,
-        /** Supplying this streams the digest (and skips the retry wrapper: a restart would duplicate text). */
+        /** Supplying this streams the digest; it is retried only until the first text arrives (a restart would duplicate text). */
         val onDelta: ((String) -> Unit)? = null,
         val zone: ZoneId = ZoneId.systemDefault(),
     )
@@ -168,7 +168,7 @@ SPOKEN OUTPUT (this will be read aloud by a text-to-speech engine):
         if (selectDigestPosts(o.posts, o.topN).isEmpty()) throw Exception("No successfully ranked notes yet. Fix the model connection and rank again.")
         val onDelta = o.onDelta
         return if (onDelta != null) {
-            chatCompletionStream(config, messages, onDelta, o.temperature)
+            chatCompletionStreamWithRetry(config, messages, onDelta, o.temperature)
         } else {
             chatCompletionWithRetry(config, messages, false, 3, 2000, o.temperature)
         }

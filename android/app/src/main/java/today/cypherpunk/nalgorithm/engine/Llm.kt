@@ -194,6 +194,39 @@ suspend fun chatCompletionStream(config: LlmConfig, messages: List<ChatMessage>,
     withProviderSlot(config) { chatCompletionStreamRaw(config, messages, onDelta, temperature) }
 
 /**
+ * [chatCompletionStream] that tries again, like [chatCompletionWithRetry], but only while
+ * nothing has reached [onDelta]: once text has been shown, a restart would repeat it.
+ */
+suspend fun chatCompletionStreamWithRetry(
+    config: LlmConfig,
+    messages: List<ChatMessage>,
+    onDelta: (String) -> Unit,
+    temperature: Double = 0.5,
+    maxAttempts: Int = 3,
+    baseDelayMs: Long = 2000,
+): String {
+    var started = false
+    val forward: (String) -> Unit = { started = true; onDelta(it) }
+    var lastErr: Exception? = null
+    for (attempt in 1..maxAttempts) {
+        currentCoroutineContext().ensureActive()
+        try {
+            return chatCompletionStream(config, messages, forward, temperature)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            lastErr = e
+            if (started || (e is ProviderError && !e.retryable) || e is ProviderBusy) break
+            if (attempt < maxAttempts) {
+                val wait = if (e is ProviderError && e.retryAfterMs > 0) e.retryAfterMs else baseDelayMs * (1L shl (attempt - 1))
+                delay(wait)
+            }
+        }
+    }
+    throw lastErr ?: Exception("LLM call failed")
+}
+
+/**
  * [chatCompletion] with exponential-backoff retries on network errors, 429 and 5xx.
  * A non-retryable provider answer (bad key, unknown model) or a full queue fails at once.
  */
