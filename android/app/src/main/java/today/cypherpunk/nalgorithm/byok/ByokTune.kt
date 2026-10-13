@@ -218,10 +218,6 @@ internal fun ByokTune(c: ByokController, graph: AppGraph, modifier: Modifier) {
                 TextInput("API key", d.apiKey, { v -> edit { it.copy(apiKey = v.trim()) } }, placeholder = "sk-...", secret = true, focus = focus[SetupField.ApiKey])
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(onClick = {
-                        busyTest = true
-                        scope.launch { try { c.testModel(d) } finally { busyTest = false } }
-                    }, enabled = !busyTest) { Text("Test model connection") }
-                    FilledTonalButton(onClick = {
                         busyModels = true
                         scope.launch { try { c.loadModels(d) } finally { busyModels = false } }
                     }, enabled = !busyModels) { Text("Load model list") }
@@ -230,7 +226,6 @@ internal fun ByokTune(c: ByokController, graph: AppGraph, modifier: Modifier) {
                     FilledTonalButton(onClick = { c.draft = c.recommend(d) }) { Text("Use recommended") }
                 }
                 if (c.catalogStatus.isNotEmpty()) FieldHint(c.catalogStatus)
-                FieldHint("The connection test makes one small request; your provider may charge for it.")
                 CheckRow(
                     d.rememberKey,
                     { v -> edit { it.copy(rememberKey = v) } },
@@ -239,6 +234,12 @@ internal fun ByokTune(c: ByokController, graph: AppGraph, modifier: Modifier) {
                 )
                 ModelInput("Model (scoring)", d.model, { v -> edit { it.copy(model = v.trim()) } }, "deepseek-v4-flash-0731", c.catalog, focus[SetupField.Model])
                 FieldHint("Does the bulk of the work. Keep it cheap and fast.")
+                FilledTonalButton(onClick = {
+                    busyTest = true
+                    scope.launch { try { c.testModel(d) } finally { busyTest = false } }
+                }, enabled = !busyTest) { Text("Test model connection") }
+                if (c.testStatus.isNotEmpty()) FieldHint(c.testStatus)
+                FieldHint("The connection test uses the model above and makes one small request; your provider may charge for it.")
             }
 
             // ── More model options ──

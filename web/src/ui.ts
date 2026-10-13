@@ -148,13 +148,16 @@ export function initUI(
   $('#btn-test-model').addEventListener('click', async () => {
     const s = readFieldsToSettings()
     const button = $<HTMLButtonElement>('#btn-test-model')
+    const status = $('#model-test-status')
+    if (!s.apiKey && !/localhost|127\.0\.0\.1/.test(s.apiBaseUrl)) { status.textContent = 'Enter your API key first.'; return }
+    if (!s.model) { status.textContent = 'Choose a scoring model first (Load model list helps).'; return }
     button.disabled = true
-    $('#model-catalog-status').textContent = 'Testing one small model request…'
+    status.textContent = 'Testing one small model request…'
     try {
       await chatCompletion({ apiBaseUrl: s.apiBaseUrl, apiKey: s.apiKey, model: s.model, timeoutMs: 15000 }, [{ role: 'user', content: 'Reply with OK only.' }])
-      $('#model-catalog-status').textContent = 'Model connection works. Save and rank your feed.'
+      status.textContent = 'Model connection works. Save and rank your feed.'
     } catch (err) {
-      $('#model-catalog-status').textContent = `${(err as Error).message}. Check the key/model. For local Ollama, allow this app origin in OLLAMA_ORIGINS and restart Ollama.`
+      status.textContent = `${(err as Error).message}. Check the key/model. For local Ollama, allow this app origin in OLLAMA_ORIGINS and restart Ollama.`
     } finally { button.disabled = false }
   })
 

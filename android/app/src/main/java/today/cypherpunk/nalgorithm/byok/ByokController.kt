@@ -102,6 +102,7 @@ class ByokController(private val graph: AppGraph) : ModeController {
     internal var draft by mutableStateOf<ByokSettings?>(null)
     internal var tuneStatus by mutableStateOf<Pair<String, Boolean>?>(null)
     internal var catalogStatus by mutableStateOf("")
+    internal var testStatus by mutableStateOf("")
     internal var catalog by mutableStateOf<List<ModelInfo>>(emptyList())
     internal var showAllSettings by mutableStateOf(false)
     internal var learnStatus by mutableStateOf<String?>(null)
@@ -799,8 +800,10 @@ class ByokController(private val graph: AppGraph) : ModeController {
 
     /** One small request with the scoring model, so a wrong key or model shows before a run. */
     internal suspend fun testModel(s: ByokSettings) {
-        catalogStatus = "Testing one small model request…"
-        catalogStatus = try {
+        if (s.apiKey.isBlank() && !s.apiBaseUrl.contains("localhost") && !s.apiBaseUrl.contains("127.0.0.1")) { testStatus = "Enter your API key first."; return }
+        if (s.model.isBlank()) { testStatus = "Choose a scoring model first (Load model list helps)."; return }
+        testStatus = "Testing one small model request…"
+        testStatus = try {
             chatCompletion(LlmConfig(s.apiBaseUrl, s.apiKey, s.model, timeoutMs = 15_000, http = graph.http), listOf(ChatMessage("user", "Reply with OK only.")))
             "Model connection works. Save and rank your feed."
         } catch (e: CancellationException) {
@@ -850,7 +853,7 @@ class ByokController(private val graph: AppGraph) : ModeController {
         val d = store.providerDraft(provider)
         val saved = settings.value
         catalog = emptyList()
-        catalogStatus = "Provider changed. Add its key and test the connection."
+        catalogStatus = "Provider changed. Add its key, load the model list and pick a model."
         return current.copy(
             provider = provider,
             apiBaseUrl = d.apiBaseUrl,
@@ -945,6 +948,7 @@ class ByokController(private val graph: AppGraph) : ModeController {
         draft = null
         catalog = emptyList()
         catalogStatus = ""
+        testStatus = ""
         tuneStatus = null
         identityKnown = false
         _digests.value = DigestListState()

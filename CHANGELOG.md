@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.1 — 2026-10-14
+
+Reader feedback: the model settings now read in the order you use them.
+
+### Settings
+- Model: Load model list comes before Model (scoring), and Test model connection comes after it, with its own status line. Testing without a key or a model says what is missing instead of failing the request. Android 1.0.3 has the same order.
+
 ## 0.19.0 — 2026-10-12
 
 Notes read better, and a slow or dead relay no longer hides what the others
