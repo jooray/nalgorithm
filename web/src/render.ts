@@ -601,7 +601,10 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
     main.appendChild(renderBoostedBy(post.boostedBy, options))
   }
   renderNoteContent(post, options, main)
-  if (isLongNote(post.content)) clampLongNote(main)
+  if (isLongNote(post.content)) clampLongNote(main.querySelector<HTMLElement>('.post-content'))
+  // A quote with little or no text of its own is mostly the quoted note: shorten that too.
+  const embedded = post.type === 'quote' ? post.quotedPost : post.type === 'boost' ? post.originalPost : undefined
+  if (embedded && isLongNote(embedded.content)) clampLongNote(main.querySelector<HTMLElement>('.embedded-content'))
   main.appendChild(renderScore(post))
 
   const links = linksFor(post, options)
@@ -626,9 +629,8 @@ function renderPostCard(post: DisplayPost, options: RenderOptions): HTMLElement 
   return card
 }
 
-/** Show a long note's first lines with Read more; the detail sheet always shows all of it. */
-function clampLongNote(main: HTMLElement): void {
-  const content = main.querySelector<HTMLElement>('.post-content')
+/** Show a long note's (or quoted note's) first lines with Read more; the detail sheet always shows all of it. */
+function clampLongNote(content: HTMLElement | null): void {
   if (!content) return
   content.classList.add('post-content-clamped')
   const more = el('button', 'read-more') as HTMLButtonElement

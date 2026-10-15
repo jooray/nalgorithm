@@ -53,8 +53,8 @@ android {
         minSdk = 26
         targetSdk = 37
         // Zapstore and Android refuse an update with an equal or lower code. Bump on every release.
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "1.0.4"
         buildConfigField("String", "HOSTED_BASE", "\"https://nalgorithm.cypherpunk.today/app/api/\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

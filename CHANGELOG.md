@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.19.2 — 2026-10-15
+
+Reader feedback: a quote of a long note filled the screen.
+
+### Feed
+- A quoted note (a quote with little or no text of its own reads like a repost) now shows its first twelve lines with Read more, like a long note does. The note sheet still shows all of it. Android 1.0.4 does the same.
+
+### Digest
+- The host reacts again. The faithfulness rules still require attribution and nothing the notes don't say, but no longer demand a sentence for every note or forbid the host's own take; weak notes can be skipped. Contested political and legal questions are reported without taking a side.
+
 ## 0.19.1 — 2026-10-14
 
 Reader feedback: the model settings now read in the order you use them.

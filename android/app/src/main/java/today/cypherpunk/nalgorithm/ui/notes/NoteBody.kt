@@ -107,11 +107,38 @@ internal fun Avatar(pubkey: String, profile: ProfileData?, options: NoteOptions,
 internal fun NoteBody(graph: AppGraph, post: ScoredPost, people: Map<String, ProfileData>, options: NoteOptions, collapsible: Boolean = false) {
     val open = rememberLinkOpener(graph)
     // A long note in a card shows its first lines and Read more; the detail sheet shows all of it.
-    var expanded by rememberSaveable(post.id) { mutableStateOf(false) }
-    var clipped by remember(post.id) { mutableStateOf(false) }
-    val clamp = collapsible && !expanded && NoteMarkdown.isLong(post.content)
+    CollapsibleText(post.id, post.content, collapsible, people, options, open, Modifier.padding(top = 6.dp))
+    LinkPreviewCards(graph, post.content)
+    // Hosted posts carry `media` (the server's imeta summary); BYOK reads the raw tags.
+    val media = remember(post.content, post.media, post.rawEvent) {
+        NoteMedia.extract(post.content, post.media ?: NoteMedia.readImeta(post.rawEvent?.tags))
+    }
+    if (media.isNotEmpty()) MediaList(media, options, open)
+    val quoted = post.quotedPost
+    val original = post.originalPost
+    if (post.type == PostType.Quote && quoted != null) EmbeddedNote(graph, quoted, people, options, collapsible)
+    // Only reached for a boost that was not folded (kept for safety).
+    else if (post.type == PostType.Boost && original != null) EmbeddedNote(graph, original, people, options, collapsible)
+}
+
+/** Note text that, when [collapsible] and long, shows its first lines and Read more. */
+@Composable
+private fun CollapsibleText(
+    key: String,
+    content: String,
+    collapsible: Boolean,
+    people: Map<String, ProfileData>,
+    options: NoteOptions,
+    open: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    color: androidx.compose.ui.graphics.Color = Nal.colors.text,
+    fontSize: Int = 16,
+) {
+    var expanded by rememberSaveable(key) { mutableStateOf(false) }
+    var clipped by remember(key) { mutableStateOf(false) }
+    val clamp = collapsible && !expanded && NoteMarkdown.isLong(content)
     ContentText(
-        post.content, people, options, open, Modifier.padding(top = 6.dp),
+        content, people, options, open, modifier, color = color, fontSize = fontSize,
         maxLines = if (clamp) COLLAPSED_LINES else Int.MAX_VALUE,
         onOverflow = { clipped = it },
     )
@@ -127,17 +154,6 @@ internal fun NoteBody(graph: AppGraph, post: ScoredPost, people: Map<String, Pro
                 .padding(vertical = 8.dp),
         )
     }
-    LinkPreviewCards(graph, post.content)
-    // Hosted posts carry `media` (the server's imeta summary); BYOK reads the raw tags.
-    val media = remember(post.content, post.media, post.rawEvent) {
-        NoteMedia.extract(post.content, post.media ?: NoteMedia.readImeta(post.rawEvent?.tags))
-    }
-    if (media.isNotEmpty()) MediaList(media, options, open)
-    val quoted = post.quotedPost
-    val original = post.originalPost
-    if (post.type == PostType.Quote && quoted != null) EmbeddedNote(graph, quoted, people, options)
-    // Only reached for a boost that was not folded (kept for safety).
-    else if (post.type == PostType.Boost && original != null) EmbeddedNote(graph, original, people, options)
 }
 
 /**
@@ -357,9 +373,9 @@ private fun InlineVideo(item: MediaItem, modifier: Modifier) {
     )
 }
 
-/** A quoted note (or an unfolded boost's original): small avatar, name, text and its media. */
+/** A quoted note (or an unfolded boost's original): small avatar, name, text and its media. Long text collapses in a card, like the note's own. */
 @Composable
-private fun EmbeddedNote(graph: AppGraph, post: EmbeddedPost, people: Map<String, ProfileData>, options: NoteOptions) {
+private fun EmbeddedNote(graph: AppGraph, post: EmbeddedPost, people: Map<String, ProfileData>, options: NoteOptions, collapsible: Boolean) {
     val c = Nal.colors
     val open = rememberLinkOpener(graph)
     val shape = RoundedCornerShape(Nal.radiusSmall)
@@ -375,7 +391,7 @@ private fun EmbeddedNote(graph: AppGraph, post: EmbeddedPost, people: Map<String
                 modifier = Modifier.clickable(onClickLabel = "Open profile") { open(options.profileHref(post.author)) },
             )
         }
-        ContentText(post.content, people, options, open, color = c.text2, fontSize = 15)
+        CollapsibleText("embedded:${post.id}", post.content, collapsible, people, options, open, color = c.text2, fontSize = 15)
         LinkPreviewCards(graph, post.content)
         val media = remember(post.content) { NoteMedia.extract(post.content, emptyList()) }
         if (media.isNotEmpty()) MediaList(media, options, open)
