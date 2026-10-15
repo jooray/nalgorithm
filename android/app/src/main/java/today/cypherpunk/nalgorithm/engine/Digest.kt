@@ -45,7 +45,7 @@ SPOKEN OUTPUT (this will be read aloud by a text-to-speech engine):
 - Use short paragraphs separated by blank lines as natural pause points."""
 
     /** Cheaper models drift without these: they drop posts and adopt authors' claims as their own. */
-    const val FAITHFULNESS_RULES = "Additional rules: give every post in the list at least one sentence, most important first, and group related ones. Report what people said and attribute it to them; do not add opinions of your own on contested political or legal matters, and do not state anything the posts do not say."
+    const val FAITHFULNESS_RULES = "Additional rules: lead with what matters most and group related posts; skip a post with nothing worth saying rather than padding it out. Attribute every claim to the person who made it, and do not state anything the posts do not say. You are the host, so react: say what you find clever, useful, funny or doubtful, in your own voice, so the listener always hears where a post ends and your take begins. On contested political or legal questions, report the sides without picking one."
 
     /** Closing line for a spoken digest, so the listener knows it is over. */
     const val SPOKEN_SIGN_OFF = "End with the sentence: That's your digest."

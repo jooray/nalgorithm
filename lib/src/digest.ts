@@ -52,11 +52,13 @@ SPOKEN OUTPUT (this will be read aloud by a text-to-speech engine):
 
 /**
  * Faithfulness rules appended to every digest request. Cheaper models drift without
- * them: they drop posts, turn an author's claim into the narrator's own, and add
- * opinions on contested matters. Measured on a real feed, they made the cheap models
- * (and Sonnet) attribute claims and cover every author.
+ * them: they turn an author's claim into the narrator's own, invent details and take
+ * sides on contested matters. The rules guard attribution and facts, not the host's
+ * voice: an earlier version also demanded a sentence for every post and no opinions,
+ * which flattened the digest into a dutiful round-up. Reacting, and skipping a post
+ * with nothing in it, are what the system prompt and the humanizer rules ask for.
  */
-export const FAITHFULNESS_RULES = `Additional rules: give every post in the list at least one sentence, most important first, and group related ones. Report what people said and attribute it to them; do not add opinions of your own on contested political or legal matters, and do not state anything the posts do not say.`
+export const FAITHFULNESS_RULES = `Additional rules: lead with what matters most and group related posts; skip a post with nothing worth saying rather than padding it out. Attribute every claim to the person who made it, and do not state anything the posts do not say. You are the host, so react: say what you find clever, useful, funny or doubtful, in your own voice, so the listener always hears where a post ends and your take begins. On contested political or legal questions, report the sides without picking one.`
 
 /** Closing line for a spoken digest, so the listener knows it is over. */
 export const SPOKEN_SIGN_OFF = `End with the sentence: That's your digest.`
