@@ -16,7 +16,7 @@
   "digestApi": {
     "apiBaseUrl": "https://api.venice.ai/api/v1",
     "apiKey": "$VENICE_API_KEY",
-    "model": "kimi-k3",
+    "model": "kimi-k3-1-pro",
     "temperature": 0.7
   },
   "digestFallbackApi": {
@@ -28,12 +28,12 @@
   "humanizerApi": {
     "apiBaseUrl": "https://api.venice.ai/api/v1",
     "apiKey": "$VENICE_API_KEY",
-    "model": "kimi-k3"
+    "model": "kimi-k3-1-pro"
   },
   "learnerApi": {
     "apiBaseUrl": "https://api.venice.ai/api/v1",
     "apiKey": "$VENICE_API_KEY",
-    "model": "kimi-k3"
+    "model": "kimi-k3-1-pro"
   },
   "userPrompt": "I'm interested in Bitcoin, Lightning Network, Nostr protocol development, privacy tech, open-source software, and cypherpunk philosophy.",
   "learnFromLikes": true,

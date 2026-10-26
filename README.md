@@ -148,7 +148,7 @@ Some options I've tested:
 
 For the web app I've run **gemma3:27b** through Ollama Cloud for scoring -- cheap, fast at structured JSON output, and it works on the free tier. `minimax-m2.5` and `qwen3-next:80b` also work if you want more depth.
 
-My daily digest runs on Venice: `deepseek-v4-flash-0731` for scoring, `kimi-k3` for writing the digest and for learning from likes, `qwen-3-6-plus` as the digest fallback, and `tts-kokoro` for the audio.
+My daily digest runs on Venice: `deepseek-v4-flash-0731` for scoring, `kimi-k3-1-pro` for writing the digest and for learning from likes, `qwen-3-6-plus` as the digest fallback, and `tts-kokoro` for the audio.
 
 ## Project structure
 
@@ -244,8 +244,8 @@ You can use different LLM models for each step:
 | Step | Config key | What it does | Recommended |
 |------|-----------|--------------|-------------|
 | Scoring | `rankingApi` | Scores posts 0-10 by relevance | Fast, cheap model (`deepseek-v4-flash-0731`) |
-| Learning | `learnerApi` | Summarizes your likes into preferences | Large context (`kimi-k3`); falls back to `rankingApi` |
-| Digest | `digestApi` | Writes the final narrative | Stronger model (`kimi-k3`) |
+| Learning | `learnerApi` | Summarizes your likes into preferences | Large context (`kimi-k3-1-pro`); falls back to `rankingApi` |
+| Digest | `digestApi` | Writes the final narrative | Stronger model (`kimi-k3-1-pro`) |
 | Digest fallback | `digestFallbackApi` | Retries the digest if the primary fails | Different model (`qwen-3-6-plus`) |
 | Speech | `ttsApi` | Reads the digest aloud | `tts-kokoro` (see below) |
 

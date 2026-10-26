@@ -44,8 +44,8 @@ object ModelCatalog {
      * batched JSON reliably, which price and context do not predict.
      */
     private val VENICE_SCORING = listOf("deepseek-v4-flash-0731", "deepseek-v4-flash", "google-gemma-3-27b-it", "qwen3-6-27b")
-    private val VENICE_DIGEST = listOf("kimi-k3", "kimi-k2-6", "claude-sonnet-5-5", "qwen-3-6-plus")
-    private val VENICE_LEARNER = listOf("kimi-k3", "kimi-k2-6", "qwen-3-6-plus")
+    private val VENICE_DIGEST = listOf("kimi-k3-1-pro", "kimi-k2-6", "claude-sonnet-5-5", "qwen-3-6-plus")
+    private val VENICE_LEARNER = listOf("kimi-k3-1-pro", "kimi-k2-6", "qwen-3-6-plus")
 
     /** Sensible per-role models from a fetched catalog. Venice only for now. */
     fun suggestModels(apiBaseUrl: String, models: List<ModelInfo>): SuggestedModels {

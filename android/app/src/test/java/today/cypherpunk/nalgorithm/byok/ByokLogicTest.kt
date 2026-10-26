@@ -175,12 +175,12 @@ class ByokLogicTest {
 
     @Test
     fun `model catalog - Venice shape, recommendations, labels`() {
-        val body = """{"data":[{"id":"kimi-k3","model_spec":{"availableContextTokens":262144,"pricing":{"input":{"usd":0.6},"output":{"usd":2.5}}}},{"id":"deepseek-v4-flash-0731","model_spec":{"availableContextTokens":1000000,"pricing":{"input":{"usd":0.18},"output":{"usd":0.35}}}},{"id":""},{"name":"no id"}]}"""
+        val body = """{"data":[{"id":"kimi-k3-1-pro","model_spec":{"availableContextTokens":262144,"pricing":{"input":{"usd":0.6},"output":{"usd":2.5}}}},{"id":"deepseek-v4-flash-0731","model_spec":{"availableContextTokens":1000000,"pricing":{"input":{"usd":0.18},"output":{"usd":0.35}}}},{"id":""},{"name":"no id"}]}"""
         val models = ModelCatalog.parseList(body)
-        assertEquals(listOf("deepseek-v4-flash-0731", "kimi-k3"), models.map { it.id })
+        assertEquals(listOf("deepseek-v4-flash-0731", "kimi-k3-1-pro"), models.map { it.id })
         assertEquals("1M ctx · $0.18/$0.35 per M", ModelCatalog.describe(models[0]))
         assertEquals("262k ctx · $0.6/$2.5 per M", ModelCatalog.describe(models[1]))
-        assertEquals(SuggestedModels("deepseek-v4-flash-0731", "kimi-k3", "kimi-k3"), ModelCatalog.suggestModels("https://api.venice.ai/api/v1", models))
+        assertEquals(SuggestedModels("deepseek-v4-flash-0731", "kimi-k3-1-pro", "kimi-k3-1-pro"), ModelCatalog.suggestModels("https://api.venice.ai/api/v1", models))
         assertEquals(SuggestedModels(), ModelCatalog.suggestModels("https://openrouter.ai/api/v1", models))
         assertEquals(listOf("llama3.2"), ModelCatalog.parseList("""{"models":[{"id":"llama3.2"}]}""").map { it.id })
         assertTrue(ModelCatalog.isVenice("https://api.venice.ai/api/v1"))
