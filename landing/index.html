@@ -146,6 +146,18 @@ h2 { margin: 0 0 .5rem; font-size: clamp(1.8rem, 4.5vw, 3rem); line-height: 1.05
 
 footer { padding: 2.5rem 0 3rem; color: var(--muted); font-size: .92rem; display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; justify-content: space-between; }
 footer a { text-decoration-color: var(--line); }
+
+/* Live posts from the project's Nostr account (nostr-live widget, themed with the page tokens) */
+.live { min-height: 28rem; --nl-fg: var(--text); --nl-muted: var(--muted); --nl-border: var(--line); --nl-card-bg: var(--surface);
+  --nl-accent: var(--accent); --nl-accent-fg: var(--on-accent); --nl-link: var(--accent-text); --nl-radius: 18px; --nl-media-radius: 12px;
+  --nl-gap: .75rem; --nl-card-pad: .9rem; --nl-font: inherit; --nl-avatar-size: 3rem; }
+.live :where(.nl__item) { border: 1px solid var(--line); }
+.live :where(.nl__list) { display: grid; gap: .75rem; }
+@media (min-width: 52rem) { .live :where(.nl__list) { grid-template-columns: 1fr 1fr; align-items: start; } }
+.live :where(.nl__name) { font-weight: 800; letter-spacing: -.01em; }
+.live :where(.nl__btn, .nl__openin) { min-height: 44px; border-radius: 999px; font-weight: 700; }
+.live :where(.nl__btn--primary) { border: 0; }
+.live :where(a, button):focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; }
 </style>
 </head>
 <body>
@@ -221,6 +233,12 @@ footer a { text-decoration-color: var(--line); }
           <figcaption>The morning digest: about six minutes, read aloud, with the notes it came from.</figcaption>
         </figure>
       </div>
+    </section>
+
+    <section id="news" aria-labelledby="news-h">
+      <h2 id="news-h">Latest from the project.</h2>
+      <p class="sub">Release notes and progress, straight from the nalgorithm account on Nostr. These posts load from public relays when you scroll here.</p>
+      <div class="live" data-nostr-live data-nprofile="nprofile1qqsxmw683gykp784cx9gqx6hm9ehzxc4gavgm3rd9tmln8z7f6hn4uqpr3mhxue69uhkummnw3ezucmewp5x2unsw4hxktn5dajxz7gpzemhxue69uhhyetvv9ujuurjd9kkzmpwdejhgqg5waehxw309aex2mrp0yhxgctdw4eju6t0jxukqy" data-relays="wss://nostr.cypherpunk.today,wss://relay.primal.net,wss://relay.damus.io" data-layout="cards" data-limit="6" data-lang="en"></div>
     </section>
 
     <section aria-labelledby="why-h">
@@ -301,6 +319,7 @@ footer a { text-decoration-color: var(--line); }
   </footer>
 </div>
 
+<script src="assets/nostr-live-1.0.0.js" defer></script>
 <script>
 (function () {
   // ---- install section: on Android the native app comes first; elsewhere the web app is the answer ----
